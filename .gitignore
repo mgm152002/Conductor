@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+*.tsbuildinfo
+
+# Local orchestration state
+.conductor/
+.kiro/settings/
+.superpowers/
+
+# Local env / secrets
+.runtime/
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Test / coverage
+coverage/

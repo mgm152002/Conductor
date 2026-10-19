@@ -1,0 +1,59 @@
+{
+  "name": "conductor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Conductor - a persistent, self-improving, general-purpose, local-first macOS AI orchestration platform.",
+  "author": "Conductor",
+  "license": "UNLICENSED",
+  "main": "out/main/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "mem0:configure": "node services/mem0/configure.mjs",
+    "mem0:up": "docker compose -f services/mem0/compose.yaml up -d --build",
+    "mem0:status": "docker compose -f services/mem0/compose.yaml ps",
+    "mem0:stop": "docker compose -f services/mem0/compose.yaml stop",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "better-sqlite3": "13.0.3",
+    "imapflow": "2.9.1",
+    "mailparser": "3.12.4",
+    "mammoth": "1.13.0",
+    "pdfjs-dist": "6.4.299",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-markdown": "10.1.0",
+    "react-router-dom": "7.18.4",
+    "remark-gfm": "4.0.1",
+    "turndown": "7.2.4",
+    "zod": "4.6.7",
+    "zustand": "5.0.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/mailparser": "3.4.6",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/turndown": "5.0.6",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.9.3",
+    "electron-vite": "6.0.0",
+    "fast-check": "4.10.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
+}
