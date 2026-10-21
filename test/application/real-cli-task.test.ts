@@ -1,0 +1,45 @@
+import {afterEach,describe,it,expect} from 'vitest';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {SqliteStore} from '@main/db/store';
+import {WorkspaceService} from '@main/domain/workspace-service';
+import {PermissionService} from '@main/domain/permission-service';
+import {AuditLog} from '@main/domain/audit-log';
+import {Registry} from '@main/registry/registry';
+import {CliRegistrar} from '@main/catalog/registrar';
+import {TaskStateMachine} from '@main/orchestrator/state-machine';
+import {TaskCanceller} from '@main/orchestrator/cancellation';
+import {Orchestrator} from '@main/orchestrator/orchestrator';
+import {TaskRunner} from '@main/orchestrator/task-runner';
+import {TaskQueries} from '@main/orchestrator/task-queries';
+import {evidenceEvaluator} from '@main/orchestrator/evidence-evaluator';
+import {RecordingTaskEventEmitter} from '@main/orchestrator/event-emitter';
+import {DiskManagedStorage} from '@main/storage/managed-storage';
+
+let root:string|undefined;let store:SqliteStore|undefined;
+afterEach(()=>{store?.close();if(root)rmSync(root,{recursive:true,force:true});});
+describe('real child process application flow',()=>{
+  it('passes objective/workspace to a CLI and persists response artifacts after approval',async()=>{
+    root=mkdtempSync(join(tmpdir(),'conductor-real-cli-'));
+    const binary=join(root,'codex-fixture');
+    writeFileSync(binary,`#!${process.execPath}\nlet input='';process.stdin.on('data',d=>input+=d);process.stdin.on('end',()=>{const task=JSON.parse(input.split('\\n').slice(1).join('\\n'));if(!process.argv.includes('--cd')||!task.objective)process.exit(2);console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Objective received: '+task.objective}}));});\n`,{mode:0o755});
+    store=new SqliteStore(':memory:');await store.migrate();
+    const workspaces=new WorkspaceService(store);const workspace=workspaces.create({name:'Fixture',rootPath:root});
+    const audit=new AuditLog(store);const permissions=new PermissionService(store,audit);const registry=new Registry();
+    new CliRegistrar(registry).ensureRegistered({id:'codex',displayName:'CLI fixture',candidateBinaryNames:[binary],installMethod:{kind:'unconfigured'}},binary);
+    expect(registry.resolve('codex').record.available).toBe(true);
+    permissions.grant({subject:{type:'agent',id:'orchestrator'},profile:'assisted_execution'});
+    const machine=new TaskStateMachine(store,audit);const canceller=new TaskCanceller(store,machine,registry,audit);
+    const storage=new DiskManagedStorage(join(root,'blobs'));const emitter=new RecordingTaskEventEmitter();
+    const orchestrator=new Orchestrator(store,machine,workspaces,canceller,audit,{registry,permissions,storage,emitter,maxStepRetries:0,criterionEvaluator:evidenceEvaluator(store),executionInput:(task)=>({objective:task.objective,rootPath:root,mode:'read_only'})});
+    const runner=new TaskRunner({store,orchestrator,stateMachine:machine,permissions,registry,audit,emitter});
+    const task=await runner.create({workspaceId:workspace.id,objective:'Summarize this workspace',acceptanceCriteria:['contains: Objective received: Summarize this workspace']});
+    await runner.waitForIdle(task.id);expect(machine.getTask(task.id)?.state).toBe('WAITING_FOR_APPROVAL');
+    await runner.resolveApproval({approvalId:permissions.pendingApprovals(task.id)[0]!.id,decision:'approved'});
+    await runner.waitForIdle(task.id);expect(machine.getTask(task.id)?.state).toBe('COMPLETED');
+    const queries=new TaskQueries(store,orchestrator,permissions,storage);const details=queries.details(task.id);
+    expect(details.verification?.verified).toBe(true);expect(details.artifacts.length).toBeGreaterThan(0);
+    expect(queries.readArtifact({taskId:task.id,artifactId:details.artifacts[0]!.id}).text).toContain('Objective received');
+  });
+});
