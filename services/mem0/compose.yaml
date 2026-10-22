@@ -1,0 +1,36 @@
+name: conductor-memory
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    restart: unless-stopped
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - vectors:/qdrant/storage
+    mem_limit: 512m
+    cpus: 1.0
+  mem0:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - qdrant
+    ports:
+      - "127.0.0.1:8000:8000"
+    secrets:
+      - mem0_api_key
+    volumes:
+      - memory:/data
+    mem_limit: 1g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      start_period: 180s
+      retries: 5
+secrets:
+  mem0_api_key:
+    file: ../../.runtime/mem0/api-key
+volumes:
+  vectors:
+  memory:
