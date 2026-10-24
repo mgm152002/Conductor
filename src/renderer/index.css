@@ -1,0 +1,229 @@
+@import 'tailwindcss';
+
+/* Dark mode follows the `dark` class set by useSystemAppearance (macOS). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens, modelled on T3 Code: zinc surfaces in light mode, near-black
+   neutral surfaces in dark mode, a single blue-violet accent, and hairline
+   borders. Components reference these through the semantic utilities declared
+   in @theme inline (bg-background, text-muted-foreground, border-border, …). */
+:root {
+  --background: var(--color-white);
+  --foreground: var(--color-zinc-800);
+  --card: var(--color-white);
+  --surface-raised: var(--color-white);
+  --muted: var(--color-zinc-50);
+  --muted-foreground: var(--color-zinc-500);
+  --accent: var(--color-zinc-100);
+  --border: var(--color-zinc-200);
+  --input: var(--color-zinc-300);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: var(--color-white);
+  --ring: oklch(0.488 0.217 264);
+  --message: var(--color-zinc-100);
+  --message-foreground: var(--color-zinc-800);
+  --destructive: var(--color-red-500);
+  --destructive-foreground: var(--color-red-700);
+  --success: var(--color-emerald-600);
+  --warning: var(--color-amber-600);
+  --info: var(--color-sky-600);
+  --sidebar: var(--color-zinc-50);
+  --sidebar-foreground: var(--color-zinc-800);
+  --sidebar-muted-foreground: var(--color-zinc-500);
+  --sidebar-border: var(--color-zinc-200);
+  --sidebar-row-hover: color-mix(in srgb, var(--color-zinc-900) 4%, transparent);
+  --sidebar-row-active: var(--color-white);
+  --code: var(--color-zinc-50);
+  --scrollbar-thumb: rgb(0 0 0 / 14%);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 24%);
+  --shadow-composer-color: rgb(0 0 0 / 22%);
+  --chat-max: 46rem;
+  --topbar-height: 52px;
+}
+
+.dark {
+  --background: var(--color-neutral-950);
+  --foreground: var(--color-neutral-100);
+  --card: color-mix(in srgb, var(--color-neutral-950) 96%, var(--color-white));
+  --surface-raised: color-mix(in srgb, var(--color-neutral-950) 94%, var(--color-white));
+  --muted: rgb(255 255 255 / 3%);
+  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --accent: rgb(255 255 255 / 5%);
+  --border: rgb(255 255 255 / 7%);
+  --input: rgb(255 255 255 / 10%);
+  --primary: oklch(0.571 0.21 264);
+  --ring: oklch(0.571 0.21 264);
+  --message: rgb(255 255 255 / 6%);
+  --message-foreground: var(--color-neutral-100);
+  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --destructive-foreground: var(--color-red-400);
+  --success: var(--color-emerald-400);
+  --warning: var(--color-amber-300);
+  --info: var(--color-sky-300);
+  --sidebar: color-mix(in srgb, var(--color-neutral-950) 97%, var(--color-white));
+  --sidebar-foreground: var(--color-neutral-100);
+  --sidebar-muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
+  --sidebar-border: rgb(255 255 255 / 6%);
+  --sidebar-row-hover: rgb(255 255 255 / 4%);
+  --sidebar-row-active: rgb(255 255 255 / 7%);
+  --code: rgb(255 255 255 / 3%);
+  --scrollbar-thumb: rgb(255 255 255 / 8%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 14%);
+  --shadow-composer-color: rgb(0 0 0 / 70%);
+}
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-surface-raised: var(--surface-raised);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-message: var(--message);
+  --color-message-foreground: var(--message-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-row-hover: var(--sidebar-row-hover);
+  --color-sidebar-row-active: var(--sidebar-row-active);
+  --color-code: var(--code);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+  --shadow-composer: 0 12px 28px -18px var(--shadow-composer-color);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Thin, unobtrusive scrollbars like T3 Code. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* macOS hidden-inset title bar: top bars drag the window, controls do not. */
+.app-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.app-drag :is(button, a, input, select, textarea, [role='button'], [data-no-drag]) {
+  -webkit-app-region: no-drag;
+}
+
+/* Size the inspector against its parent surface, including a narrow window
+   with the sidebar visible. Overlay it when two columns no longer fit. */
+.thread-layout {
+  container-type: inline-size;
+}
+.thread-details {
+  width: 22rem;
+  flex-shrink: 0;
+}
+@container (max-width: 56rem) {
+  .thread-details {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 20;
+    width: min(24rem, 100%);
+    box-shadow: -12px 0 32px rgb(0 0 0 / 8%);
+  }
+}
+
+@keyframes conductor-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-status-pulse {
+  animation: conductor-pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes conductor-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: conductor-shimmer 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-status-pulse,
+  .text-shimmer {
+    animation: none;
+  }
+  .text-shimmer {
+    color: var(--muted-foreground);
+    background: none;
+  }
+}

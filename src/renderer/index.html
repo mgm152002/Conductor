@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The Content-Security-Policy is injected per-mode by electron.vite.config.ts
+         (transformIndexHtml). Production is locked down to 'self'; dev additionally
+         permits Vite's inline HMR preamble and its dev-server WebSocket. -->
+    <!--CSP-META-->
+    <title>Conductor</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
