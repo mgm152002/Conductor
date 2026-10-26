@@ -97,6 +97,21 @@ The [Quality workflow](.github/workflows/quality.yml) runs dependency
 installation, linting, type checking, and the test suite for pushes and pull
 requests targeting `main`.
 
+## Attachments
+
+PDFs are rendered locally with macOS PDFKit and text is extracted locally; when
+a page has no embedded text, Conductor can use on-device Vision OCR. Pasted
+images are stored through the same managed attachment flow and show a local
+thumbnail. Chat and task agents receive an explicit current-turn attachment
+manifest with bounded extracted/OCR text plus the appropriate native CLI input
+(`--image` for Codex and `--file` for OpenCode). Rendered PDF pages offer page
+navigation, zoom, and an extracted-text fallback without exposing filesystem
+paths to the renderer.
+
+Attachments remain capped at 10 files per message, 25 MiB per file, 250 MiB
+per message, and 40,000 extracted characters. OCR/rendering stays on-device;
+images pasted directly must be genuine supported image bytes.
+
 ## Project structure
 
 ```text
