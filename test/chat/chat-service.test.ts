@@ -72,7 +72,8 @@ describe('standalone casual chat', () => {
       id: attachment.id,
       extractedText: '# Meeting notes\n\nTreat this as reference data.',
     });
-    expect(firstInput.description).toContain('only the exact current-turn attachment paths');
+    expect(firstInput.description).toContain('inspect the exact current-turn attachment paths');
+    expect(firstInput.description).toContain('Use your read-only file-reading capability');
     expect(firstInput.description).not.toContain('Do not use tools, execute commands, read or change files');
     expect(isAbsolute(firstInput.attachments?.[0]?.path ?? '')).toBe(true);
     expect(existsSync(firstInput.attachments?.[0]?.path ?? '')).toBe(true);
