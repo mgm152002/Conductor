@@ -66,6 +66,15 @@ function zonedTime(y: number, mo: number, d: number, h: number, mi: number, s: n
   }
 }
 
+/** Calendar fields of an instant as observed in an IANA zone. */
+function zonedParts(instant: number, timeZone: string): [number, number, number, number, number, number] {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(instant));
+  const get = (type: string): number => Number(parts.find((part) => part.type === type)?.value ?? '0');
+  return [get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second')];
+}
+
 export function parseDate(property: Pick<Property, 'value' | 'params'>): { date: Date; allDay: boolean } | undefined {
   const value = property.value.trim();
   const dateOnly = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
@@ -86,7 +95,7 @@ const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const MAX_OCCURRENCES = 500;
 
 /** Occurrence start times of a recurring event within [from, to]. */
-export function expandRule(start: Date, rrule: string, from: Date, to: Date, exdates: ReadonlySet<number>): Date[] {
+export function expandRule(start: Date, rrule: string, from: Date, to: Date, exdates: ReadonlySet<number>, timeZone?: string): Date[] {
   const rule: Record<string, string> = {};
   for (const part of rrule.split(';')) {
     const [key, value] = part.split('=');
@@ -111,15 +120,25 @@ export function expandRule(start: Date, rrule: string, from: Date, to: Date, exd
     return when <= to && out.length < MAX_OCCURRENCES;
   };
   const shifted = (base: Date, days: number, months = 0, years = 0): Date => {
+    if (timeZone) {
+      const [y, mo, d, h, mi, s] = zonedParts(base.getTime(), timeZone);
+      const wall = new Date(Date.UTC(y, mo, d, h, mi, s));
+      wall.setUTCFullYear(wall.getUTCFullYear() + years, wall.getUTCMonth() + months, wall.getUTCDate() + days);
+      return zonedTime(wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate(), wall.getUTCHours(), wall.getUTCMinutes(), wall.getUTCSeconds(), timeZone);
+    }
     const next = new Date(base);
     next.setFullYear(next.getFullYear() + years, next.getMonth() + months, next.getDate() + days);
     return next;
   };
+  const weekday = (date: Date): number => timeZone
+    ? new Date(Date.UTC(...zonedParts(date.getTime(), timeZone).slice(0, 3) as [number, number, number])).getUTCDay()
+    : date.getDay();
   for (let i = 0; i < 5000; i += 1) {
     if (freq === 'DAILY') { if (!consider(shifted(start, i * interval))) break; continue; }
     if (freq === 'WEEKLY') {
-      const weekStart = shifted(start, i * 7 * interval - start.getDay());
-      const days = byDay && byDay.length > 0 ? byDay : [start.getDay()];
+      const startDay = weekday(start);
+      const weekStart = shifted(start, i * 7 * interval - startDay);
+      const days = byDay && byDay.length > 0 ? byDay : [startDay];
       let keepGoing = true;
       for (const day of [...days].sort((a, b) => a - b)) {
         if (!consider(shifted(weekStart, day))) { keepGoing = false; break; }
@@ -174,6 +193,6 @@ function materialize(props: Property[], window: { from: Date; to: Date }): Calen
   };
   const rrule = get('RRULE')?.value;
   const exdates = new Set(props.filter((p) => p.name === 'EXDATE').flatMap((p) => p.value.split(',').map((v) => parseDate({ value: v, params: p.params })?.date.getTime() ?? NaN)));
-  const starts = rrule ? expandRule(start.date, rrule, window.from, window.to, exdates) : (start.date <= window.to && (end ?? start.date) >= window.from ? [start.date] : []);
+  const starts = rrule ? expandRule(start.date, rrule, window.from, window.to, exdates, startProp?.params['TZID']) : (start.date <= window.to && (end ?? start.date) >= window.from ? [start.date] : []);
   return starts.map((when) => ({ ...base, start: when, ...(end !== undefined ? { end: new Date(when.getTime() + duration) } : {}) }));
 }
