@@ -36,4 +36,17 @@ describe('attachment validation boundaries', () => {
     expect(attachmentSizeError(MAX_ATTACHMENT_BYTES + 1)).toMatch(/larger/i);
     expect(attachmentBatchError(MAX_ATTACHMENTS_PER_MESSAGE + 1)).toMatch(/at most/i);
   });
+
+  it('validates bounded clipboard image bytes without trusting renderer metadata', () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    expect(ATTACHMENT_SCHEMAS['attachment.ingestBytes'].safeParse({
+      name: 'pasted-image.png', mimeType: 'image/png', bytes,
+    }).success).toBe(true);
+    expect(ATTACHMENT_SCHEMAS['attachment.ingestBytes'].safeParse({
+      name: 'pasted-image.png', mimeType: 'image/png', bytes, path: '/etc/passwd',
+    }).success).toBe(false);
+    expect(ATTACHMENT_SCHEMAS['attachment.ingestBytes'].safeParse({
+      name: 'large.png', mimeType: 'image/png', bytes: new Uint8Array(MAX_ATTACHMENT_BYTES + 1),
+    }).success).toBe(false);
+  });
 });

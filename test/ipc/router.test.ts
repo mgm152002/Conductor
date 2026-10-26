@@ -33,6 +33,17 @@ describe('withValidation', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('counts typed-array bytes and honors an explicit bounded binary channel limit', async () => {
+    const schema = z.object({ bytes: z.instanceof(Uint8Array) });
+    const handler = vi.fn(() => 'accepted');
+    const wrapped = withValidation(schema, handler, { channel: 'attachment.ingestBytes', maxPayloadBytes: 16 });
+
+    await expect(wrapped(fakeEvent, { bytes: new Uint8Array(8) })).resolves.toEqual({ ok: true, value: 'accepted' });
+    const rejected = await wrapped(fakeEvent, { bytes: new Uint8Array(17) });
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) expect(rejected.error.code).toBe('payload_too_large');
+  });
+
   it('returns a typed validation error and never runs the handler', async () => {
     const schema = z.object({ id: z.string().uuid() });
     const handler = vi.fn();

@@ -23,16 +23,18 @@ import { redact } from './redaction';
 // The router additionally drops any channel outside the allowlist, auditing the
 // attempt, and only ever emits redacted payloads to the renderer.
 
-function byteLength(payload: unknown): number {
-  if (payload === undefined) {
-    return 0;
-  }
-  try {
-    return Buffer.byteLength(JSON.stringify(payload) ?? '', 'utf8');
-  } catch {
-    // Unserializable payload (e.g. a cycle) — treat as oversized to be safe.
-    return MAX_IPC_PAYLOAD_BYTES + 1;
-  }
+function byteLength(payload: unknown, seen = new Set<object>()): number {
+  if (payload === undefined || payload === null) return 0;
+  if (payload instanceof Uint8Array) return payload.byteLength;
+  if (typeof payload === 'string') return Buffer.byteLength(payload, 'utf8');
+  if (typeof payload === 'number' || typeof payload === 'boolean') return 8;
+  if (typeof payload !== 'object') return MAX_IPC_PAYLOAD_BYTES + 1;
+  if (seen.has(payload)) return MAX_IPC_PAYLOAD_BYTES + 1;
+  seen.add(payload);
+  if (Array.isArray(payload)) return payload.reduce((total, item) => total + byteLength(item, seen), 0);
+  return Object.entries(payload as Record<string, unknown>).reduce(
+    (total, [key, value]) => total + Buffer.byteLength(key, 'utf8') + byteLength(value, seen), 0,
+  );
 }
 
 function fail(error: IpcError['error']): IpcError {
@@ -52,13 +54,14 @@ export type ValidatedHandler<TIn, TOut> = (
 export function withValidation<TSchema extends z.ZodTypeAny, TOut>(
   schema: TSchema,
   handler: ValidatedHandler<z.infer<TSchema>, TOut>,
-  options: { channel?: string; audit?: AuditSink } = {},
+  options: { channel?: string; audit?: AuditSink; maxPayloadBytes?: number } = {},
 ): (event: IpcMainInvokeEvent, payload: unknown) => Promise<IpcResult<TOut>> {
   const audit = options.audit ?? noopAuditSink;
   const channel = options.channel;
+  const maxPayloadBytes = options.maxPayloadBytes ?? MAX_IPC_PAYLOAD_BYTES;
 
   return async (event, payload): Promise<IpcResult<TOut>> => {
-    if (byteLength(payload) > MAX_IPC_PAYLOAD_BYTES) {
+    if (byteLength(payload) > maxPayloadBytes) {
       audit.append({
         actor: 'orchestrator',
         action: 'ipc.payload_too_large',
@@ -67,7 +70,7 @@ export function withValidation<TSchema extends z.ZodTypeAny, TOut>(
       });
       return fail({
         code: 'payload_too_large',
-        message: `Payload exceeds ${MAX_IPC_PAYLOAD_BYTES} bytes`,
+        message: `Payload exceeds ${maxPayloadBytes} bytes`,
         ...(channel !== undefined ? { channel } : {}),
       });
     }
@@ -128,6 +131,7 @@ export class IpcRouter {
     channel: string,
     schema: TSchema,
     handler: ValidatedHandler<z.infer<TSchema>, TOut>,
+    options: { maxPayloadBytes?: number } = {},
   ): void {
     if (!isInvokeChannel(channel)) {
       this.audit.append({
@@ -141,7 +145,7 @@ export class IpcRouter {
     this.registered.add(channel);
     this.ipcMain.handle(
       channel,
-      withValidation(schema, handler, { channel, audit: this.audit }),
+      withValidation(schema, handler, { channel, audit: this.audit, ...options }),
     );
   }
 

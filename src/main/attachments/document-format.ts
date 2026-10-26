@@ -67,6 +67,17 @@ export function detectDocumentFormat(name: string, bytes: Uint8Array): DetectedD
   return unsupported;
 }
 
+/** Clipboard ingress has no trusted path; accept image data only when its bytes identify an image. */
+export function hasImageSignature(bytes: Uint8Array): boolean {
+  const b = Buffer.from(bytes);
+  const starts = (hex: string): boolean => b.subarray(0, hex.length / 2).equals(Buffer.from(hex, 'hex'));
+  if (starts('89504e470d0a1a0a') || starts('ffd8ff') || starts('49492a00') || starts('4d4d002a') || starts('424d') || starts('00000100')) return true;
+  if (/^GIF8[79]a/.test(b.subarray(0, 6).toString('ascii'))) return true;
+  if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return true;
+  if (b.toString('ascii', 4, 8) === 'ftyp') return /^(heic|heix|hevc|hevx|mif1|msf1|avif|avis)$/.test(b.toString('ascii', 8, 12));
+  return false;
+}
+
 /** Redact before slicing so a credential crossing the cap cannot leak its prefix. */
 export function boundExtractedText(text: string): { text: string; truncated: boolean } {
   const safe = redact(text) as string;

@@ -118,6 +118,7 @@ const integrations: IntegrationsBridge = {
 const attachment: AttachmentBridge = {
   pick: () => invoke('attachment.pick'),
   ingest: (input) => invoke('attachment.ingestPaths', input),
+  ingestBytes: (input) => invoke('attachment.ingestBytes', input),
   preview: (id) => invoke('attachment.preview', { id }),
   discard: (id) => invoke('attachment.discard', { id }),
 };

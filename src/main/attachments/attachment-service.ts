@@ -6,12 +6,12 @@ import {
   AttachmentIdSchema, AttachmentIdsSchema, attachmentBatchError, attachmentSizeError,
   MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_NAME_LENGTH,
   type AttachmentIngestResult, type AttachmentPickResult, type AttachmentPreview,
-  type AttachmentRef, type AttachmentSummary, type MaterializedAttachment,
+  type AttachmentIngestBytesInput, type AttachmentRef, type AttachmentSummary, type MaterializedAttachment,
 } from '../../shared/attachments';
 import type { Store } from '../db/types';
 import type { ManagedStorage } from '../storage/managed-storage';
 import { redact } from '../ipc/redaction';
-import { detectDocumentFormat, formatDocument } from './document-format';
+import { detectDocumentFormat, formatDocument, hasImageSignature } from './document-format';
 
 interface Row {
   id: string; name: string; kind: AttachmentRef['kind']; mime_type: string;
@@ -93,6 +93,31 @@ export class AttachmentService {
       } finally { if (fd !== undefined) closeSync(fd); }
     }
     return { attachments, rejected };
+  }
+
+  /** Ingest a sandboxed clipboard image without accepting a renderer filesystem path. */
+  async ingestBytes(input: AttachmentIngestBytesInput): Promise<AttachmentIngestResult> {
+    const name = safeName(input.name);
+    const bytes = Buffer.from(input.bytes);
+    const sizeError = attachmentSizeError(bytes.byteLength) ?? attachmentBatchError(1, bytes.byteLength);
+    if (sizeError) return { attachments: [], rejected: [{ fileName: name, code: bytes.byteLength === 0 ? 'empty' : bytes.byteLength > MAX_ATTACHMENT_BYTES ? 'too_large' : 'limit_exceeded', message: sizeError }] };
+    const format = detectDocumentFormat(name, bytes);
+    // Clipboard byte ingress is intentionally image-only. The claimed MIME
+    // type is renderer metadata; signature detection remains authoritative.
+    if (format.kind !== 'image' || !hasImageSignature(bytes)) return { attachments: [], rejected: [{ fileName: name, code: 'unsupported', message: 'Only image data can be pasted directly. Use Attach files for documents.' }] };
+    try {
+      const sha256 = createHash('sha256').update(bytes).digest('hex');
+      const existing = this.store.db.prepare('SELECT * FROM attachments WHERE sha256=? LIMIT 1').get(sha256) as Row | undefined;
+      const blobId = existing?.blob_id ?? this.storage.put(bytes, format.mimeType).id;
+      const id = randomUUID();
+      try {
+        this.store.db.prepare('INSERT INTO attachments (id,name,kind,mime_type,size_bytes,sha256,blob_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
+          .run(id, name, format.kind, format.mimeType, bytes.byteLength, sha256, blobId, new Date().toISOString());
+      } catch (error) { if (!existing) this.storage.delete(blobId); throw error; }
+      return { attachments: [summary(this.row(id))], rejected: [] };
+    } catch {
+      return { attachments: [], rejected: [{ fileName: name, code: 'unreadable', message: 'The pasted image could not be stored. Please try again.' }] };
+    }
   }
 
   private row(id: string): Row {

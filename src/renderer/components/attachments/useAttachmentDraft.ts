@@ -1,8 +1,37 @@
 import { useCallback, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { attachmentBatchError, attachmentSizeError, type AttachmentIngestResult, type AttachmentSummary } from '@shared/attachments';
+import { attachmentBatchError, attachmentSizeError, type AttachmentIngestBytesInput, type AttachmentIngestResult, type AttachmentSummary } from '@shared/attachments';
 
 export interface AttachmentDraftError { fileName: string; message: string }
 export interface AttachmentProgress { completed: number; total: number; fileName: string }
+
+export interface AttachmentDraftFile {
+  readonly name: string;
+  readonly size: number;
+  readonly type: string;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  readonly path?: string | undefined;
+}
+
+type AttachmentFileInput =
+  | { kind: 'path'; path: string }
+  | { kind: 'bytes'; input: AttachmentIngestBytesInput };
+
+/** Select the safe main-process ingestion route for an Electron or clipboard File. */
+export async function attachmentInputForFile(file: AttachmentDraftFile): Promise<AttachmentFileInput> {
+  const path = file.path;
+  if (typeof path === 'string' && path.length > 0) return { kind: 'path', path };
+  return { kind: 'bytes', input: {
+    name: file.name || 'pasted-image.png',
+    mimeType: file.type || 'application/octet-stream',
+    bytes: new Uint8Array(await file.arrayBuffer()) as Uint8Array<ArrayBuffer>,
+  } };
+}
+
+/** Keep pasted text in the composer while routing only pasted images to attachment storage. */
+export function pastedImageFiles(input: { files: Iterable<AttachmentDraftFile>; text: string }): { files: AttachmentDraftFile[]; preventDefault: boolean } {
+  const files = Array.from(input.files).filter(file => file.type.startsWith('image/'));
+  return { files, preventDefault: files.length > 0 && input.text.length === 0 };
+}
 
 /** Shared task/chat draft. Call reset() only after a successful send (it keeps stored files). */
 export function useAttachmentDraft() {
@@ -43,7 +72,7 @@ export function useAttachmentDraft() {
     setProgress({ completed: 0, total: 0, fileName: 'Choosing and attaching files…' });
     await accept(await window.conductor.attachment.pick());
   });
-  const addFiles = (files: Iterable<File>) => {
+  const addFiles = (files: Iterable<AttachmentDraftFile>) => {
     const selection = Array.from(files);
     return run(async () => {
       const batchError = attachmentBatchError(current.current.length + selection.length,
@@ -53,11 +82,12 @@ export function useAttachmentDraft() {
         setProgress({ completed: index, total: selection.length, fileName: file.name });
         const sizeError = attachmentSizeError(file.size);
         if (sizeError) { report(file.name, sizeError); continue; }
-        // Older Electron File objects expose path. Sandboxed runtimes without it
-        // need a preload File/clipboard bridge; never invent a path from file.name.
-        const path = (file as File & { path?: string }).path;
-        if (!path) { report(file.name, 'This app cannot read this dropped or pasted file. Save it and use Attach files.'); continue; }
-        try { await accept(await window.conductor.attachment.ingest({ paths: [path] })); }
+        try {
+          const input = await attachmentInputForFile(file);
+          await accept(input.kind === 'path'
+            ? await window.conductor.attachment.ingest({ paths: [input.path] })
+            : await window.conductor.attachment.ingestBytes(input.input));
+        }
         catch { report(file.name, 'Could not attach this file. Try selecting it again.'); }
       }
     });
@@ -83,11 +113,10 @@ export function useAttachmentDraft() {
     event.preventDefault(); void addFiles(event.dataTransfer.files);
   };
   const onPaste = (event: ClipboardEvent<HTMLElement>) => {
-    const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
-    if (!images.length) return;
-    // Preserve any text accompanying an image paste.
-    if (!event.clipboardData.getData('text/plain')) event.preventDefault();
-    void addFiles(images);
+    const pasted = pastedImageFiles({ files: event.clipboardData.files, text: event.clipboardData.getData('text/plain') });
+    if (!pasted.files.length) return;
+    if (pasted.preventDefault) event.preventDefault();
+    void addFiles(pasted.files);
   };
   return { attachments, attachmentIds: attachments.map(item => item.id), busy, progress, errors,
     pick, addFiles, remove, reset, clear, clearErrors: () => setErrors([]), onDragOver, onDrop, onPaste };

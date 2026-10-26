@@ -262,6 +262,10 @@ export const AttachmentIdsSchema = z
   });
 
 const AttachmentPathSchema = z.string().trim().min(1).max(4096);
+const AttachmentBytesSchema = z.instanceof(Uint8Array).refine(
+  (bytes) => bytes.byteLength > 0 && bytes.byteLength <= MAX_ATTACHMENT_BYTES,
+  { message: `Attachment bytes must be between 1 byte and ${MAX_ATTACHMENT_BYTES} bytes` },
+);
 
 /**
  * Attachment invoke schemas, keyed by the exact IPC channel names.
@@ -285,6 +289,11 @@ export const ATTACHMENT_SCHEMAS = {
         }),
     })
     .strict(),
+  'attachment.ingestBytes': z.object({
+    name: z.string().trim().min(1).max(MAX_ATTACHMENT_NAME_LENGTH),
+    mimeType: z.string().trim().min(1).max(255),
+    bytes: AttachmentBytesSchema,
+  }).strict(),
   'attachment.preview': z.object({ id: AttachmentIdSchema }).strict(),
   'attachment.discard': z.object({ id: AttachmentIdSchema }).strict(),
 } as const;
@@ -292,6 +301,9 @@ export const ATTACHMENT_SCHEMAS = {
 export type AttachmentPickRequest = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.pick']>;
 export type AttachmentIngestPathsInput = z.infer<
   (typeof ATTACHMENT_SCHEMAS)['attachment.ingestPaths']
+>;
+export type AttachmentIngestBytesInput = z.infer<
+  (typeof ATTACHMENT_SCHEMAS)['attachment.ingestBytes']
 >;
 export type AttachmentPreviewInput = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.preview']>;
 export type AttachmentDiscardInput = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.discard']>;
@@ -306,6 +318,8 @@ export interface AttachmentBridge {
   pick(): Promise<AttachmentPickResult>;
   /** Ingest files the user dropped onto the composer. */
   ingest(input: AttachmentIngestPathsInput): Promise<AttachmentIngestResult>;
+  /** Ingest a pasted image that has no filesystem path in the sandboxed renderer. */
+  ingestBytes(input: AttachmentIngestBytesInput): Promise<AttachmentIngestResult>;
   /** Render a preview by id; refuses ids the main process did not record. */
   preview(id: string): Promise<AttachmentPreview>;
   /** Remove an unbound draft attachment; linked attachments are kept. */
