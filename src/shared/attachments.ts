@@ -64,6 +64,12 @@ export const MAX_ATTACHMENT_EXTRACTED_CHARS = 40_000;
 /** Bounded pages rendered from a PDF; later pages are reported as truncated. */
 export const MAX_ATTACHMENT_PDF_PAGES = 100;
 
+/** Visual page previews are capped independently from text extraction. */
+export const MAX_ATTACHMENT_PDF_RENDERED_PAGES = 12;
+
+/** OCR is intentionally bounded because Vision work is CPU intensive. */
+export const MAX_ATTACHMENT_OCR_PAGES = 20;
+
 /** A display name is bounded so a hostile filename cannot flood the UI. */
 export const MAX_ATTACHMENT_NAME_LENGTH = 255;
 
@@ -151,6 +157,8 @@ export interface PdfAttachmentPage {
   /** 1-based page number in the original document. */
   readonly pageNumber: number;
   readonly text: string;
+  /** Locally rendered page image; omitted when the visual preview cap is hit. */
+  readonly dataUrl?: string | undefined;
 }
 
 export interface AttachmentPreviewBase {
@@ -169,6 +177,8 @@ export interface ImageAttachmentPreview extends AttachmentPreviewBase {
   readonly dataUrl: string;
   readonly width?: number | undefined;
   readonly height?: number | undefined;
+  /** Local Vision OCR, requested only for agent delivery rather than thumbnails. */
+  readonly recognizedText?: string | undefined;
 }
 
 export interface MarkdownAttachmentPreview extends AttachmentPreviewBase {

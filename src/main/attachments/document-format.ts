@@ -11,6 +11,7 @@ import {
   type AttachmentSummary, type PdfAttachmentPage,
 } from '../../shared/attachments';
 import { redact } from '../ipc/redaction';
+import { formatPdfWithMacos, recognizeImageWithMacos } from './macos-vision';
 
 const run = promisify(execFile);
 export interface DetectedDocumentFormat { kind: AttachmentKind; mimeType: string }
@@ -104,7 +105,7 @@ async function temporary<T>(action: (dir: string) => Promise<T>): Promise<T> {
 }
 
 /** Accept bytes from the trusted attachment service, never a renderer-supplied path. */
-export async function formatDocument(bytes: Uint8Array, attachment: AttachmentSummary): Promise<AttachmentPreview> {
+export async function formatDocument(bytes: Uint8Array, attachment: AttachmentSummary, options: { recognizeImages?: boolean } = {}): Promise<AttachmentPreview> {
   const fail = (reason: AttachmentPreviewFailure, message: string): AttachmentPreview =>
     ({ attachment, format: 'unsupported', truncated: false, reason, message });
   if (!bytes.byteLength) return fail('empty', 'The file is empty.');
@@ -145,6 +146,8 @@ export async function formatDocument(bytes: Uint8Array, attachment: AttachmentSu
         return textPreview(htmlToSafeMarkdown(html), 'markdown');
       }
       case 'pdf': {
+        const native = await formatPdfWithMacos(buffer);
+        if (native !== null) return { attachment, format: 'pdf', ...native };
         const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
         const loading = getDocument({ data: new Uint8Array(buffer), useSystemFonts: false, useWorkerFetch: false });
         try {
@@ -183,7 +186,12 @@ export async function formatDocument(bytes: Uint8Array, attachment: AttachmentSu
         const image = nativeImage.createFromBuffer(imageBytes);
         if (image.isEmpty()) return fail('error', 'The image is corrupt or its format is not supported.');
         const { width, height } = image.getSize();
-        return { attachment, format: 'image', dataUrl: image.toDataURL(), width, height, truncated: false };
+        let recognizedText: string | undefined;
+        if (options.recognizeImages === true) {
+          try { recognizedText = await recognizeImageWithMacos(imageBytes, detected.mimeType); }
+          catch { /* The visual preview remains useful when native OCR is unavailable. */ }
+        }
+        return { attachment, format: 'image', dataUrl: image.toDataURL(), width, height, truncated: false, ...(recognizedText ? { recognizedText } : {}) };
       }
       default: return fail('unsupported', 'This file type does not support a preview.');
     }

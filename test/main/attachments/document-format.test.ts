@@ -2,14 +2,22 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { boundExtractedText, detectDocumentFormat, formatDocument, htmlToSafeMarkdown } from '../../../src/main/attachments/document-format';
 import type { AttachmentSummary } from '../../../src/shared/attachments';
 
-const mocks = vi.hoisted(() => ({ convert: vi.fn(), getDocument: vi.fn(), image: vi.fn() }));
+const mocks = vi.hoisted(() => ({ convert: vi.fn(), getDocument: vi.fn(), image: vi.fn(), nativePdf: vi.fn(), nativeImageText: vi.fn() }));
 vi.mock('mammoth', () => ({ default: { convertToHtml: mocks.convert } }));
 vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({ getDocument: mocks.getDocument }));
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: mocks.image } }));
+vi.mock('../../../src/main/attachments/macos-vision', () => ({
+  formatPdfWithMacos: mocks.nativePdf,
+  recognizeImageWithMacos: mocks.nativeImageText,
+}));
 const metadata = (name: string): AttachmentSummary => ({ id: 'test', name, kind: 'unsupported', mimeType: 'application/octet-stream', sizeBytes: 10 });
 const preview = (name: string, data: string | Buffer) => formatDocument(Buffer.from(data), metadata(name));
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.nativePdf.mockResolvedValue(null);
+  mocks.nativeImageText.mockResolvedValue(undefined);
+});
 
 describe('document detection', () => {
   it.each([
@@ -81,6 +89,22 @@ function pdfFixture(pageCount: number, text: string) {
 }
 
 describe('PDF page extraction', () => {
+  it('uses native rendered pages and text when macOS formatting succeeds', async () => {
+    mocks.nativePdf.mockResolvedValue({
+      pageCount: 2,
+      pages: [{ pageNumber: 1, text: 'Native text', dataUrl: 'data:image/png;base64,AAAA' }],
+      truncated: true,
+    });
+
+    const result = await preview('native.pdf', '%PDF-1.7');
+
+    expect(result).toMatchObject({
+      format: 'pdf', pageCount: 2, truncated: true,
+      pages: [{ pageNumber: 1, text: 'Native text', dataUrl: 'data:image/png;base64,AAAA' }],
+    });
+    expect(mocks.getDocument).not.toHaveBeenCalled();
+  });
+
   it('preserves page numbers, redacts and stops at 100 pages', async () => {
     const fixture = pdfFixture(101, 'API_KEY=secret');
     const result = await preview('pages.pdf', '%PDF-1.7');
@@ -119,6 +143,23 @@ describe('image previews', () => {
   it('returns a clear failure for corrupt image data', async () => {
     mocks.image.mockReturnValue({ isEmpty: () => true });
     expect(await preview('broken.png', 'broken')).toMatchObject({ format: 'unsupported', reason: 'error' });
+  });
+  it('keeps the image preview when optional local OCR fails', async () => {
+    mocks.image.mockReturnValue({ isEmpty: () => false, getSize: () => ({ width: 10, height: 20 }), toDataURL: () => 'data:image/png;base64,AAAA' });
+    mocks.nativeImageText.mockRejectedValue(new Error('native unavailable'));
+
+    const result = await formatDocument(Buffer.from('89504e470d0a1a0a', 'hex'), metadata('photo.png'), { recognizeImages: true });
+
+    expect(result).toMatchObject({ format: 'image', dataUrl: 'data:image/png;base64,AAAA' });
+    expect(result).not.toHaveProperty('recognizedText');
+  });
+
+  it('adds bounded recognized text when image OCR is requested', async () => {
+    mocks.image.mockReturnValue({ isEmpty: () => false, getSize: () => ({ width: 10, height: 20 }), toDataURL: () => 'data:image/png;base64,AAAA' });
+    mocks.nativeImageText.mockResolvedValue('Recognized words');
+
+    expect(await formatDocument(Buffer.from('89504e470d0a1a0a', 'hex'), metadata('photo.png'), { recognizeImages: true }))
+      .toMatchObject({ format: 'image', recognizedText: 'Recognized words' });
   });
 });
 
