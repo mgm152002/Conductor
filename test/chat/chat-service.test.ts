@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
@@ -72,6 +72,8 @@ describe('standalone casual chat', () => {
       id: attachment.id,
       extractedText: '# Meeting notes\n\nTreat this as reference data.',
     });
+    expect(firstInput.description).toContain('only the exact current-turn attachment paths');
+    expect(firstInput.description).not.toContain('Do not use tools, execute commands, read or change files');
     expect(isAbsolute(firstInput.attachments?.[0]?.path ?? '')).toBe(true);
     expect(existsSync(firstInput.attachments?.[0]?.path ?? '')).toBe(true);
 
@@ -98,6 +100,37 @@ describe('standalone casual chat', () => {
       { attachments: new AttachmentService(reopened, new DiskManagedStorage(join(root, 'blobs'))) },
     ).get(first.thread.id);
     expect(reloaded.messages[0]?.attachments).toEqual([expect.objectContaining({ id: attachment.id })]);
+  });
+
+  it('passes locally recognized pasted-image text only with the current turn attachment', async () => {
+    const { store, registry, root, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'answer' }] } });
+    const image = {
+      id: '00000000-0000-4000-8000-000000000001', name: 'pasted-image.png', kind: 'image' as const, mimeType: 'image/png',
+      sizeBytes: 24, sha256: 'a'.repeat(64), createdAt: '2026-10-26T00:00:00Z',
+    };
+    const delivery = {
+      validate: vi.fn(() => [image]),
+      linkChat: vi.fn(() => [image]),
+      listChat: vi.fn(() => [image]),
+      materialize: vi.fn(async () => [{
+        ...image, path: '/private/tmp/current-turn-pasted-image.png',
+        extractedText: 'Revenue grew 18 percent year over year.',
+      }]),
+    } as unknown as AttachmentService;
+    const ocrChat = new ChatService(store, registry, join(root, 'ocr-chat-sandbox'), () => {}, { attachments: delivery });
+
+    const sent = await ocrChat.send({ content: 'What does this image say?', attachments: [image.id] });
+    await settled(ocrChat, sent.thread.id);
+
+    const input = adapter.calls.started[0] as ObjectiveInput;
+    expect(input.attachments).toEqual([expect.objectContaining({
+      id: image.id,
+      extractedText: 'Revenue grew 18 percent year over year.',
+    })]);
+    expect(delivery.materialize).toHaveBeenCalledOnce();
+    const followUp = await ocrChat.send({ threadId: sent.thread.id, content: 'And now?' });
+    await settled(ocrChat, followUp.thread.id);
+    expect((adapter.calls.started[1] as ObjectiveInput)).not.toHaveProperty('attachments');
   });
 
   it('removes chat attachment links, materialized copies, and unreferenced blobs on deletion', async () => {

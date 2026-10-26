@@ -191,18 +191,26 @@ export class AttachmentService {
     const directory = realpathSync(destination);
     const result: MaterializedAttachment[] = [];
     for (const item of refs) {
-      const preview = await this.preview(item.id);
+      // Delivery happens once per current turn, so it may request local OCR for
+      // images. Interactive previews deliberately remain fast and do not OCR.
+      const row = this.row(item.id);
+      const bytes = this.storage.get(row.blob_id);
+      const preview = await formatDocument(bytes, summary(row), { recognizeImages: true });
       // Recheck the owner after asynchronous conversion (deletion may have occurred).
       if (!this.list(owner).some((entry) => entry.id === item.id)) throw new Error('Attachment owner no longer exists.');
       const path = join(directory, `${item.id}-${randomUUID()}-${copyName(item.name)}`);
       const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      try { writeFileSync(fd, this.storage.get(this.row(item.id).blob_id)); }
+      try { writeFileSync(fd, bytes); }
       catch (error) { rmSync(path, { force: true }); throw error; }
       finally { closeSync(fd); }
       const previous = this.store.db.prepare(`SELECT materialized_path FROM ${table} WHERE ${key}=? AND attachment_id=?`).get(id, item.id) as { materialized_path: string | null };
       this.store.db.prepare(`UPDATE ${table} SET materialized_path=? WHERE ${key}=? AND attachment_id=?`).run(path, id, item.id);
       if (previous.materialized_path && previous.materialized_path !== path) rmSync(previous.materialized_path, { force: true });
-      const text = preview.format === 'markdown' ? preview.markdown : preview.format === 'text' ? preview.text : preview.format === 'pdf' ? preview.pages.map((page) => page.text).join('\n\n') : undefined;
+      const text = preview.format === 'markdown' ? preview.markdown
+        : preview.format === 'text' ? preview.text
+          : preview.format === 'pdf' ? preview.pages.map((page) => page.text).join('\n\n')
+            : preview.format === 'image' ? preview.recognizedText
+              : undefined;
       result.push({ ...item, path, ...(text !== undefined ? { extractedText: text, truncated: preview.truncated } : {}), ...(preview.format === 'pdf' ? { pageCount: preview.pageCount } : {}) });
     }
     return result;
