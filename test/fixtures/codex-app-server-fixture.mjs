@@ -18,12 +18,25 @@ function ask(method, params) {
   return new Promise((resolve) => waiting.set(id, resolve));
 }
 
-async function runTurn(turnId, text) {
+async function runTurn(turnId, input) {
   send({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
   if (model === 'gpt-bad') {
     const message = '{"error":{"message":"The \'gpt-bad\' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}}';
     send({ method: 'error', params: { error: { message }, willRetry: false, threadId, turnId } });
     send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'failed', error: { message }, items: [] } } });
+    return;
+  }
+  const text = input.find((item) => item.type === 'text')?.text ?? '';
+  const body = JSON.parse(text.split('\n').slice(1).join('\n'));
+  if (body.objective === 'inspect attachments') {
+    const reply = JSON.stringify({
+      inputTypes: input.map((item) => item.type),
+      imagePaths: input.filter((item) => item.type === 'localImage').map((item) => item.path),
+      attachmentPaths: (body.attachments ?? []).map((item) => item.path),
+      attachmentContents: body.attachmentContents ?? [],
+    });
+    send({ method: 'item/completed', params: { threadId, turnId, item: { type: 'agentMessage', id: 'msg1', text: reply, phase: null } } });
+    send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', error: null, items: [] } } });
     return;
   }
   send({ method: 'configWarning', params: { summary: 'Ignoring unknown features' } });
@@ -46,7 +59,10 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     case 'initialized': break;
     case 'thread/start':
     case 'thread/resume':
-      if (m.params.approvalPolicy !== 'untrusted' || m.params.sandbox !== 'workspace-write') { send({ id: m.id, error: { message: `unexpected policy ${m.params.approvalPolicy}/${m.params.sandbox}` } }); break; }
+      if (!((m.params.approvalPolicy === 'untrusted' && m.params.sandbox === 'workspace-write')
+        || (m.params.approvalPolicy === 'never' && m.params.sandbox === 'read-only'))) {
+        send({ id: m.id, error: { message: `unexpected policy ${m.params.approvalPolicy}/${m.params.sandbox}` } }); break;
+      }
       if (m.params.model) model = m.params.model;
       send({ id: m.id, result: { thread: { id: threadId } } }); break;
     case 'model/list': send({ id: m.id, result: { data: [{ model: 'gpt-bad', hidden: false, isDefault: true }, { model: 'gpt-good', hidden: false, isDefault: false }], nextCursor: null } }); break;
@@ -54,7 +70,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       if (m.params.model) model = m.params.model;
       const turnId = `turn-${++turns}`;
       send({ id: m.id, result: { turn: { id: turnId, status: 'inProgress', items: [] } } });
-      void runTurn(turnId, m.params.input[0].text);
+      void runTurn(turnId, m.params.input);
       break;
     }
     case 'turn/interrupt': send({ id: m.id, result: {} }); process.exit(0); break;

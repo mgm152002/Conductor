@@ -16,7 +16,8 @@ import { evidenceEvaluator } from '@main/orchestrator/evidence-evaluator';
 import { RecordingTaskEventEmitter } from '@main/orchestrator/event-emitter';
 import { ToolApprovalBroker } from '@main/orchestrator/tool-approvals';
 import { replyFor, codexSessionId } from '@main/orchestrator/thread-context';
-import { approvalPolicyFor, execItem } from '@main/adapters/codex-app-server-adapter';
+import { approvalPolicyFor, CodexAppServerAdapter, execItem } from '@main/adapters/codex-app-server-adapter';
+import { responseText } from '@main/adapters/objective-cli-adapter';
 
 const FIXTURE = resolve(__dirname, '../fixtures/codex-app-server-fixture.mjs');
 let root: string | undefined;
@@ -63,6 +64,40 @@ async function waitForApproval(permissions: PermissionService, taskId: string) {
 }
 
 describe('Codex over app-server with per-tool-call approvals', () => {
+  it('delivers attachment manifests, extracted text, and local images to the turn', async () => {
+    root = mkdtempSync(join(tmpdir(), 'conductor-appserver-attachments-'));
+    const binary = join(root, 'codex');
+    writeFileSync(binary, `#!/bin/sh\nexec "${process.execPath}" "${FIXTURE}" "$@"\n`);
+    chmodSync(binary, 0o755);
+    const imagePath = join(root, 'chart.png');
+    const pdfPath = join(root, 'report.pdf');
+    writeFileSync(imagePath, 'image bytes');
+    writeFileSync(pdfPath, 'pdf bytes');
+    const adapter = new CodexAppServerAdapter(
+      { id: 'codex', name: 'Codex', command: binary, capabilities: [] },
+      async () => 'decline',
+    );
+    const base = { sizeBytes: 11, sha256: 'a'.repeat(64), createdAt: '2026-10-26T00:00:00Z' };
+    const handle = await adapter.start({
+      objective: 'inspect attachments', rootPath: root, mode: 'read_only', models: { codex: 'gpt-good' },
+      attachments: [
+        { ...base, id: 'image-1', name: 'chart.png', kind: 'image', mimeType: 'image/png', path: imagePath },
+        { ...base, id: 'pdf-1', name: 'report.pdf', kind: 'pdf', mimeType: 'application/pdf', path: pdfPath, extractedText: 'Revenue rose 18 percent.', pageCount: 2 },
+      ],
+    });
+    let reply = '';
+    for await (const event of adapter.stream(handle)) {
+      if (event.kind === 'stdout' && typeof event.data === 'string') reply += responseText(event.data);
+    }
+    expect(await adapter.await(handle)).toMatchObject({ status: 'succeeded' });
+    expect(JSON.parse(reply)).toEqual({
+      inputTypes: ['text', 'localImage'],
+      imagePaths: [imagePath],
+      attachmentPaths: [imagePath, pdfPath],
+      attachmentContents: [{ name: 'report.pdf', kind: 'pdf', text: 'Revenue rose 18 percent.' }],
+    });
+  });
+
   it('starts without an up-front approval and asks only when Codex runs a command', async () => {
     const { s, runner, machine, permissions, workspace } = await setup();
     const task = await runner.create({ workspaceId: workspace.id, objective: 'make notes', acceptanceCriteria: ['contains: decision=accept'] });
