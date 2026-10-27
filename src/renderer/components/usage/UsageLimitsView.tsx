@@ -18,10 +18,10 @@ import { UsageLimitCard } from './UsageLimitCard';
 // up by kind so a CLI may report either one independently; the missing one
 // renders the explicit not-reported state.
 //
-// Quota windows are rare: Codex reports them, most other CLIs only report
-// tokens. The view therefore leads with the usage that *is* available (a bar
-// per CLI) and calls out why some windows are empty, rather than presenting a
-// wall of identical "Not reported" cards.
+// Quota windows are rare: Codex, Antigravity, and OpenCode Go report them;
+// most other CLIs only report tokens. The view therefore leads with the usage
+// that *is* available (a bar per CLI) and calls out why some windows are empty,
+// rather than presenting a wall of identical "Not reported" cards.
 
 type CliIconComponent = (props: SVGProps<SVGSVGElement> & { size?: number }) => React.JSX.Element;
 
@@ -92,7 +92,8 @@ export function UsageLimitsView({
       {reporting === 0 ? (
         <Alert tone="info">
           No CLI has reported a quota window yet. Codex reports limits after a Codex session starts;
-          OpenCode and Antigravity report token usage but not session/weekly quota windows.
+          Antigravity and OpenCode Go are checked in the background when signed in. Other CLIs do not
+          expose session or weekly quota data.
         </Alert>
       ) : null}
 

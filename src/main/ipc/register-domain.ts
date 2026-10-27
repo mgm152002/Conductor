@@ -69,6 +69,8 @@ import { UsageSummaryRequest, WorkspaceDeleteRequest } from '@shared/ipc-contrac
 export interface UsageSummaryQuery {
   range: UsageRange;
   workspaceId?: string;
+  /** Only an explicit refresh asks the main process to probe CLIs. */
+  refreshLimits?: boolean;
 }
 
 export interface DomainHandlerDeps {
@@ -175,10 +177,12 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     const query: UsageSummaryQuery = {
       range: input.range,
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+      ...(input.refreshLimits ? { refreshLimits: true } : {}),
     };
-    // A temporary provider/CLI failure must not hide the last valid snapshot
-    // already stored locally. The background poller will retry on its cadence.
-    await deps.refreshUsageLimits?.().catch(() => undefined);
+    // Only a manual refresh waits for the CLI probes; initial loads and range
+    // changes read the snapshots already stored locally. A temporary
+    // provider/CLI failure must not hide the last valid snapshot either way.
+    if (query.refreshLimits) await deps.refreshUsageLimits?.().catch(() => undefined);
     return deps.usageSummary(query);
   });
 

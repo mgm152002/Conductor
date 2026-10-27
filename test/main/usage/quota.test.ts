@@ -4,7 +4,9 @@ import {
   isQuotaWindowCurrent,
   normalizeQuotaSample,
   quotaFromEvent,
+  quotaSampleFromAntigravityUsage,
   quotaSampleFromCodexRateLimits,
+  quotaSampleFromOpenCodeGoUsage,
   QuotaRecorder,
 } from '@main/usage/quota';
 import type { AdapterStreamEvent } from '@shared/adapter';
@@ -98,6 +100,125 @@ describe('Codex rate-limit mapping', () => {
   });
 });
 
+describe('Antigravity usage mapping', () => {
+  it('maps model groups to labelled windows and keeps the most constrained group', () => {
+    const sample = quotaSampleFromAntigravityUsage(
+      {
+        command: {
+          data: {
+            groups: [
+              {
+                name: 'Gemini Models',
+                buckets: [{ window: 'weekly', remaining_fraction: 0.55, reset_time: at(5 * DAY) }],
+              },
+              {
+                name: 'Claude and GPT models',
+                buckets: [{ window: 'weekly', remaining_fraction: 0.1, reset_time: at(6 * DAY) }],
+              },
+            ],
+          },
+        },
+      },
+      { now: NOW },
+    );
+
+    expect(sample).toEqual({
+      source: 'antigravity',
+      windows: [{
+        kind: 'weekly',
+        remainingPercent: 10,
+        usedPercent: 90,
+        resetsAt: at(6 * DAY),
+        label: 'Claude and GPT models',
+      }],
+    });
+  });
+
+  it('uses the earlier reset when groups report the same remaining percentage', () => {
+    const sample = quotaSampleFromAntigravityUsage(
+      {
+        command: {
+          data: {
+            groups: [
+              {
+                name: 'Gemini Models',
+                buckets: [{ window: 'weekly', remaining_fraction: 0, reset_time: at(5 * DAY) }],
+              },
+              {
+                name: 'Claude and GPT models',
+                buckets: [{ window: 'weekly', remaining_fraction: 0, reset_time: at(6 * DAY) }],
+              },
+            ],
+          },
+        },
+      },
+      { now: NOW },
+    );
+
+    expect(sample?.windows).toEqual([{
+      kind: 'weekly',
+      remainingPercent: 0,
+      usedPercent: 100,
+      resetsAt: at(5 * DAY),
+      label: 'Gemini Models',
+    }]);
+  });
+
+  it('ignores unsupported windows and unusable fractions', () => {
+    expect(quotaSampleFromAntigravityUsage(undefined, { now: NOW })).toBeUndefined();
+    expect(quotaSampleFromAntigravityUsage(
+      {
+        command: {
+          data: {
+            groups: [
+              { name: 'Daily', buckets: [{ window: 'daily', remaining_fraction: 0.5 }] },
+              { name: 'Broken', buckets: [{ window: 'weekly', remaining_fraction: 1.5 }] },
+            ],
+          },
+        },
+      },
+      { now: NOW },
+    )).toBeUndefined();
+  });
+});
+
+describe('OpenCode Go usage mapping', () => {
+  it('maps rolling to session and weekly to weekly while ignoring monthly', () => {
+    const sample = quotaSampleFromOpenCodeGoUsage(
+      {
+        usage: {
+          rolling: { status: 'ok', percent: 1, resetsAt: at(HOUR) },
+          weekly: { status: 'ok', percent: 25, resetsAt: at(5 * DAY) },
+          monthly: { status: 'ok', percent: 80, resetsAt: at(20 * DAY) },
+        },
+      },
+      { now: NOW },
+    );
+
+    expect(sample).toEqual({
+      source: 'opencode',
+      windows: [
+        { kind: 'session', usedPercent: 1, remainingPercent: 99, resetsAt: at(HOUR) },
+        { kind: 'weekly', usedPercent: 25, remainingPercent: 75, resetsAt: at(5 * DAY) },
+      ],
+    });
+  });
+
+  it('drops invalid percentages and payloads without usage', () => {
+    expect(quotaSampleFromOpenCodeGoUsage(undefined, { now: NOW })).toBeUndefined();
+    expect(quotaSampleFromOpenCodeGoUsage({ usage: {} }, { now: NOW })).toBeUndefined();
+    expect(quotaSampleFromOpenCodeGoUsage(
+      {
+        usage: {
+          rolling: { percent: 150 },
+          weekly: { percent: '25' },
+        },
+      },
+      { now: NOW },
+    )).toBeUndefined();
+  });
+});
+
 describe('percentage validation', () => {
   it.each([
     ['negative used percent', { kind: 'session', usedPercent: -1 }],
@@ -147,6 +268,36 @@ describe('percentage validation', () => {
     );
     expect(sample?.source).toBeUndefined();
   });
+
+  it('keeps the most constrained window when a kind is reported twice', () => {
+    const sample = normalizeQuotaSample(
+      {
+        windows: [
+          { kind: 'weekly', remainingPercent: 40, resetsAt: at(5 * DAY), label: 'Group A' },
+          { kind: 'weekly', remainingPercent: 10, resetsAt: at(6 * DAY), label: 'Group B' },
+        ],
+      },
+      { now: NOW },
+    );
+
+    expect(sample?.windows).toEqual([
+      { kind: 'weekly', remainingPercent: 10, usedPercent: 90, resetsAt: at(6 * DAY), label: 'Group B' },
+    ]);
+  });
+
+  it('trims a usable window label and drops an unusable one', () => {
+    const labelled = normalizeQuotaSample(
+      { windows: [{ kind: 'weekly', remainingPercent: 10, label: '  Gemini   Models  ' }] },
+      { now: NOW },
+    );
+    const tooLong = normalizeQuotaSample(
+      { windows: [{ kind: 'weekly', remainingPercent: 10, label: 'x'.repeat(61) }] },
+      { now: NOW },
+    );
+
+    expect(labelled?.windows[0]?.label).toBe('Gemini Models');
+    expect(tooLong?.windows[0]?.label).toBeUndefined();
+  });
 });
 
 describe('reset windows', () => {
@@ -193,6 +344,7 @@ describe('quota stream events', () => {
 interface LimitRow {
   adapter_id: string;
   window_kind: string;
+  label: string | null;
   remaining_percent: number | null;
   used_percent: number | null;
   resets_at: string | null;
@@ -203,7 +355,7 @@ interface LimitRow {
 
 function limitRows(store: SqliteStore): LimitRow[] {
   return store.db
-    .prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes
+    .prepare(`SELECT adapter_id, window_kind, label, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes
       FROM agent_usage_limits ORDER BY adapter_id, window_kind`)
     .all() as LimitRow[];
 }
@@ -218,8 +370,8 @@ describe('QuotaRecorder latest-snapshot upsert', () => {
       adapterId: 'codex',
       sample: {
         windows: [
-          { kind: 'session', usedPercent: 10, resetsAt: at(HOUR), windowMinutes: 300 },
-          { kind: 'weekly', remainingPercent: 90, resetsAt: at(5 * DAY), windowMinutes: 10_080 },
+          { kind: 'session', usedPercent: 10, resetsAt: at(HOUR), windowMinutes: 300, label: 'Primary' },
+          { kind: 'weekly', remainingPercent: 90, resetsAt: at(5 * DAY), windowMinutes: 10_080, label: 'Gemini Models' },
         ],
       },
     });
@@ -243,8 +395,9 @@ describe('QuotaRecorder latest-snapshot upsert', () => {
       resets_at: at(HOUR),
       reported_at: now.toISOString(),
       source: 'codex',
-      // A sample without a duration does not resurrect the old one.
+      // A sample without a duration or label does not resurrect the old ones.
       window_minutes: null,
+      label: null,
     });
     // A sample that omits the weekly window leaves the prior snapshot alone.
     expect(weekly).toMatchObject({
@@ -253,6 +406,7 @@ describe('QuotaRecorder latest-snapshot upsert', () => {
       resets_at: at(5 * DAY),
       reported_at: NOW.toISOString(),
       window_minutes: 10_080,
+      label: 'Gemini Models',
     });
 
     // A third snapshot for the same window still upserts rather than inserts.

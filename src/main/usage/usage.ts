@@ -120,6 +120,7 @@ interface LimitRow {
   reported_at: string;
   source: string | null;
   window_minutes: number | null;
+  label: string | null;
 }
 
 function toLimitWindow(row: LimitRow): UsageLimitWindow {
@@ -131,6 +132,7 @@ function toLimitWindow(row: LimitRow): UsageLimitWindow {
     ...(row.reported_at ? { reportedAt: row.reported_at } : {}),
     ...(row.source !== null ? { source: row.source } : {}),
     ...(row.window_minutes !== null ? { windowMinutes: row.window_minutes } : {}),
+    ...(row.label !== null ? { label: row.label } : {}),
   };
 }
 
@@ -169,7 +171,7 @@ export function usageSummary(
 
   const limitsByAdapter = new Map<string, UsageLimitWindow[]>();
   const limitRows = store.db.prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at,
-    reported_at, source, window_minutes FROM agent_usage_limits
+    reported_at, source, window_minutes, label FROM agent_usage_limits
     ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 ELSE 1 END`).all() as LimitRow[];
   const now = new Date();
   for (const row of limitRows) {

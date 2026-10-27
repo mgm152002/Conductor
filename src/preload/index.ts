@@ -150,6 +150,8 @@ function on(channel: EventChannel, handler: ((payload: ChatConversation) => void
 export interface UsageSummaryQuery {
   range: UsageRange;
   workspaceId?: string;
+  /** Set only by a manual refresh so the main process probes CLIs first. */
+  refreshLimits?: boolean;
 }
 
 const conductor = {

@@ -637,10 +637,27 @@ describe('Usage summary quota refresh', () => {
       },
     });
 
-    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d' }));
+    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d', refreshLimits: true }));
 
     expect(order).toEqual(['refresh', 'summary']);
     expect(result.range).toBe('7d');
+  });
+
+  it('reads stored limits without probing CLIs on an ordinary load', async () => {
+    let refreshes = 0;
+    const built = buildRegistry({});
+    const h = launch({
+      ...built,
+      refreshUsageLimits: async () => {
+        refreshes += 1;
+      },
+      usageSummary: emptyUsageSummary,
+    });
+
+    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d' }));
+
+    expect(refreshes).toBe(0);
+    expect(result).toEqual(emptyUsageSummary());
   });
 
   it('returns the stored summary when quota refresh fails', async () => {
@@ -655,7 +672,7 @@ describe('Usage summary quota refresh', () => {
       usageSummary: emptyUsageSummary,
     });
 
-    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d' }));
+    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d', refreshLimits: true }));
 
     expect(refreshes).toBe(1);
     expect(result).toEqual(emptyUsageSummary());

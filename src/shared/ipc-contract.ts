@@ -52,6 +52,8 @@ export const WorkspaceDeleteRequest = z.object({
 export const UsageSummaryRequest = z.object({
   range: z.enum(['24h', '7d', '30d', '90d', 'all']),
   workspaceId: z.string().uuid().optional(),
+  /** Manual refreshes ask the main process to probe CLIs before reading. */
+  refreshLimits: z.boolean().optional(),
 });
 
 export const SettingsGetRequest = z.object({ key: z.string().min(1) });

@@ -24,6 +24,11 @@ export interface UsageLimitWindow {
   reportedAt?: string;
   /** Which source produced the sample (CLI/adapter id, e.g. 'codex'). */
   source?: string;
+  /**
+   * Optional provider label for the window, when a CLI splits one kind into
+   * separate quotas (for example Antigravity's model groups).
+   */
+  label?: string;
   /** Total length of the window in minutes, when the CLI reports it. */
   windowMinutes?: number;
 }

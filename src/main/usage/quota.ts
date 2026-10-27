@@ -6,12 +6,12 @@ import type { Store } from '../db/types';
 //
 // Adapters report quota alongside token usage: a `log` stream event whose data
 // is `{ quota: QuotaSample }`. The payload is deliberately generic so every
-// adapter (Codex today, Claude Code / OpenCode / Antigravity later) can report
-// the same two windows without teaching the recorder about its wire format:
+// adapter can report the same two windows without teaching the recorder about
+// its wire format:
 //
 //   { quota: { source?: 'codex', windows: [
 //       { kind: 'session', usedPercent: 0, resetsAt: 1730000000, windowMinutes: 300 },
-//       { kind: 'weekly', remainingPercent: 88, resetsAt: '2026-11-01T12:00:00.000Z' },
+//       { kind: 'weekly', remainingPercent: 88, resetsAt: '2026-11-01T12:00:00.000Z', label: 'Gemini Models' },
 //   ] } }
 //
 // A window carries at least one of `usedPercent` / `remainingPercent`; the
@@ -22,7 +22,9 @@ import type { Store } from '../db/types';
 // persisted, so prompts, message text, or secrets can never reach the table.
 //
 // The recorder upserts the latest snapshot per (adapter, window kind); older
-// samples for the same window are overwritten.
+// samples for the same window are overwritten. When one snapshot contains the
+// same kind twice, the most constrained window wins because the table has no
+// room for both.
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
@@ -40,6 +42,8 @@ export interface QuotaWindowSample {
   resetsAt?: string | number;
   /** Total length of the window in minutes. */
   windowMinutes?: number;
+  /** Optional provider label identifying the quota inside its window kind. */
+  label?: string;
 }
 
 /** The generic quota log payload contract. */
@@ -56,6 +60,7 @@ export interface NormalizedQuotaWindow {
   remainingPercent?: number;
   resetsAt?: string;
   windowMinutes?: number;
+  label?: string;
 }
 
 /** A validated quota sample. */
@@ -68,9 +73,17 @@ const INVALID = 'invalid' as const;
 const EXPIRED = 'expired' as const;
 const SOURCE = /^[\w.:-]{1,64}$/;
 const ISO_PREFIX = /^\d{4}-\d{2}-\d{2}T/;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 function safeSource(value: unknown): string | undefined {
   return typeof value === 'string' && SOURCE.test(value) ? value : undefined;
+}
+
+/** A short display label, `undefined` when absent or unusable. */
+function safeLabel(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const label = value.trim().replace(/\s+/g, ' ');
+  return label.length > 0 && label.length <= 60 && !CONTROL_CHARACTERS.test(label) ? label : undefined;
 }
 
 /** A finite 0–100 percentage, `undefined` when absent, or `INVALID`. */
@@ -124,13 +137,34 @@ function normalizeWindow(value: unknown, now: Date): NormalizedQuotaWindow | und
   const windowMinutes = durationMinutes(raw['windowMinutes']);
   if (windowMinutes === INVALID) return undefined;
 
+  const label = safeLabel(raw['label']);
+
   return {
     kind,
     usedPercent: used ?? 100 - remaining!,
     remainingPercent: remaining ?? 100 - used!,
     ...(resetsAt !== undefined ? { resetsAt } : {}),
     ...(windowMinutes !== undefined ? { windowMinutes } : {}),
+    ...(label !== undefined ? { label } : {}),
   };
+}
+
+/**
+ * Pick the window that better represents the remaining quota when a source
+ * reports one kind twice: less remaining first, then the earlier reset. The
+ * stored table has one row per kind, so this choice is deterministic rather
+ * than depending on provider ordering.
+ */
+function mostConstrained(
+  a: NormalizedQuotaWindow,
+  b: NormalizedQuotaWindow,
+): NormalizedQuotaWindow {
+  const remainingA = a.remainingPercent ?? 100;
+  const remainingB = b.remainingPercent ?? 100;
+  if (remainingA !== remainingB) return remainingA < remainingB ? a : b;
+  const resetA = a.resetsAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(a.resetsAt);
+  const resetB = b.resetsAt === undefined ? Number.POSITIVE_INFINITY : Date.parse(b.resetsAt);
+  return resetB < resetA ? b : a;
 }
 
 /**
@@ -150,7 +184,9 @@ export function normalizeQuotaSample(
   const byKind = new Map<UsageLimitWindowKind, NormalizedQuotaWindow>();
   for (const window of windows) {
     const normalized = normalizeWindow(window, now);
-    if (normalized !== undefined) byKind.set(normalized.kind, normalized);
+    if (normalized === undefined) continue;
+    const prior = byKind.get(normalized.kind);
+    byKind.set(normalized.kind, prior === undefined ? normalized : mostConstrained(prior, normalized));
   }
   if (byKind.size === 0) return undefined;
   return {
@@ -197,6 +233,92 @@ export function quotaSampleFromCodexRateLimits(
   );
 }
 
+/** Map an Antigravity `window` value onto the two supported window kinds. */
+function antigravityWindowKind(value: unknown): UsageLimitWindowKind | undefined {
+  if (typeof value !== 'string') return undefined;
+  const window = value.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+  if (window === 'weekly' || window === 'week') return 'weekly';
+  if (window === 'session' || window === 'rolling' || window === 'five hour' || window === '5 hour') return 'session';
+  return undefined;
+}
+
+/** Convert a 0–1 remaining fraction to a 0–100 percentage. */
+function percentFromFraction(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) return undefined;
+  return Math.round(value * 1000) / 10;
+}
+
+/**
+ * Map Antigravity's `/usage --output-format json` response onto the generic
+ * contract. Each model group has its own buckets; because only one window per
+ * kind can be stored, normalization keeps the most constrained group.
+ */
+export function quotaSampleFromAntigravityUsage(
+  value: unknown,
+  options: { now?: Date; source?: string } = {},
+): NormalizedQuotaSample | undefined {
+  const data = obj(obj(obj(value)?.['command'])?.['data']);
+  const groups = Array.isArray(data?.['groups']) ? data['groups'] : [];
+  const windows: QuotaWindowSample[] = [];
+  for (const groupValue of groups) {
+    const group = obj(groupValue);
+    if (group === null) continue;
+    const label = safeLabel(group['name']);
+    const buckets = Array.isArray(group['buckets']) ? group['buckets'] : [];
+    for (const bucketValue of buckets) {
+      const bucket = obj(bucketValue);
+      if (bucket === null) continue;
+      const kind = antigravityWindowKind(bucket['window']);
+      if (kind === undefined) continue;
+      const remainingPercent = percentFromFraction(
+        bucket['remaining_fraction'] ?? bucket['remainingFraction'],
+      );
+      if (remainingPercent === undefined) continue;
+      const sample: QuotaWindowSample = { kind, remainingPercent };
+      const resetsAt = bucket['reset_time'] ?? bucket['resetTime'] ?? bucket['resetsAt'] ?? bucket['resets_at'];
+      if (typeof resetsAt === 'string' || typeof resetsAt === 'number') sample.resetsAt = resetsAt;
+      if (label !== undefined) sample.label = label;
+      windows.push(sample);
+    }
+  }
+  return normalizeQuotaSample(
+    { source: options.source ?? 'antigravity', windows },
+    options,
+  );
+}
+
+/**
+ * Map the OpenCode Go usage endpoint onto the generic contract. `percent` is
+ * already consumed, unlike Antigravity's remaining fraction. The monthly window
+ * has no UI representation and is intentionally ignored.
+ */
+export function quotaSampleFromOpenCodeGoUsage(
+  value: unknown,
+  options: { now?: Date; source?: string } = {},
+): NormalizedQuotaSample | undefined {
+  const usage = obj(obj(value)?.['usage']);
+  if (usage === null) return undefined;
+
+  const windows: QuotaWindowSample[] = [];
+  const add = (key: 'rolling' | 'weekly', kind: UsageLimitWindowKind): void => {
+    const window = obj(usage[key]);
+    if (window === null) return;
+    const percent = window['percent'];
+    if (typeof percent !== 'number') return;
+    const sample: QuotaWindowSample = { kind, usedPercent: percent };
+    const resetsAt = window['resetsAt'] ?? window['resets_at'];
+    if (typeof resetsAt === 'string' || typeof resetsAt === 'number') sample.resetsAt = resetsAt;
+    windows.push(sample);
+  };
+  add('rolling', 'session');
+  add('weekly', 'weekly');
+
+  return normalizeQuotaSample(
+    { source: options.source ?? 'opencode', windows },
+    options,
+  );
+}
+
 /** The quota an adapter stream event reports, if any. */
 export function quotaFromEvent(ev: AdapterStreamEvent): NormalizedQuotaSample | undefined {
   if (ev.kind !== 'log') return undefined;
@@ -217,9 +339,10 @@ export function isQuotaWindowCurrent(
 }
 
 const UPSERT = `INSERT INTO agent_usage_limits
-  (adapter_id, window_kind, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (adapter_id, window_kind, label, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(adapter_id, window_kind) DO UPDATE SET
+    label = excluded.label,
     remaining_percent = excluded.remaining_percent,
     used_percent = excluded.used_percent,
     resets_at = excluded.resets_at,
@@ -250,6 +373,7 @@ export class QuotaRecorder {
       statement.run(
         adapterId,
         window.kind,
+        window.label ?? null,
         window.remainingPercent ?? null,
         window.usedPercent ?? null,
         window.resetsAt ?? null,

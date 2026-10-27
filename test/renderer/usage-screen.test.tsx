@@ -60,6 +60,21 @@ function attachedClients(): UsageClient[] {
       ...ZERO,
       limits: [],
     },
+    {
+      // Antigravity reports one weekly window per model group; the label keeps
+      // the stored "most constrained" group identifiable.
+      key: 'antigravity',
+      label: 'Antigravity',
+      ...ZERO,
+      limits: [{
+        kind: 'weekly',
+        remainingPercent: 0,
+        usedPercent: 100,
+        resetsAt: new Date(now + 5 * DAY).toISOString(),
+        source: 'antigravity',
+        label: 'Gemini Models',
+      }],
+    },
   ];
 }
 
@@ -202,6 +217,15 @@ describe('Usage Limits cards', () => {
     expect(session).toContain('aria-valuenow="0"');
     expect(session).toContain('aria-valuetext="0% left"');
     expect(html).toMatch(/Resets in 1h/);
+  });
+
+  it('shows the provider label for a multi-group quota window', () => {
+    const html = renderUsage({ view: 'limits' });
+    const bar = progressbarTag(html, 'Antigravity Gemini Models weekly limit');
+
+    expect(html).toContain('Gemini Models');
+    expect(bar).toContain('aria-valuenow="0"');
+    expect(bar).toContain('aria-valuetext="0% left"');
   });
 
   it('shows the not-reported state instead of a fabricated percentage', () => {

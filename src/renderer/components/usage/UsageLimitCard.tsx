@@ -51,13 +51,17 @@ export function UsageLimitCard({
   // reset times, so expired windows simply omit the countdown.
   const reset = resetCountdown(limit, now);
   const reported = percent !== undefined;
-  const ariaLabel = `${clientLabel} ${title.toLowerCase()} limit`;
+  const label = limit?.label;
+  const ariaLabel = `${clientLabel} ${label !== undefined ? `${label} ` : ''}${title.toLowerCase()} limit`;
 
   return (
     <div className={cn('flex flex-col gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5', className)}>
       <div className="flex items-center gap-2">
-        <p className="text-xs font-medium text-foreground">{title}</p>
-        <Badge tone={reported ? badgeTone(percent) : 'neutral'} className="ml-auto">
+        <p className="shrink-0 text-xs font-medium text-foreground">{title}</p>
+        {label !== undefined ? (
+          <span className="min-w-0 truncate text-3xs text-muted-foreground">{label}</span>
+        ) : null}
+        <Badge tone={reported ? badgeTone(percent) : 'neutral'} className="ml-auto shrink-0">
           {reported ? `${percent}% left` : 'Not reported'}
         </Badge>
       </div>

@@ -1225,6 +1225,17 @@ const migration024: Migration = {
   },
 };
 
+// Migration 25 — an optional label for a quota window. A provider can split a
+// single kind into separate quotas (Antigravity's model groups); the label
+// identifies which group the stored "most constrained" window came from.
+const migration025: Migration = {
+  version: 25,
+  name: 'agent_usage_limits_label',
+  up({ db }: Tx): void {
+    db.exec('ALTER TABLE agent_usage_limits ADD COLUMN label TEXT;');
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1251,4 +1262,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration022,
   migration023,
   migration024,
+  migration025,
 ];

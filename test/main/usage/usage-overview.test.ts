@@ -86,11 +86,11 @@ function insertUsage(store: SqliteStore, usage: UsageFixture): void {
 
 function insertLimit(
   store: SqliteStore,
-  limit: { adapterId: string; kind: 'session' | 'weekly'; remaining?: number; used?: number; resetsAt?: string },
+  limit: { adapterId: string; kind: 'session' | 'weekly'; remaining?: number; used?: number; resetsAt?: string; label?: string },
 ): void {
   store.db
     .prepare(`INSERT INTO agent_usage_limits (adapter_id, window_kind, remaining_percent, used_percent, resets_at,
-      reported_at, source, window_minutes, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`)
+      reported_at, source, window_minutes, label, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`)
     .run(
       limit.adapterId,
       limit.kind,
@@ -99,6 +99,7 @@ function insertLimit(
       limit.resetsAt ?? null,
       NOW.toISOString(),
       limit.adapterId,
+      limit.label ?? null,
       NOW.toISOString(),
     );
 }
@@ -279,7 +280,7 @@ describe('attached CLI clients', () => {
     const store = await seedSpread();
     insertLimit(store, { adapterId: 'codex', kind: 'session', remaining: 12, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString() });
     insertLimit(store, { adapterId: 'codex', kind: 'weekly', remaining: 88, resetsAt: new Date(NOW.getTime() - 1_000).toISOString() });
-    insertLimit(store, { adapterId: 'claude-code', kind: 'weekly', used: 30 });
+    insertLimit(store, { adapterId: 'claude-code', kind: 'weekly', used: 30, label: 'All models' });
     const adapters = [adapter('codex', 'Codex'), adapter('claude-code', 'Claude Code'), adapter('antigravity', 'Antigravity')];
 
     const summary = usageSummary(store, { range: 'all' }, AGENT_NAME, { adapters });
@@ -290,7 +291,7 @@ describe('attached CLI clients', () => {
       { kind: 'session', remainingPercent: 12, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString(), reportedAt: NOW.toISOString(), source: 'codex' },
     ]);
     expect(byId.get('claude-code')?.limits).toEqual([
-      { kind: 'weekly', usedPercent: 30, reportedAt: NOW.toISOString(), source: 'claude-code' },
+      { kind: 'weekly', usedPercent: 30, reportedAt: NOW.toISOString(), source: 'claude-code', label: 'All models' },
     ]);
     expect(byId.get('antigravity')?.limits).toEqual([]);
   });
