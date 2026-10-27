@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SqliteStore } from '@main/db/store';
 import {
   isQuotaWindowCurrent,
+  nextUtcMidnight,
   normalizeQuotaSample,
   quotaFromEvent,
   quotaSampleFromAntigravityUsage,
   quotaSampleFromCodexRateLimits,
+  quotaSampleFromOpenCodeFreeTier,
   quotaSampleFromOpenCodeGoUsage,
   QuotaRecorder,
 } from '@main/usage/quota';
@@ -219,6 +221,70 @@ describe('OpenCode Go usage mapping', () => {
   });
 });
 
+describe('OpenCode free-tier mapping', () => {
+  it('maps recent free-model usage to an unreported daily window with the next UTC midnight', () => {
+    const sample = quotaSampleFromOpenCodeFreeTier({ freeModelsUsed: true }, { now: NOW });
+
+    expect(sample).toEqual({
+      source: 'opencode',
+      windows: [{
+        kind: 'daily',
+        resetsAt: '2026-10-28T00:00:00.000Z',
+        windowMinutes: 1440,
+        label: 'Free models',
+      }],
+    });
+    // A daily window without a reported percentage must not invent one.
+    expect(sample?.windows[0]?.usedPercent).toBeUndefined();
+    expect(sample?.windows[0]?.remainingPercent).toBeUndefined();
+  });
+
+  it('reports an observed block as fully consumed until its retry time', () => {
+    const blockedUntil = at(6 * HOUR);
+    const sample = quotaSampleFromOpenCodeFreeTier(
+      { freeModelsUsed: true, blockedUntil },
+      { now: NOW },
+    );
+
+    expect(sample?.windows).toEqual([{
+      kind: 'daily',
+      usedPercent: 100,
+      remainingPercent: 0,
+      resetsAt: blockedUntil,
+      windowMinutes: 1440,
+      label: 'Free models',
+    }]);
+  });
+
+  it('requires recent free-model usage or a current block', () => {
+    expect(quotaSampleFromOpenCodeFreeTier({}, { now: NOW })).toBeUndefined();
+    expect(quotaSampleFromOpenCodeFreeTier(
+      { freeModelsUsed: false, blockedUntil: at(-HOUR) },
+      { now: NOW },
+    )).toBeUndefined();
+    expect(quotaSampleFromOpenCodeFreeTier({ blockedUntil: 'not a date' }, { now: NOW })).toBeUndefined();
+  });
+
+  it('treats an elapsed retry time as unblocked and keeps the daily window', () => {
+    const sample = quotaSampleFromOpenCodeFreeTier(
+      { freeModelsUsed: true, blockedUntil: at(-HOUR) },
+      { now: NOW },
+    );
+
+    expect(sample?.windows[0]).toMatchObject({
+      kind: 'daily',
+      resetsAt: '2026-10-28T00:00:00.000Z',
+    });
+    expect(sample?.windows[0]?.usedPercent).toBeUndefined();
+    expect(sample?.windows[0]?.remainingPercent).toBeUndefined();
+  });
+
+  it('resets at midnight UTC across a month and year boundary', () => {
+    expect(nextUtcMidnight(NOW).toISOString()).toBe('2026-10-28T00:00:00.000Z');
+    expect(nextUtcMidnight(new Date('2026-12-31T23:59:59.999Z')).toISOString()).toBe('2027-01-01T00:00:00.000Z');
+  });
+});
+
 describe('percentage validation', () => {
   it.each([
     ['negative used percent', { kind: 'session', usedPercent: -1 }],
@@ -258,6 +324,15 @@ describe('percentage validation', () => {
     });
     expect(normalizeQuotaSample({ windows: [{ kind: 'session', remainingPercent: 0 }] }, { now: NOW })).toEqual({
       windows: [{ kind: 'session', remainingPercent: 0, usedPercent: 100 }],
+    });
+  });
+
+  it('keeps a known daily window that reports a reset but no percentage', () => {
+    expect(normalizeQuotaSample(
+      { windows: [{ kind: 'daily', resetsAt: at(DAY), label: 'Free models' }] },
+      { now: NOW },
+    )).toEqual({
+      windows: [{ kind: 'daily', resetsAt: at(DAY), label: 'Free models' }],
     });
   });
 

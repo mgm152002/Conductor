@@ -1,5 +1,8 @@
 import type { SVGProps } from 'react';
-import type { UsageLimitWindow, UsageRange, UsageSummary } from '@shared/usage';
+import type {
+  UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageSummary,
+} from '@shared/usage';
+import { cn } from '../../lib/cn';
 import { clientLabel, compactNumber, formatCost } from '../../lib/usage-format';
 import {
   ActivityIcon,
@@ -14,14 +17,17 @@ import { UsageLimitCard } from './UsageLimitCard';
 
 // The Limits view (Requirements 2.3, 2.4, 4.4). Every attached CLI in
 // `summary.clients` gets a card with its Session and Weekly windows, even when
-// it recorded no sessions or does not report limits at all. Windows are looked
-// up by kind so a CLI may report either one independently; the missing one
-// renders the explicit not-reported state.
+// it recorded no sessions or does not report limits at all. A Daily window is
+// added only when the CLI reports one (OpenCode's free tier), so the common
+// two-window layout stays uncluttered. Windows are looked up by kind so a CLI
+// may report any one independently; the missing one renders the explicit
+// not-reported state.
 //
-// Quota windows are rare: Codex, Antigravity, and OpenCode Go report them;
-// most other CLIs only report tokens. The view therefore leads with the usage
-// that *is* available (a bar per CLI) and calls out why some windows are empty,
-// rather than presenting a wall of identical "Not reported" cards.
+// Quota windows are rare: Codex, Antigravity, OpenCode Go, and OpenCode's free
+// tier report them; most other CLIs only report tokens. The view therefore
+// leads with the usage that *is* available (a bar per CLI) and calls out why
+// some windows are empty, rather than presenting a wall of identical
+// "Not reported" cards.
 
 type CliIconComponent = (props: SVGProps<SVGSVGElement> & { size?: number }) => React.JSX.Element;
 
@@ -38,7 +44,7 @@ function CliIcon({ id }: { id: string }): React.JSX.Element {
   return <Icon size={13} className="text-muted-foreground" aria-hidden="true" />;
 }
 
-function findLimit(limits: UsageLimitWindow[], kind: 'session' | 'weekly'): UsageLimitWindow | undefined {
+function findLimit(limits: UsageLimitWindow[], kind: UsageLimitWindowKind): UsageLimitWindow | undefined {
   return limits.find((limit) => limit.kind === kind);
 }
 
@@ -65,7 +71,7 @@ export function UsageLimitsView({
     return (
       <EmptyState
         title="No attached CLIs"
-        description="Attach an agent CLI to see its session and weekly limits here."
+        description="Attach an agent CLI to see its session, daily, and weekly limits here."
       />
     );
   }
@@ -92,8 +98,9 @@ export function UsageLimitsView({
       {reporting === 0 ? (
         <Alert tone="info">
           No CLI has reported a quota window yet. Codex reports limits after a Codex session starts;
-          Antigravity and OpenCode Go are checked in the background when signed in. Other CLIs do not
-          expose session or weekly quota data.
+          Antigravity reports its Gemini model groups; OpenCode reports its free-model daily window,
+          and adds Go session and weekly windows when an active Go subscription is connected. Other
+          CLIs do not expose quota data.
         </Alert>
       ) : null}
 
@@ -111,6 +118,7 @@ export function UsageLimitsView({
           {summary.clients.map((client) => {
             const label = clientLabel(client);
             const hasLimits = client.limits.length > 0;
+            const daily = findLimit(client.limits, 'daily');
             return (
               <article
                 key={client.key}
@@ -126,7 +134,15 @@ export function UsageLimitsView({
                   {hasLimits ? null : <Badge>No limits</Badge>}
                 </header>
 
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className={cn('grid gap-2', daily !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+                  {daily !== undefined ? (
+                    <UsageLimitCard
+                      title="Daily"
+                      clientLabel={label}
+                      limit={daily}
+                      now={now}
+                    />
+                  ) : null}
                   <UsageLimitCard
                     title="Session"
                     clientLabel={label}

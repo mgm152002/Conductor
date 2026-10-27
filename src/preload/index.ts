@@ -175,8 +175,8 @@ const conductor = {
   usage: {
     /**
      * Extended usage overview for the selected range. `UsageSummary.clients`
-     * carries every attached CLI and its session/weekly `limits`; the legacy
-     * totals and breakdowns stay on the same response.
+     * carries every attached CLI and its session, daily, and weekly `limits`;
+     * the legacy totals and breakdowns stay on the same response.
      */
     summary: (input: UsageSummaryQuery): Promise<UsageSummary> =>
       invoke<UsageSummary>('usage.summary', input),

@@ -1,6 +1,8 @@
 import type { AdapterStreamEvent } from '@shared/adapter';
 import type { AdapterRecord } from '@shared/domain';
-import type { UsageClient, UsageLimitWindow, UsageRange, UsageRow, UsageSummary } from '@shared/usage';
+import type {
+  UsageClient, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
+} from '@shared/usage';
 import type { Store } from '../db/types';
 import { isQuotaWindowCurrent } from './quota';
 
@@ -123,9 +125,13 @@ interface LimitRow {
   label: string | null;
 }
 
+function limitKind(value: string): UsageLimitWindowKind {
+  return value === 'weekly' ? 'weekly' : value === 'daily' ? 'daily' : 'session';
+}
+
 function toLimitWindow(row: LimitRow): UsageLimitWindow {
   return {
-    kind: row.window_kind === 'weekly' ? 'weekly' : 'session',
+    kind: limitKind(row.window_kind),
     ...(row.remaining_percent !== null ? { remainingPercent: row.remaining_percent } : {}),
     ...(row.used_percent !== null ? { usedPercent: row.used_percent } : {}),
     ...(row.resets_at !== null ? { resetsAt: row.resets_at } : {}),
@@ -172,7 +178,7 @@ export function usageSummary(
   const limitsByAdapter = new Map<string, UsageLimitWindow[]>();
   const limitRows = store.db.prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at,
     reported_at, source, window_minutes, label FROM agent_usage_limits
-    ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 ELSE 1 END`).all() as LimitRow[];
+    ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 WHEN 'daily' THEN 1 ELSE 2 END`).all() as LimitRow[];
   const now = new Date();
   for (const row of limitRows) {
     const window = toLimitWindow(row);

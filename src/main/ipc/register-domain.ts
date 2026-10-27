@@ -96,7 +96,7 @@ export interface DomainHandlerDeps {
   /**
    * Token usage overview. The extended summary keeps the legacy totals and
    * breakdowns and adds `clients`: every attached CLI, including zero-usage
-   * ones, with its session/weekly limit windows under `limits`.
+   * ones, with its session, daily, and weekly limit windows under `limits`.
    */
   usageSummary?: (input: UsageSummaryQuery) => UsageSummary;
   /** Refresh provider quota snapshots before serving an explicit usage read. */

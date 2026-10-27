@@ -11,6 +11,7 @@ import { USAGE_RANGES } from '../../src/renderer/lib/usage-format';
 // loading/error flags, a view, and a range, so no preload bridge is needed.
 
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * 60 * MINUTE;
 
 const ZERO = {
@@ -73,6 +74,21 @@ function attachedClients(): UsageClient[] {
         resetsAt: new Date(now + 5 * DAY).toISOString(),
         source: 'antigravity',
         label: 'Gemini Models',
+      }],
+    },
+    {
+      // OpenCode's free tier publishes a daily window reset at midnight UTC but
+      // no percentage until the limit is actually hit.
+      key: 'opencode',
+      label: 'OpenCode',
+      ...ZERO,
+      sessions: 51,
+      totalTokens: 115_500_000,
+      limits: [{
+        kind: 'daily',
+        resetsAt: new Date(now + 12 * HOUR + 30_000).toISOString(),
+        source: 'opencode',
+        label: 'Free models',
       }],
     },
   ];
@@ -242,6 +258,32 @@ describe('Usage Limits cards', () => {
       expect(bar).toContain('aria-valuetext="Not reported by this CLI"');
       expect(bar).not.toContain('aria-valuenow');
     }
+  });
+
+  it('renders a known daily window without fabricating a percentage', () => {
+    const html = renderUsage({ view: 'limits' });
+    const card = /<article aria-label="OpenCode limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
+    const bar = progressbarTag(card, 'OpenCode Free models daily limit');
+
+    expect(card).toContain('>Daily<');
+    expect(card).toContain('Free models');
+    expect(card).toContain('Remaining percentage not reported');
+    expect(card).toMatch(/Resets in 12h/);
+    expect(card).not.toContain('% left');
+    expect(card).toContain('sm:grid-cols-3');
+    expect(bar).toContain('aria-valuemin="0"');
+    expect(bar).toContain('aria-valuemax="100"');
+    expect(bar).toContain('aria-valuetext="Remaining percentage not reported"');
+    expect(bar).not.toContain('aria-valuenow');
+  });
+
+  it('keeps the two-window layout for a CLI without a daily window', () => {
+    const html = renderUsage({ view: 'limits' });
+    const card = /<article aria-label="Codex limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
+
+    expect(card).toContain('sm:grid-cols-2');
+    expect(card).not.toContain('sm:grid-cols-3');
+    expect(card).not.toContain('>Daily<');
   });
 });
 

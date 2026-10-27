@@ -86,7 +86,7 @@ function insertUsage(store: SqliteStore, usage: UsageFixture): void {
 
 function insertLimit(
   store: SqliteStore,
-  limit: { adapterId: string; kind: 'session' | 'weekly'; remaining?: number; used?: number; resetsAt?: string; label?: string },
+  limit: { adapterId: string; kind: 'session' | 'daily' | 'weekly'; remaining?: number; used?: number; resetsAt?: string; label?: string },
 ): void {
   store.db
     .prepare(`INSERT INTO agent_usage_limits (adapter_id, window_kind, remaining_percent, used_percent, resets_at,
@@ -278,9 +278,11 @@ describe('attached CLI clients', () => {
 
   it('attaches only current limit windows and leaves unreported CLIs empty', async () => {
     const store = await seedSpread();
+    const dailyReset = new Date(NOW.getTime() + 6 * 3_600_000).toISOString();
     insertLimit(store, { adapterId: 'codex', kind: 'session', remaining: 12, resetsAt: new Date(NOW.getTime() + 3_600_000).toISOString() });
     insertLimit(store, { adapterId: 'codex', kind: 'weekly', remaining: 88, resetsAt: new Date(NOW.getTime() - 1_000).toISOString() });
     insertLimit(store, { adapterId: 'claude-code', kind: 'weekly', used: 30, label: 'All models' });
+    insertLimit(store, { adapterId: 'opencode', kind: 'daily', resetsAt: dailyReset });
     const adapters = [adapter('codex', 'Codex'), adapter('claude-code', 'Claude Code'), adapter('antigravity', 'Antigravity')];
 
     const summary = usageSummary(store, { range: 'all' }, AGENT_NAME, { adapters });
@@ -293,7 +295,25 @@ describe('attached CLI clients', () => {
     expect(byId.get('claude-code')?.limits).toEqual([
       { kind: 'weekly', usedPercent: 30, reportedAt: NOW.toISOString(), source: 'claude-code', label: 'All models' },
     ]);
+    // A known window with no reported percentage keeps its reset and neither
+    // percentage, rather than inventing 0 or 100.
+    expect(byId.get('opencode')?.limits).toEqual([
+      { kind: 'daily', resetsAt: dailyReset, reportedAt: NOW.toISOString(), source: 'opencode' },
+    ]);
     expect(byId.get('antigravity')?.limits).toEqual([]);
+  });
+
+  it('orders a client’s current limits as session, daily, then weekly', async () => {
+    const store = await seedSpread();
+    const reset = new Date(NOW.getTime() + 3_600_000).toISOString();
+    insertLimit(store, { adapterId: 'opencode', kind: 'weekly', remaining: 50, resetsAt: reset });
+    insertLimit(store, { adapterId: 'opencode', kind: 'daily', remaining: 25, resetsAt: reset });
+    insertLimit(store, { adapterId: 'opencode', kind: 'session', remaining: 75, resetsAt: reset });
+
+    const summary = usageSummary(store, { range: 'all' }, AGENT_NAME);
+
+    expect(summary.clients.find((client) => client.key === 'opencode')?.limits.map((limit) => limit.kind))
+      .toEqual(['session', 'daily', 'weekly']);
   });
 });
 

@@ -1236,6 +1236,47 @@ const migration025: Migration = {
   },
 };
 
+// Migration 26 — allow the daily window kind used by OpenCode's free tier.
+// SQLite cannot alter a CHECK constraint in place, so rebuild the table and
+// copy every existing snapshot. The label column arrives in migration 25.
+const migration026: Migration = {
+  version: 26,
+  name: 'agent_usage_limits_daily',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_usage_limits_next (
+        adapter_id        TEXT NOT NULL,
+        window_kind       TEXT NOT NULL
+                            CHECK (window_kind IN ('session', 'daily', 'weekly')),
+        remaining_percent REAL
+                            CHECK (remaining_percent IS NULL
+                              OR (remaining_percent >= 0 AND remaining_percent <= 100)),
+        used_percent      REAL
+                            CHECK (used_percent IS NULL
+                              OR (used_percent >= 0 AND used_percent <= 100)),
+        resets_at         TEXT,
+        reported_at       TEXT NOT NULL,
+        source            TEXT,
+        window_minutes    INTEGER
+                            CHECK (window_minutes IS NULL OR window_minutes >= 0),
+        updated_at        TEXT NOT NULL,
+        label             TEXT,
+        PRIMARY KEY (adapter_id, window_kind)
+      );
+      INSERT INTO agent_usage_limits_next
+        (adapter_id, window_kind, remaining_percent, used_percent, resets_at,
+         reported_at, source, window_minutes, updated_at, label)
+        SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at,
+               reported_at, source, window_minutes, updated_at, label
+        FROM agent_usage_limits;
+      DROP TABLE agent_usage_limits;
+      ALTER TABLE agent_usage_limits_next RENAME TO agent_usage_limits;
+      CREATE INDEX idx_agent_usage_limits_reported
+        ON agent_usage_limits (reported_at);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1263,4 +1304,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration023,
   migration024,
   migration025,
+  migration026,
 ];

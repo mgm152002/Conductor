@@ -6,11 +6,12 @@ import type { Store } from '../db/types';
 //
 // Adapters report quota alongside token usage: a `log` stream event whose data
 // is `{ quota: QuotaSample }`. The payload is deliberately generic so every
-// adapter can report the same two windows without teaching the recorder about
-// its wire format:
+// adapter can report the same windows without teaching the recorder about its
+// wire format:
 //
 //   { quota: { source?: 'codex', windows: [
 //       { kind: 'session', usedPercent: 0, resetsAt: 1730000000, windowMinutes: 300 },
+//       { kind: 'daily', resetsAt: '2026-11-01T00:00:00.000Z', label: 'Free models' },
 //       { kind: 'weekly', remainingPercent: 88, resetsAt: '2026-11-01T12:00:00.000Z', label: 'Gemini Models' },
 //   ] } }
 //
@@ -29,7 +30,7 @@ import type { Store } from '../db/types';
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
 
-export const QUOTA_WINDOW_KINDS: readonly UsageLimitWindowKind[] = ['session', 'weekly'];
+export const QUOTA_WINDOW_KINDS: readonly UsageLimitWindowKind[] = ['session', 'daily', 'weekly'];
 
 /** One window in a generic quota log payload. */
 export interface QuotaWindowSample {
@@ -122,17 +123,20 @@ function normalizeWindow(value: unknown, now: Date): NormalizedQuotaWindow | und
   const raw = obj(value);
   if (raw === null) return undefined;
   const kind = raw['kind'];
-  if (kind !== 'session' && kind !== 'weekly') return undefined;
+  if (kind !== 'session' && kind !== 'daily' && kind !== 'weekly') return undefined;
 
   const used = percentage(raw['usedPercent']);
   if (used === INVALID) return undefined;
   const remaining = percentage(raw['remainingPercent']);
   if (remaining === INVALID) return undefined;
-  // A window without any percentage has nothing to show; do not invent one.
-  if (used === undefined && remaining === undefined) return undefined;
 
   const resetsAt = resetTime(raw['resetsAt'], now);
   if (resetsAt === INVALID || resetsAt === EXPIRED) return undefined;
+
+  // A window without a percentage is still useful when it has a reset time:
+  // it says the quota exists but the CLI does not report how much is left.
+  // Never invent a percentage for it.
+  if (used === undefined && remaining === undefined && resetsAt === undefined) return undefined;
 
   const windowMinutes = durationMinutes(raw['windowMinutes']);
   if (windowMinutes === INVALID) return undefined;
@@ -141,8 +145,8 @@ function normalizeWindow(value: unknown, now: Date): NormalizedQuotaWindow | und
 
   return {
     kind,
-    usedPercent: used ?? 100 - remaining!,
-    remainingPercent: remaining ?? 100 - used!,
+    ...(used !== undefined ? { usedPercent: used } : remaining !== undefined ? { usedPercent: 100 - remaining } : {}),
+    ...(remaining !== undefined ? { remainingPercent: remaining } : used !== undefined ? { remainingPercent: 100 - used } : {}),
     ...(resetsAt !== undefined ? { resetsAt } : {}),
     ...(windowMinutes !== undefined ? { windowMinutes } : {}),
     ...(label !== undefined ? { label } : {}),
@@ -317,6 +321,51 @@ export function quotaSampleFromOpenCodeGoUsage(
     { source: options.source ?? 'opencode', windows },
     options,
   );
+}
+
+/** A locally observed OpenCode free-tier state. */
+export interface OpenCodeFreeTierState {
+  /** Whether a free model was used in the recent daily window. */
+  freeModelsUsed?: boolean;
+  /** When an observed free-limit block ends, if it is still in the future. */
+  blockedUntil?: Date | string | number;
+}
+
+/** The next midnight UTC, OpenCode's reset boundary for free usage. */
+export function nextUtcMidnight(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+}
+
+/**
+ * Map OpenCode's free tier onto a daily window.
+ *
+ * OpenCode does not publish a free-tier percentage. It only returns a 429 with
+ * a retry time once the daily limit is reached, so `usedPercent: 100` is set
+ * only for an observed block. An unblocked day still gets the window and its
+ * midnight-UTC reset, with the percentage deliberately unreported.
+ */
+export function quotaSampleFromOpenCodeFreeTier(
+  value: OpenCodeFreeTierState,
+  options: { now?: Date; source?: string } = {},
+): NormalizedQuotaSample | undefined {
+  const now = options.now ?? new Date();
+  const blockedUntil = value.blockedUntil === undefined ? undefined : new Date(value.blockedUntil);
+  const blocked = blockedUntil !== undefined
+    && Number.isFinite(blockedUntil.getTime())
+    && blockedUntil.getTime() > now.getTime();
+  if (!blocked && value.freeModelsUsed !== true) return undefined;
+
+  const reset = blocked ? blockedUntil! : nextUtcMidnight(now);
+  return normalizeQuotaSample({
+    source: options.source ?? 'opencode',
+    windows: [{
+      kind: 'daily',
+      ...(blocked ? { usedPercent: 100 } : {}),
+      resetsAt: reset.getTime(),
+      windowMinutes: 1440,
+      label: 'Free models',
+    }],
+  }, options);
 }
 
 /** The quota an adapter stream event reports, if any. */

@@ -1,6 +1,10 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliEnvironment } from '@main/adapters/local-cli-adapter';
 import { SqliteStore } from '@main/db/store';
@@ -129,10 +133,12 @@ function fakeEnv(child?: FakeCodexChild | (() => FakeCodexChild), available = tr
 }
 
 const stores: SqliteStore[] = [];
+const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.useRealTimers();
   for (const store of stores.splice(0)) store.close();
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 async function storeWithQuota(now: () => Date = () => new Date()): Promise<{ store: SqliteStore; quota: QuotaRecorder }> {
@@ -153,6 +159,81 @@ function response(body: unknown, status = 200): Awaited<ReturnType<QuotaFetch>> 
     status,
     json: async () => body,
   };
+}
+
+function storedDailyWindows(store: SqliteStore): Array<Record<string, unknown>> {
+  return store.db.prepare(`SELECT window_kind, remaining_percent, used_percent, resets_at, source, label, window_minutes
+    FROM agent_usage_limits WHERE adapter_id = 'opencode' AND window_kind = 'daily'`)
+    .all() as Array<Record<string, unknown>>;
+}
+
+interface OpenCodeDbSeed {
+  freeModelUpdatedAt?: number;
+  freeModelId?: string;
+  freeModelProvider?: string;
+  error?: { createdAt: number; completedAt?: number; retryAfterMs?: number };
+}
+
+/** Build the two OpenCode tables the free-tier probe reads. */
+function openCodeDb(seed: OpenCodeDbSeed = {}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'conductor-opencode-'));
+  tempDirs.push(dir);
+  const dbPath = join(dir, 'opencode.db');
+  const db = new Database(dbPath);
+  try {
+    db.exec(`
+      CREATE TABLE session_v2 (time_updated INTEGER NOT NULL, model TEXT);
+      CREATE TABLE session_message (type TEXT NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL);
+    `);
+    if (seed.freeModelUpdatedAt !== undefined) {
+      db.prepare('INSERT INTO session_v2 (time_updated, model) VALUES (?, ?)').run(
+        seed.freeModelUpdatedAt,
+        JSON.stringify({
+          providerID: seed.freeModelProvider ?? 'opencode',
+          id: seed.freeModelId ?? 'deepseek-v4.1-flash-free',
+        }),
+      );
+    }
+    if (seed.error !== undefined) {
+      db.prepare('INSERT INTO session_message (type, time_created, data) VALUES (?, ?, ?)').run(
+        'assistant',
+        seed.error.createdAt,
+        JSON.stringify({
+          time: {
+            created: seed.error.createdAt,
+            completed: seed.error.completedAt ?? seed.error.createdAt,
+          },
+          error: {
+            type: 'provider.free-limit',
+            ...(seed.error.retryAfterMs !== undefined ? { retryAfterMs: seed.error.retryAfterMs } : {}),
+            // Free text is never read; keep it here so the test proves that.
+            message: 'Free usage limit reached',
+          },
+        }),
+      );
+    }
+  } finally {
+    db.close();
+  }
+  return dbPath;
+}
+
+function missingOpenCodeDb(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'conductor-opencode-missing-'));
+  tempDirs.push(dir);
+  return join(dir, 'missing', 'opencode.db');
+}
+
+/** The free-tier probe only needs an OpenCode executable on PATH. */
+function freeTierService(quota: QuotaRecorder, dbPath: string): QuotaPollingService {
+  return new QuotaPollingService({
+    quota,
+    env: fakeMultiEnv({ opencode: new FakeCliChild({ stdout: '[]' }) }),
+    openCodeApiKey: async () => undefined,
+    openCodeDbPath: dbPath,
+    timeoutMs: 1_000,
+    now: () => NOW,
+  });
 }
 
 describe('QuotaPollingService Codex probe', () => {
@@ -272,7 +353,7 @@ describe('QuotaPollingService CLI probes', () => {
       });
     };
     const service = new QuotaPollingService({
-      quota, env, fetch: fetchImpl, timeoutMs: 1_000, now: () => NOW,
+      quota, env, fetch: fetchImpl, openCodeDbPath: null, timeoutMs: 1_000, now: () => NOW,
     });
 
     await service.refresh();
@@ -313,7 +394,7 @@ describe('QuotaPollingService CLI probes', () => {
     const auth = new FakeCliChild({ stdout: JSON.stringify([{ integrationID: 'opencode', value: { type: 'key', key: 'other' } }]) });
     const fetchImpl = vi.fn<QuotaFetch>();
     const service = new QuotaPollingService({
-      quota, env: fakeMultiEnv({ opencode: auth }), fetch: fetchImpl, timeoutMs: 1_000, now: () => NOW,
+      quota, env: fakeMultiEnv({ opencode: auth }), fetch: fetchImpl, openCodeDbPath: null, timeoutMs: 1_000, now: () => NOW,
     });
 
     await service.refresh();
@@ -335,6 +416,97 @@ describe('QuotaPollingService CLI probes', () => {
     await refresh;
 
     expect(agy.signals).toContain('SIGTERM');
+  });
+});
+
+describe('QuotaPollingService OpenCode free-tier probe', () => {
+  it.each(['deepseek-v4.1-flash-free', 'big-pickle'])(
+    'records an unreported daily window from recent %s usage',
+    async (freeModelId) => {
+      const { store, quota } = await storeWithQuota(() => NOW);
+      const dbPath = openCodeDb({ freeModelUpdatedAt: NOW.getTime() - HOUR, freeModelId });
+
+      await freeTierService(quota, dbPath).refresh();
+
+      expect(storedDailyWindows(store)).toEqual([{
+        window_kind: 'daily',
+        remaining_percent: null,
+        used_percent: null,
+        resets_at: '2026-10-28T00:00:00.000Z',
+        source: 'opencode',
+        label: 'Free models',
+        window_minutes: 1440,
+      }]);
+    },
+  );
+
+  it('records an observed block as exhausted until its retry time', async () => {
+    const { store, quota } = await storeWithQuota(() => NOW);
+    const blockedUntil = NOW.getTime() + 4 * HOUR;
+    const completedAt = blockedUntil - 6 * HOUR;
+    const dbPath = openCodeDb({
+      freeModelUpdatedAt: completedAt,
+      error: { createdAt: completedAt, completedAt, retryAfterMs: 6 * HOUR },
+    });
+
+    await freeTierService(quota, dbPath).refresh();
+
+    expect(storedDailyWindows(store)).toEqual([{
+      window_kind: 'daily',
+      remaining_percent: 0,
+      used_percent: 100,
+      resets_at: new Date(blockedUntil).toISOString(),
+      source: 'opencode',
+      label: 'Free models',
+      window_minutes: 1440,
+    }]);
+  });
+
+  it('does not keep reporting exhaustion after the retry time has elapsed', async () => {
+    const { store, quota } = await storeWithQuota(() => NOW);
+    const completedAt = NOW.getTime() - 10 * HOUR;
+    const dbPath = openCodeDb({
+      freeModelUpdatedAt: NOW.getTime() - HOUR,
+      error: { createdAt: completedAt, completedAt, retryAfterMs: HOUR },
+    });
+
+    await freeTierService(quota, dbPath).refresh();
+
+    expect(storedDailyWindows(store)).toMatchObject([{
+      window_kind: 'daily',
+      remaining_percent: null,
+      used_percent: null,
+      resets_at: '2026-10-28T00:00:00.000Z',
+    }]);
+  });
+
+  it('ignores old free usage, paid models, and missing databases', async () => {
+    const { store, quota } = await storeWithQuota(() => NOW);
+
+    await freeTierService(quota, openCodeDb({ freeModelUpdatedAt: NOW.getTime() - 2 * DAY })).refresh();
+    await freeTierService(quota, openCodeDb({
+      freeModelUpdatedAt: NOW.getTime() - HOUR,
+      freeModelProvider: 'opencode-go',
+      freeModelId: 'deepseek-v4.1-flash',
+    })).refresh();
+    await freeTierService(quota, missingOpenCodeDb()).refresh();
+
+    expect(storedDailyWindows(store)).toEqual([]);
+  });
+
+  it('does not read the database without an OpenCode CLI', async () => {
+    const { store, quota } = await storeWithQuota(() => NOW);
+    const service = new QuotaPollingService({
+      quota,
+      env: fakeMultiEnv({}),
+      openCodeDbPath: openCodeDb({ freeModelUpdatedAt: NOW.getTime() - HOUR }),
+      timeoutMs: 1_000,
+      now: () => NOW,
+    });
+
+    await service.refresh();
+
+    expect(storedDailyWindows(store)).toEqual([]);
   });
 });
 
@@ -421,6 +593,7 @@ describe('QuotaPollingService lifecycle', () => {
     const service = new QuotaPollingService({
       quota,
       env: fakeMultiEnv({ codex: () => codex, agy, opencode: auth }),
+      openCodeDbPath: null,
       timeoutMs: 60_000,
     });
 

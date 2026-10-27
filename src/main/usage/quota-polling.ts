@@ -1,13 +1,18 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import Database from 'better-sqlite3';
 import {
   defaultCliEnvironment,
   discoverOnPath,
   type CliEnvironment,
 } from '../adapters/local-cli-adapter';
 import {
+  nextUtcMidnight,
   quotaSampleFromAntigravityUsage,
   quotaSampleFromCodexRateLimits,
+  quotaSampleFromOpenCodeFreeTier,
   quotaSampleFromOpenCodeGoUsage,
   type NormalizedQuotaSample,
   type QuotaRecorder,
@@ -21,6 +26,9 @@ const DEFAULT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 1_000_000;
 const OPENCODE_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
+const OPENCODE_DB_FILE = 'opencode.db';
+const OPENCODE_FREE_MODEL_SUFFIX = '-free';
+const DAY_MS = 86_400_000;
 
 const obj = (value: unknown): Json | null => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -50,6 +58,11 @@ export interface QuotaPollingServiceOptions {
   fetch?: QuotaFetch;
   /** Resolve the OpenCode Go API key; defaults to `opencode auth export`. */
   openCodeApiKey?: () => Promise<string | undefined>;
+  /**
+   * Path to OpenCode's local database, used for the free-tier daily window.
+   * `null` disables that probe; defaults to the XDG data directory.
+   */
+  openCodeDbPath?: string | null;
   now?: () => Date;
 }
 
@@ -73,6 +86,99 @@ function openCodeGoKey(value: unknown): string | undefined {
   return undefined;
 }
 
+/** OpenCode's data directory, following the platform conventions it uses. */
+function defaultOpenCodeDbPath(): string {
+  const local = process.env['LOCALAPPDATA'];
+  const dataHome = process.env['XDG_DATA_HOME'];
+  const base = process.platform === 'win32' && typeof local === 'string' && local.length > 0
+    ? local
+    : typeof dataHome === 'string' && dataHome.length > 0
+      ? dataHome
+      : join(homedir(), '.local', 'share');
+  return join(base, 'opencode', OPENCODE_DB_FILE);
+}
+
+interface OpenCodeFreeTierRead {
+  freeModelsUsed: boolean;
+  blockedUntil?: Date;
+}
+
+/**
+ * Read the free-tier state from OpenCode's own database.
+ *
+ * OpenCode does not expose a free-tier usage endpoint. When its daily limit is
+ * reached it records `provider.free-limit` with a retry time on the assistant
+ * message; that is the only real quota signal available. Only the error type,
+ * timestamps, and retry duration are read — never prompts or message text.
+ * A missing, locked, or incompatible database is simply an unavailable source.
+ */
+function readOpenCodeFreeTier(dbPath: string, now: Date): OpenCodeFreeTierRead | undefined {
+  let db: Database.Database | undefined;
+  try {
+    // Read-only and short-busy-timeout: this runs beside the OpenCode process,
+    // which may be writing to the same WAL database.
+    db = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: 250 });
+
+    const recentFreeModel = db.prepare(`
+      SELECT 1 AS found
+      FROM session_v2
+      WHERE time_updated >= ?
+        AND model IS NOT NULL
+        AND json_extract(model, '$.providerID') = 'opencode'
+        AND (
+          json_extract(model, '$.id') LIKE '%' || ?
+          OR json_extract(model, '$.id') = 'big-pickle'
+        )
+      LIMIT 1
+    `).get(now.getTime() - DAY_MS, OPENCODE_FREE_MODEL_SUFFIX) as { found: number } | undefined;
+
+    const error = db.prepare(`
+      SELECT time_created AS createdAt,
+             json_extract(data, '$.time.completed') AS completedAt,
+             json_extract(data, '$.error.retryAfterMs') AS retryAfterMs
+      FROM session_message
+      WHERE type = 'assistant'
+        AND time_created >= ?
+        AND json_extract(data, '$.error.type') = 'provider.free-limit'
+      ORDER BY time_created DESC
+      LIMIT 1
+    `).get(now.getTime() - 2 * DAY_MS) as {
+      createdAt?: number;
+      completedAt?: number | null;
+      retryAfterMs?: number | null;
+    } | undefined;
+
+    let blockedUntil: Date | undefined;
+    if (error !== undefined) {
+      const completedAt = typeof error.completedAt === 'number' && Number.isFinite(error.completedAt)
+        ? error.completedAt
+        : error.createdAt;
+      const retryAfterMs = typeof error.retryAfterMs === 'number'
+        && Number.isFinite(error.retryAfterMs)
+        && error.retryAfterMs > 0
+        ? error.retryAfterMs
+        : undefined;
+      if (typeof completedAt === 'number' && Number.isFinite(completedAt)) {
+        // Retry-After is the observed source of truth; the UTC-midnight fallback
+        // covers builds that omit it. Reject implausibly long retries.
+        const resetAt = retryAfterMs !== undefined && retryAfterMs <= 2 * DAY_MS
+          ? completedAt + retryAfterMs
+          : nextUtcMidnight(new Date(completedAt)).getTime();
+        if (resetAt > now.getTime()) blockedUntil = new Date(resetAt);
+      }
+    }
+
+    return {
+      freeModelsUsed: recentFreeModel !== undefined,
+      ...(blockedUntil !== undefined ? { blockedUntil } : {}),
+    };
+  } catch {
+    return undefined;
+  } finally {
+    db?.close();
+  }
+}
+
 /** Refreshes provider quota snapshots without starting an agent task. */
 export class QuotaPollingService {
   private readonly quota: Pick<QuotaRecorder, 'record'>;
@@ -81,6 +187,7 @@ export class QuotaPollingService {
   private readonly timeoutMs: number;
   private readonly fetch: QuotaFetch;
   private readonly openCodeApiKey: () => Promise<string | undefined>;
+  private readonly openCodeDbPath: string | null;
   private readonly now: () => Date;
   private readonly activeChildren = new Set<ChildProcessWithoutNullStreams>();
   private readonly activeRequests = new Set<AbortController>();
@@ -95,6 +202,9 @@ export class QuotaPollingService {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetch = options.fetch ?? ((url, init) => fetch(url, init));
     this.openCodeApiKey = options.openCodeApiKey ?? (() => this.readOpenCodeApiKey());
+    this.openCodeDbPath = options.openCodeDbPath === null
+      ? null
+      : options.openCodeDbPath ?? defaultOpenCodeDbPath();
     this.now = options.now ?? (() => new Date());
   }
 
@@ -143,6 +253,7 @@ export class QuotaPollingService {
       this.probeCodex(),
       this.probeAntigravity(),
       this.probeOpenCodeGo(),
+      this.probeOpenCodeFreeTier(),
     ]);
     if (this.stopped) return;
     for (const result of results) {
@@ -284,6 +395,26 @@ export class QuotaPollingService {
     const sample = quotaSampleFromOpenCodeGoUsage(payload, {
       source: 'opencode',
       now: this.now(),
+    });
+    return sample === undefined ? undefined : { adapterId: 'opencode', sample };
+  }
+
+  /**
+   * OpenCode's free tier has no usage endpoint. Its local database records the
+   * daily 429 with a retry time, so a recent free-model session (or block) is
+   * the only real signal available. It never fabricates a percentage.
+   */
+  private async probeOpenCodeFreeTier(): Promise<ProbeSample | undefined> {
+    if (this.openCodeDbPath === null) return undefined;
+    if (discoverOnPath('opencode', this.env) === undefined) return undefined;
+
+    const now = this.now();
+    const state = readOpenCodeFreeTier(this.openCodeDbPath, now);
+    if (state === undefined) return undefined;
+
+    const sample = quotaSampleFromOpenCodeFreeTier(state, {
+      source: 'opencode',
+      now,
     });
     return sample === undefined ? undefined : { adapterId: 'opencode', sample };
   }

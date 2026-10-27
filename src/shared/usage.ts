@@ -2,8 +2,8 @@
 
 export type UsageRange = '24h' | '7d' | '30d' | '90d' | 'all';
 
-/** The two quota windows agent CLIs report. */
-export type UsageLimitWindowKind = 'session' | 'weekly';
+/** The quota windows agent CLIs report. */
+export type UsageLimitWindowKind = 'session' | 'daily' | 'weekly';
 
 /**
  * The latest quota snapshot reported by one CLI for one window kind.
