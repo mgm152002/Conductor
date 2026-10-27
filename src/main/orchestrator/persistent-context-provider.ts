@@ -13,7 +13,7 @@ export class PersistentContextProvider implements ContextProvider {
   eligibleMemoryIds(request: Pick<ContextRequest, 'workspaceId' | 'taskId'>, sources: boolean): string[] {
     const predicate = sources
       ? `scope_level='source' AND scope_ref_id IN (SELECT id FROM connectors WHERE auth_state='authorized' AND json_extract(config,'$.workspaceId')=@workspaceId)`
-      : `(scope_level='global' AND scope_ref_id IS NULL) OR (scope_level='project' AND scope_ref_id=@workspaceId) OR (scope_level='task' AND scope_ref_id=@taskId)`;
+      : `(scope_level='project' AND scope_ref_id=@workspaceId) OR (scope_level='task' AND scope_ref_id=@taskId)`;
     return (this.store.db.prepare(`SELECT id FROM memories WHERE (${predicate}) AND superseded_by IS NULL AND (expires_at IS NULL OR expires_at>@now)`)
       .all({ workspaceId: request.workspaceId, taskId: request.taskId, now: new Date(this.now()).toISOString() }) as { id: string }[]).map((r) => r.id);
   }

@@ -14,6 +14,8 @@ import type { AdapterSessionHandle } from '@shared/adapter';
 import type { ChatConversation } from '@shared/chat-contract';
 import { AttachmentService } from '@main/attachments/attachment-service';
 import { DiskManagedStorage } from '@main/storage/managed-storage';
+import { MemoryEngine } from '@main/domain/memory-engine';
+import { mockMem0 } from '../helpers/mem0';
 import type { ObjectiveInput } from '@main/adapters/objective-cli-adapter';
 
 const roots: string[] = [];
@@ -50,7 +52,7 @@ async function settled(service: ChatService, id: string) {
 }
 
 describe('standalone casual chat', () => {
-  it('persists attachments, materializes only the current turn, and keeps prior refs in history metadata', async () => {
+  it('persists attachments, materializes only the current turn, and omits prior attachment metadata from agent history', async () => {
     const { service, attachments, adapter, updates, root, path } = await setup({ script: {
       events: [{ kind: 'stdout', data: 'first answer' }],
       streamDelayMs: 20,
@@ -82,12 +84,11 @@ describe('standalone casual chat', () => {
     await settled(service, second.thread.id);
     const secondInput = adapter.calls.started[1] as ObjectiveInput;
     expect(secondInput).not.toHaveProperty('attachments');
-    expect(secondInput.conversation?.[0]?.attachments).toEqual([expect.objectContaining({ id: attachment.id })]);
+    expect(secondInput.conversation?.[0]).not.toHaveProperty('attachments');
     expect(secondInput.conversation).toEqual([{
       objective: 'Summarize this',
       reply: 'first answer',
       state: 'complete',
-      attachments: [expect.objectContaining({ id: attachment.id, name: 'notes.md' })],
     }]);
 
     const reopened = new SqliteStore(path);
@@ -101,6 +102,22 @@ describe('standalone casual chat', () => {
       { attachments: new AttachmentService(reopened, new DiskManagedStorage(join(root, 'blobs'))) },
     ).get(first.thread.id);
     expect(reloaded.messages[0]?.attachments).toEqual([expect.objectContaining({ id: attachment.id })]);
+  });
+
+  it('recalls only global personal memory in casual chat', async () => {
+    const { store, registry, root, adapter, attachments } = await setup({ script: { events: [{ kind: 'stdout', data: 'answer' }] } });
+    const memory = new MemoryEngine(store, Date.now, mockMem0().client);
+    await memory.create({ layer: 'personal', scope: { level: 'global' }, content: 'pineapple preference' });
+    await memory.create({ layer: 'project', scope: { level: 'project', refId: 'project-a' }, content: 'pineapple project secret' });
+    await memory.create({ layer: 'project', scope: { level: 'project', refId: 'project-b' }, content: 'pineapple other secret' });
+    const isolated = new ChatService(store, registry, join(root, 'isolated-chat-sandbox'), () => {}, { attachments, memory });
+
+    const sent = await isolated.send({ content: 'What is my pineapple preference?' });
+    await settled(isolated, sent.thread.id);
+
+    expect((adapter.calls.started[0] as ObjectiveInput).contextData).toEqual([
+      { kind: 'memory', content: 'pineapple preference' },
+    ]);
   });
 
   it('passes locally recognized pasted-image text only with the current turn attachment', async () => {

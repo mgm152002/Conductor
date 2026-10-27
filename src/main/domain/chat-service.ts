@@ -163,7 +163,6 @@ export class ChatService {
           objective: user.content,
           reply: reply.content,
           state: reply.status,
-          ...(user.attachments.length > 0 ? { attachments: user.attachments } : {}),
         });
         i += 1;
       }
@@ -279,7 +278,12 @@ export class ChatService {
    */
   private async recall(content: string): Promise<RecalledContext[]> {
     if (this.memory === undefined) return [];
-    const hits = await this.memory.recall({ text: content, limit: this.recallLimit });
+    // Casual Chat is the personal namespace. Project/task/source memories are
+    // never eligible here, even if their text is a stronger semantic match.
+    const personalIds = (this.store.db.prepare(`SELECT id FROM memories
+      WHERE layer='personal' AND scope_level='global' AND scope_ref_id IS NULL`).all() as { id: string }[])
+      .map((row) => row.id);
+    const hits = await this.memory.recall({ text: content, layer: 'personal', limit: this.recallLimit }, personalIds);
     return hits.map((hit) => ({ kind: 'memory', content: hit.memory.content }));
   }
 

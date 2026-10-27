@@ -101,11 +101,14 @@ describe('task retrieval scope isolation', () => {
         mock.setOffline(true);
         expect(await service.memory.delete(m.id)).toEqual({ id: m.id, deleted: true, memoryCleanupPending: true });
     });
-    it('includes global and matching workspace/task context only, excluding expired/superseded memory without elevating trust', async () => {
+    it('keeps personal memory out of projects and includes only matching workspace/task memory', async () => {
         const allowed: string[] = [];
+        const personal: string[] = [];
+        let allowedMemory = '';
         for (const scope of [{ level: 'global' }, { level: 'project', refId: 'workspace-a' }, { level: 'task', refId: 'task-a' }] as const) {
             allowed.push(context.create({ scope, content: 'Inferred context', veracity: 'inferred', provenance: [{ method: 'agent_output', sourceId: 'agent' }] }).id);
-            allowed.push((await memory.create({ scope, content: 'Inferred memory', layer: 'personal', veracity: 'inferred' })).id);
+            const id = (await memory.create({ scope, content: 'Inferred memory', layer: scope.level === 'global' ? 'personal' : scope.level, veracity: 'inferred' })).id;
+            if (scope.level === 'global') personal.push(id); else { allowed.push(id); allowedMemory ||= id; }
         }
         for (const scope of [{ level: 'project', refId: 'workspace-b' }, { level: 'task', refId: 'task-b' }, { level: 'workflow', refId: 'task-a' }, { level: 'source', refId: 'workspace-a' }] as const) {
             context.create({ scope, content: 'Private context' });
@@ -114,11 +117,12 @@ describe('task retrieval scope isolation', () => {
         await memory.create({ scope: { level: 'global' }, content: 'Expired', layer: 'personal', expiresAt: '2025-01-01T00:00:00Z' });
         const stale = await memory.create({ scope: { level: 'global' }, content: 'Stale', layer: 'personal' });
         const replacement = await memory.supersede(stale.id, { scope: { level: 'global' }, content: 'New', layer: 'personal' });
-        allowed.push(replacement.id);
+        personal.push(replacement.id);
         const result = await new PersistentContextProvider(store, () => now, memory).retrieveContext({ workspaceId: 'workspace-a', taskId: 'task-a', objective: 'Help me' });
         expect([...result.refs].sort()).toEqual([...allowed].sort());
+        expect(result.refs).not.toEqual(expect.arrayContaining(personal));
         expect(context.inspect(allowed[0]!).veracity).toBe('inferred');
-        expect((await memory.inspect(allowed[1]!)).veracity).toBe('inferred');
+        expect((await memory.inspect(allowedMemory)).veracity).toBe('inferred');
     });
     it('applies limits after scope filtering so other workspaces cannot crowd out the current task', async () => {
         const wanted = await memory.create({ scope: { level: 'task', refId: 'task-a' }, content: 'Local knowledge', layer: 'task' });
