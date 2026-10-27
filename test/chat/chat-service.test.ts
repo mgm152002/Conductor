@@ -192,6 +192,30 @@ describe('standalone casual chat', () => {
     expect(new ChatService(reopened, new Registry(), join(root, 'chat-sandbox')).get(done.thread.id)).toEqual(done);
   });
 
+  it('persists reasoning and keyed tool activity with the assistant reply', async () => {
+    const { service, path, root } = await setup({ script: {
+      events: [
+        { kind: 'log', data: { message: 'Inspecting the request.', kind: 'reasoning', source: 'Chat Agent' } },
+        { kind: 'log', data: { message: 'Read', kind: 'read', detail: '/tmp/notes.md', key: 'tool-1', status: 'running', source: 'Chat Agent' } },
+        { kind: 'log', data: { key: 'tool-1', status: 'completed', source: 'Chat Agent' } },
+        { kind: 'stdout', data: 'Here is the answer.' },
+      ],
+    } });
+
+    const sent = await service.send({ content: 'Read my notes' });
+    const done = await settled(service, sent.thread.id);
+    expect(done.messages.at(-1)?.activity).toEqual([
+      expect.objectContaining({ label: 'Inspecting the request.', kind: 'reasoning', source: 'Chat Agent', status: 'neutral' }),
+      expect.objectContaining({ label: 'Read', kind: 'read', detail: '/tmp/notes.md', key: 'tool-1', source: 'Chat Agent', status: 'completed' }),
+    ]);
+
+    const reopened = new SqliteStore(path);
+    stores.push(reopened);
+    await reopened.migrate();
+    const reloaded = new ChatService(reopened, new Registry(), join(root, 'chat-sandbox')).get(done.thread.id);
+    expect(reloaded.messages.at(-1)?.activity).toEqual(done.messages.at(-1)?.activity);
+  });
+
   it('passes only this chat history, supports agent switching, and rejects overlapping sends', async () => {
     const { service, adapter, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'first answer' }], streamDelayMs: 20 } });
     const first = await service.send({ content: 'remember apricots' });
@@ -324,11 +348,17 @@ describe('standalone casual chat', () => {
   it('extracts only Codex assistant JSONL text and handles structured final output', async () => {
     const { service } = await setup({ record: { id: 'codex' }, script: { events: [
       { kind: 'stdout', data: '{"type":"thread.started","thread_id":"provider-thread"}' },
-      { kind: 'stdout', data: '{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"do not display"}}' },
+      { kind: 'stdout', data: '{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"ls","aggregated_output":"do not display","exit_code":0,"status":"completed"}}' },
+      { kind: 'stdout', data: '{"type":"item.completed","item":{"id":"think-1","type":"reasoning","text":"Checking the available files."}}' },
       { kind: 'stdout', data: '{"type":"item.completed","item":{"type":"agent_message","text":"Actual answer"}}' },
     ] } });
     const sent = await service.send({ content: 'hi' });
-    expect((await settled(service, sent.thread.id)).messages.at(-1)?.content).toBe('Actual answer');
+    const message = (await settled(service, sent.thread.id)).messages.at(-1);
+    expect(message?.content).toBe('Actual answer');
+    expect(message?.activity).toEqual([
+      expect.objectContaining({ key: 'cmd-1', label: 'ls', kind: 'execute', detail: 'do not display', status: 'completed', source: 'Fake Adapter' }),
+      expect.objectContaining({ key: 'think-1', label: 'Checking the available files.', kind: 'reasoning', status: 'neutral', source: 'Fake Adapter' }),
+    ]);
   });
 
   describe('default and fallback model routing', () => {

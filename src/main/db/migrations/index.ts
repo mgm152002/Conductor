@@ -1214,6 +1214,17 @@ const migration023: Migration = {
   },
 };
 
+// Migration 24 — durable activity rows for standalone Chat replies. The JSON
+// contains only adapter-emitted, redacted activity metadata; conversation text
+// remains in chat_messages.content.
+const migration024: Migration = {
+  version: 24,
+  name: 'chat_message_activity',
+  up({ db }: Tx): void {
+    db.exec("ALTER TABLE chat_messages ADD COLUMN activity_json TEXT NOT NULL DEFAULT '[]';");
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1239,4 +1250,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration021,
   migration022,
   migration023,
+  migration024,
 ];

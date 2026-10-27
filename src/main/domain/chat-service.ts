@@ -2,8 +2,8 @@ import type { AttachmentService } from '../attachments/attachment-service';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentAdapter, AdapterResult, AdapterSessionHandle } from '@shared/adapter';
-import { ChatSendRequest, type ChatConversation, type ChatMessage, type ChatSendInput, type ChatThread, type Mem0Health } from '@shared/chat-contract';
+import type { AgentAdapter, AdapterResult, AdapterSessionHandle, AdapterStreamEvent } from '@shared/adapter';
+import { ChatSendRequest, type ChatActivity, type ChatActivityStatus, type ChatConversation, type ChatMessage, type ChatSendInput, type ChatThread, type Mem0Health } from '@shared/chat-contract';
 import type { RunChoice } from '@shared/agent-models';
 import { compareAgentPreference } from '@shared/agent-preference';
 import { defaultModelKey, fallbackModelKey, isValidModelId } from '@shared/model-defaults';
@@ -19,7 +19,7 @@ import type { SettingsService } from './settings-service';
 import { NO_VALUE } from './settings-service';
 
 type ThreadRow = { id: string; title: string; agent_id: string; created_at: string; updated_at: string };
-type MessageRow = { id: string; thread_id: string; role: ChatMessage['role']; content: string; status: ChatMessage['status']; created_at: string; error: string | null };
+type MessageRow = { id: string; thread_id: string; role: ChatMessage['role']; content: string; status: ChatMessage['status']; created_at: string; error: string | null; activity_json: string };
 interface Run {
   adapter: AgentAdapter;
   messageId: string;
@@ -30,6 +30,7 @@ interface Run {
   done: Promise<void>;
   finish(): void;
   cancellation?: Promise<void> | undefined;
+  activity: ChatActivity[];
 }
 
 /** The terminal outcome of one agent attempt in the fallback loop. */
@@ -56,6 +57,96 @@ export interface ChatServiceOptions {
 interface RecalledContext {
   kind: 'memory';
   content: string;
+}
+
+type Json = Record<string, unknown>;
+type ActivityUpdate = Omit<ChatActivity, 'id' | 'label' | 'kind'> & { label?: string; kind?: string };
+const obj = (value: unknown): Json | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Json : null;
+const str = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+
+function activityStatus(value: unknown): ChatActivityStatus {
+  if (value === 'running' || value === 'in_progress' || value === 'pending') return 'running';
+  if (value === 'completed' || value === 'success' || value === 'succeeded') return 'completed';
+  if (value === 'failed' || value === 'error') return 'failed';
+  return 'neutral';
+}
+
+function firstLine(value: string): string {
+  const line = value.trim().split('\n').find((part) => part.trim() !== '') ?? '';
+  const clean = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '').trim();
+  return clean.length > 120 ? `${clean.slice(0, 119)}…` : clean;
+}
+
+function parseActivity(value: string): ChatActivity[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is ChatActivity => {
+      const item = obj(entry);
+      return item !== null && typeof item['id'] === 'string' && typeof item['label'] === 'string'
+        && typeof item['kind'] === 'string' && typeof item['status'] === 'string' && typeof item['createdAt'] === 'string';
+    });
+  } catch { return []; }
+}
+
+/** Normalize activity-bearing adapter events; reply text and usage stay out. */
+function chatActivity(event: AdapterStreamEvent, source: string): ActivityUpdate | undefined {
+  if (event.kind === 'log') {
+    const data = obj(event.data);
+    if (data === null || data['usage'] !== undefined || data['quota'] !== undefined) return undefined;
+    const label = str(data['message']) ?? str(data['text']);
+    const detail = str(data['detail']);
+    const key = str(data['key']) ?? str(data['toolCallId']);
+    if (label === undefined && detail === undefined && key === undefined) return undefined;
+    const kind = str(data['kind']);
+    return {
+      ...(label !== undefined ? { label: kind === 'reasoning' ? firstLine(label) : label.trim() } : {}),
+      ...(kind !== undefined ? { kind } : {}),
+      ...(detail !== undefined ? { detail } : kind === 'reasoning' && label !== undefined ? { detail: label.trim() } : {}),
+      ...(key !== undefined ? { key } : {}),
+      status: activityStatus(data['status']),
+      source: str(data['source']) ?? source,
+      createdAt: event.at,
+    };
+  }
+  if (event.kind !== 'stdout' || typeof event.data !== 'string') return undefined;
+  let parsed: Json | null = null;
+  try { parsed = obj(JSON.parse(event.data)); } catch { return undefined; }
+  const type = str(parsed?.['type']);
+  if (parsed === null || (type !== 'item.started' && type !== 'item.completed')) return undefined;
+  const item = obj(parsed['item']);
+  if (item === null) return undefined;
+  const itemType = str(item['type']);
+  const key = str(item['id']);
+  const completed = type === 'item.completed';
+  const base = { ...(key !== undefined ? { key } : {}), source, createdAt: event.at };
+  if (itemType === 'reasoning') {
+    const text = str(item['text']);
+    return completed && text !== undefined && text.trim() !== ''
+      ? { ...base, label: firstLine(text), kind: 'reasoning', detail: text.trim(), status: 'neutral' }
+      : undefined;
+  }
+  if (itemType === 'command_execution') {
+    const output = str(item['aggregated_output']);
+    const failed = typeof item['exit_code'] === 'number' && item['exit_code'] !== 0 || str(item['status']) === 'failed';
+    return { ...base, label: str(item['command']) || 'command', kind: 'execute', ...(output?.trim() ? { detail: output.trimEnd() } : {}), status: completed ? (failed ? 'failed' : 'completed') : 'running' };
+  }
+  if (itemType === 'file_change') {
+    const changes = Array.isArray(item['changes']) ? item['changes'].map(obj).filter((change): change is Json => change !== null) : [];
+    const paths = changes.map((change) => `${str(change['kind']) ?? 'update'} ${str(change['path']) ?? ''}`.trim());
+    return { ...base, label: changes.length === 1 ? `Edited ${str(changes[0]!['path']) ?? 'a file'}` : `Edited ${changes.length} files`, kind: 'edit', ...(paths.length > 0 ? { detail: paths.join('\n') } : {}), status: str(item['status']) === 'failed' ? 'failed' : completed ? 'completed' : 'running' };
+  }
+  if (itemType === 'mcp_tool_call') {
+    const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
+    return { ...base, label: `Called ${name || 'tool'}`, kind: 'tool', status: completed ? (str(item['status']) === 'failed' ? 'failed' : 'completed') : 'running' };
+  }
+  if (itemType === 'web_search') return { ...base, label: `Searched “${str(item['query']) ?? ''}”`, kind: 'search', status: completed ? 'completed' : 'running' };
+  if (itemType === 'todo_list') {
+    const todos = Array.isArray(item['items']) ? item['items'].map(obj).filter((todo): todo is Json => todo !== null) : [];
+    const done = todos.filter((todo) => todo['completed'] === true).length;
+    return { ...base, label: `Plan · ${done}/${todos.length} done`, kind: 'plan', detail: todos.map((todo) => `${todo['completed'] === true ? '✓' : '○'} ${str(todo['text']) ?? ''}`).join('\n'), status: 'neutral' };
+  }
+  return undefined;
 }
 
 function threadFrom(row: ThreadRow): ChatThread {
@@ -110,6 +201,7 @@ export class ChatService {
         status: m.status,
         createdAt: m.created_at,
         attachments: this.attachments?.listChat(m.id) ?? [],
+        activity: parseActivity(m.activity_json),
         ...(m.error !== null ? { error: m.error } : {}),
       }));
     return { thread: threadFrom(row), messages };
@@ -149,7 +241,7 @@ export class ChatService {
     let finish!: () => void;
     const ready = new Promise<void>((resolve) => { started = resolve; });
     const done = new Promise<void>((resolve) => { finish = resolve; });
-    const pending: Run = { adapter, messageId: assistantId, cancelled: false, ready, started, done, finish };
+    const pending: Run = { adapter, messageId: assistantId, cancelled: false, ready, started, done, finish, activity: [] };
     this.runs.set(threadId, pending);
     const snapshot = this.get(threadId);
     this.emit(threadId);
@@ -426,6 +518,7 @@ export class ChatService {
       const codex = run.adapter.record.id === 'codex';
       for await (const event of run.adapter.stream(run.handle)) {
         if (run.cancelled) continue;
+        this.recordActivity(threadId, run, event);
         if (event.kind === 'stderr' && typeof event.data === 'string') { errorLines.push(event.data); continue; }
         if (event.kind !== 'stdout' || typeof event.data !== 'string') continue;
         const text = codex ? responseText(event.data) : event.data;
@@ -458,7 +551,26 @@ export class ChatService {
 
   private write(threadId: string, run: Run, content: string | undefined, status: ChatMessage['status'], error?: string): void {
     this.store.transaction(({ db }) => {
-      db.prepare('UPDATE chat_messages SET content=coalesce(?,content),status=?,error=? WHERE id=?').run(content ?? null, status, error ?? null, run.messageId);
+      db.prepare('UPDATE chat_messages SET content=coalesce(?,content),status=?,error=?,activity_json=? WHERE id=?')
+        .run(content ?? null, status, error ?? null, JSON.stringify(run.activity), run.messageId);
+      db.prepare('UPDATE chat_threads SET updated_at=? WHERE id=?').run(new Date().toISOString(), threadId);
+    });
+    this.emit(threadId);
+  }
+
+  private recordActivity(threadId: string, run: Run, event: AdapterStreamEvent): void {
+    const update = chatActivity(event, run.adapter.record.name);
+    if (update === undefined) return;
+    const existing = update.key === undefined ? undefined : run.activity.find((item) => item.key === update.key && item.source === update.source);
+    if (existing !== undefined) {
+      Object.assign(existing, update, { id: existing.id, label: update.label ?? existing.label });
+    } else {
+      const label = update.label ?? update.detail;
+      if (label === undefined || label.trim() === '') return;
+      run.activity.push({ ...update, id: randomUUID(), label: label.trim(), kind: update.kind ?? 'tool' });
+    }
+    this.store.transaction(({ db }) => {
+      db.prepare('UPDATE chat_messages SET activity_json=? WHERE id=?').run(JSON.stringify(run.activity), run.messageId);
       db.prepare('UPDATE chat_threads SET updated_at=? WHERE id=?').run(new Date().toISOString(), threadId);
     });
     this.emit(threadId);

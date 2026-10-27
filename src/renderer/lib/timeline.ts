@@ -1,6 +1,7 @@
 import type { Task, TaskEvent } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
 import type { AttachmentRef } from '@shared/attachments';
+import type { ChatActivity, ChatMessage } from '@shared/chat-contract';
 
 // Turns a task's persisted events into a chat timeline in the T3 Code shape:
 // the user's message, collapsible groups of agent work (commands, file edits,
@@ -307,6 +308,31 @@ export function latestActivity(items: TimelineItem[]): WorkEntry | undefined {
     if (latest !== undefined) return latest;
   }
   return undefined;
+}
+
+/** Builds the same work-log presentation for a standalone Chat assistant reply. */
+export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  const activity = message.activity ?? [];
+  if (activity.length > 0) {
+    items.push({
+      kind: 'work',
+      id: `chat-work:${message.id}`,
+      entries: activity.map((entry: ChatActivity): WorkEntry => ({
+        id: entry.id,
+        icon: iconForLogKind(entry.kind),
+        label: entry.label,
+        ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+        tone: entry.status === 'completed' ? 'success' : entry.status === 'failed' ? 'error' : entry.status === 'running' ? 'running' : 'neutral',
+        at: entry.createdAt,
+        ...(entry.key !== undefined ? { key: entry.key } : {}),
+        ...(entry.source !== undefined ? { source: entry.source } : {}),
+      })),
+    });
+  }
+  if (message.content.trim() !== '') items.push({ kind: 'assistant', id: message.id, text: message.content, at: message.createdAt });
+  if (message.error !== undefined && message.error.trim() !== '') items.push({ kind: 'error', id: `chat-error:${message.id}`, text: message.error, at: message.createdAt });
+  return items;
 }
 
 function workEntryFor(itemType: string | undefined, item: Json, completed: boolean, event: TaskEvent, itemId: string): WorkEntry | null {

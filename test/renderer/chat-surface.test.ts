@@ -73,3 +73,24 @@ it('shows the empty new-chat state after the selected chat is removed from the s
   expect(empty).not.toContain('Saved reply');
   expect(empty).not.toContain('aria-label="Delete chat: Saved chat"');
 });
+
+it('shows reasoning and tool activity in a casual Chat thread', () => {
+  useChatStore.getState().receive({
+    thread: { id: 'chat-live', title: 'Verbose chat', agentId: 'codex', createdAt: '2026-10-26', updatedAt: '2026-10-26' },
+    messages: [{
+      id: 'reply-live', threadId: 'chat-live', role: 'assistant', content: 'Finished answer', status: 'complete', createdAt: '2026-10-26', attachments: [],
+      activity: [
+        { id: 'a1', label: 'Inspecting the request.', kind: 'reasoning', status: 'neutral', source: 'Codex', createdAt: '2026-10-26T00:00:01Z' },
+        { id: 'a2', key: 'tool-1', label: 'Read', kind: 'read', detail: '/tmp/notes.md', status: 'completed', source: 'Codex', createdAt: '2026-10-26T00:00:02Z' },
+      ],
+    }],
+  });
+  useChatStore.getState().select('chat-live');
+
+  const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/home'] }, createElement(CasualChat)));
+
+  expect(html).toContain('Inspecting the request.');
+  expect(html).toContain('Read');
+  expect(html).toContain('Codex');
+  expect(html).toContain('Finished answer');
+});

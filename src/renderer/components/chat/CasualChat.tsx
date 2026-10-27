@@ -4,13 +4,14 @@ import type { RunChoice } from '@shared/agent-models';
 import type { ChatThread } from '@shared/chat-contract';
 import { useChatStore } from '../../stores/chat-store';
 import { useAgents } from '../../hooks/useAgents';
-import { Markdown } from './Markdown';
+import { MessagesTimeline } from './MessagesTimeline';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { ArrowUpIcon, StopIcon, TrashIcon } from '../ui/icons';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
+import { buildChatMessageTimeline } from '../../lib/timeline';
 
 /** Project-free conversation: no plans, project context or task workflow. */
 export function CasualChat(): React.JSX.Element {
@@ -118,9 +119,8 @@ export function CasualChat(): React.JSX.Element {
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">
             {conversation?.messages.map((message) => (
               <article key={message.id} aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl bg-accent px-4 py-3')}>
-                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : message.content ? <Markdown text={message.content} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">Thinking…</p> : null}
+                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">Thinking…</p> : null}
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
-                {message.error ? <p role="alert" className="mt-2 text-xs text-destructive-foreground [overflow-wrap:anywhere]">{message.error}</p> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
             ))}

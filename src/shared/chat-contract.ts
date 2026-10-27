@@ -17,7 +17,23 @@ export interface ChatMessage {
   status: 'complete' | 'streaming' | 'failed' | 'cancelled';
   createdAt: string;
   attachments: AttachmentRef[];
+  /** Durable reasoning/tool activity emitted while the assistant produced this reply. */
+  activity?: ChatActivity[];
   error?: string;
+}
+
+export type ChatActivityStatus = 'neutral' | 'running' | 'completed' | 'failed';
+
+export interface ChatActivity {
+  id: string;
+  /** Stable provider tool id; start/completion updates share this key. */
+  key?: string;
+  label: string;
+  kind: string;
+  detail?: string;
+  status: ChatActivityStatus;
+  source?: string;
+  createdAt: string;
 }
 
 export interface ChatConversation {
