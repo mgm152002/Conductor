@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskEvent } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
-import { buildTimeline, latestActivity } from '../../src/renderer/lib/timeline';
+import { buildTimeline, latestActivity, recentActivities } from '../../src/renderer/lib/timeline';
 
 const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 'COMPLETED', acceptanceCriteria: ['response: nonempty'], contextRefs: [], createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z' };
 let n = 0;
@@ -110,5 +110,23 @@ describe('chat timeline', () => {
     ]));
 
     expect(latestActivity(items)).toMatchObject({ label: 'Read src/a.ts', icon: 'read', source: 'OpenCode' });
+  });
+
+  it('keeps a continuous tail of recent activity instead of one line', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Read src/a.ts', kind: 'read', status: 'completed', source: 'OpenCode' }),
+      stdout('Planning the change'),
+      log({ message: 'Bash', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'OpenCode' }),
+      stdout({ type: 'item.completed', item: { id: 'n', type: 'error', message: 'Ignoring unknown feature' } }),
+      log({ message: 'Edited src/b.ts', kind: 'edit', status: 'completed', source: 'OpenCode' }),
+    ]));
+
+    expect(recentActivities(items, 3).map((entry) => entry.label)).toEqual([
+      'Read src/a.ts',
+      'Bash',
+      'Edited src/b.ts',
+    ]);
+    expect(recentActivities(items, 1).map((entry) => entry.label)).toEqual(['Edited src/b.ts']);
+    expect(recentActivities(items, 0)).toEqual([]);
   });
 });

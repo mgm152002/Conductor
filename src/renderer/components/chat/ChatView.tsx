@@ -5,7 +5,7 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { buildTimeline, isAgentFallbackEvent, latestActivity, type TimelineItem } from '../../lib/timeline';
+import { buildTimeline, isAgentFallbackEvent, type TimelineItem } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { cn } from '../../lib/cn';
@@ -18,7 +18,9 @@ import { MessagesTimeline } from './MessagesTimeline';
 import { PendingApprovalPanel } from './PendingApprovalPanel';
 import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
-import { PlanCard, PlanResults, runLabel } from './PlanCard';
+import { PlanResults, runLabel } from './PlanCard';
+import { PlanDock } from './PlanDock';
+import { LiveActivityFeed } from './LiveActivityFeed';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
 // The main surface, in the T3 Code shape: a thread header, a centred message
@@ -41,14 +43,16 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
   const now = useNow(working);
   if (working) {
     const label = task.state === 'VERIFYING' ? 'Verifying results' : task.state === 'RUNNING' ? 'Working' : 'Preparing';
-    const runningStep = details?.steps.find((step) => step.status === 'running');
-    const activity = latestActivity(items);
-    const detail = activity !== undefined && activity.icon !== 'state' ? activity.label : runningStep?.description;
-    const source = activity?.source ?? (runningStep?.assignedAdapterId !== undefined ? agentLabel(runningStep.assignedAdapterId) : undefined);
+    const runningSteps = details?.steps.filter((step) => step.status === 'running') ?? [];
+    const source = runningSteps.length > 1
+      ? `${runningSteps.length} agents`
+      : runningSteps[0]?.assignedAdapterId !== undefined
+        ? agentLabel(runningSteps[0].assignedAdapterId)
+        : undefined;
     return (
       <div className="flex min-w-0 items-center gap-2 px-1 text-[13px]" role="status">
-        <span className="min-w-0 truncate text-shimmer font-medium" title={detail !== undefined ? `${label}: ${detail}` : label}>
-          {label}{detail !== undefined ? ` · ${detail}` : '…'}
+        <span className="min-w-0 truncate text-shimmer font-medium" title={label}>
+          {label}…
         </span>
         {source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{source}</span> : null}
         <span className="ml-auto shrink-0 text-2xs text-muted-foreground tabular-nums">{formatDuration(now - Date.parse(task.createdAt))}</span>
@@ -114,7 +118,6 @@ function Turn({ task, isLatest, onDetails, onLoaded }: { task: Task; isLatest: b
     <section aria-label={`Message: ${task.objective.slice(0, 60)}`} className="group/turn flex flex-col gap-5">
       {error !== null ? <Alert action={<Button size="xs" variant="ghost" onClick={refresh}>Retry details</Button>}>{error}</Alert> : null}
       <MessagesTimeline items={items} live={live} />
-      {details !== null && planned ? <PlanCard task={task} details={details} /> : null}
       {details !== null && planned ? <PlanResults task={task} details={details} /> : null}
       {loading && details === null ? <p role="status" className="px-1 text-xs text-muted-foreground">Loading task details…</p> : null}
       <StatusLine task={task} details={details} items={items} />
@@ -142,6 +145,11 @@ function Turn({ task, isLatest, onDetails, onLoaded }: { task: Task; isLatest: b
   );
 }
 
+function InspectedDetailsPanel({ task }: { task: Task }): React.JSX.Element {
+  const { details } = useTaskDetails(task);
+  return <DetailsPanel task={task} details={details} />;
+}
+
 function Thread({ focused, project }: { focused: Task; project: Workspace | undefined }): React.JSX.Element {
   const key = threadKey(focused);
   const allTasks = useTaskStore((s) => s.tasks);
@@ -149,7 +157,7 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
   const latest = turns[turns.length - 1] ?? focused;
   // The details panel follows the focused message (latest by default).
   const inspected = turns.find((t) => t.id === focused.id) ?? latest;
-  const { details: inspectedDetails } = useTaskDetails(inspected);
+  const { details: latestDetails } = useTaskDetails(latest);
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const openDetails = useUiStore((s) => s.openDetails);
   const scroller = useRef<HTMLDivElement>(null);
@@ -196,10 +204,16 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
           <AgentSetupNotice />
           <Mem0OfflineNotice />
           <PendingApprovalPanel task={latest} />
+          <PlanDock task={latest} details={latestDetails} />
+          <LiveActivityFeed task={latest} details={latestDetails} />
           <Composer task={latest} />
         </div>
       </div>
-      {detailsOpen ? <DetailsPanel task={inspected} details={inspectedDetails} /> : null}
+      {detailsOpen ? (
+        inspected.id === latest.id
+          ? <DetailsPanel task={latest} details={latestDetails} />
+          : <InspectedDetailsPanel task={inspected} />
+      ) : null}
     </div>
   );
 }

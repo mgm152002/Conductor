@@ -30,7 +30,7 @@ import type { KnowledgeBridge } from '@shared/knowledge-contract';
 import type { AutomationBridge } from '@shared/automation-contract';
 import type { ConnectorBridge, SystemBridge } from '@shared/connector-contract';
 import type { IntegrationsBridge } from '@shared/integrations-contract';
-import type { ArtifactPreview, TaskDetails } from '@shared/task-view';
+import type { ArtifactPreview, ChangedFileDiff, TaskDetails, WorkspaceChanges } from '@shared/task-view';
 import type { ApprovalRequest, AuditEvent, PermissionProfile } from '@shared/domain';
 import type { CatalogEntryView, InstallOutcome } from '@shared/catalog';
 import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
@@ -171,6 +171,10 @@ const conductor = {
     select: (id: string): Promise<void> => invoke('workspace.select', { id }),
     /** Delete a project and everything Conductor stored for it (not its files). */
     delete: (id: string): Promise<ProjectDeletionResult> => invoke('workspace.delete', { id, confirmed: true }),
+    /** Uncommitted files in the project working tree (read-only). */
+    changes: (workspaceId: string): Promise<WorkspaceChanges> => invoke('workspace.changes', { workspaceId }),
+    /** Unified diff for one changed file, capped and redacted by the main process. */
+    fileDiff: (input: { workspaceId: string; path: string }): Promise<ChangedFileDiff> => invoke('workspace.fileDiff', input),
   },
   usage: {
     /**

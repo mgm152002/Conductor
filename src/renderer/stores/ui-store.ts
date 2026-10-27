@@ -28,8 +28,8 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   draft: false,
-  detailsOpen: false,
-  detailsTab: 'plan',
+  detailsOpen: true,
+  detailsTab: 'files',
   collapsedProjects: {},
   addProjectOpen: false,
   planMode: false,

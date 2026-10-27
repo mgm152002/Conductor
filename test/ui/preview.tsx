@@ -4,7 +4,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from '../../src/renderer/App';
 import { useTaskStore, useUiStore, useWorkspaceStore } from '../../src/renderer/stores';
-import type { Task, Workspace } from '../../src/shared/domain';
+import type { Task, TaskEvent, Workspace } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
 import type { ChatConversation, ChatThread } from '../../src/shared/chat-contract';
 import '../../src/renderer/index.css';
@@ -15,16 +15,22 @@ if (width > 0) document.getElementById('root')!.style.width = `${width}px`;
 const height = Number(params.get('height'));
 if (height > 0) document.getElementById('root')!.style.height = `${height}px`;
 const createdAt = new Date().toISOString();
+const running = params.has('running');
 const project: Workspace = { id: 'ui-project', name: 'Conductor project with a very long name', rootPath: '/ui-fixture', createdAt, updatedAt: createdAt };
 const task: Task = {
-  id: 'ui-task', workspaceId: project.id, objective: 'Build the memory and workflow experience', state: 'COMPLETED',
+  id: 'ui-task', workspaceId: project.id, objective: 'Build the memory and workflow experience', state: running ? 'RUNNING' : 'COMPLETED',
   acceptanceCriteria: ['Memory is searchable by meaning', 'Plan controls fit in a narrow window'], contextRefs: [], createdAt, updatedAt: createdAt,
 };
+const events: TaskEvent[] = running ? [
+  { id: 'event-1', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Read src/renderer/components/chat/PlanDock.tsx', kind: 'read', status: 'completed', source: 'Codex' } },
+  { id: 'event-2', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Bash', kind: 'execute', detail: 'npm test -- plan-dock', key: 'tool-1', status: 'running', source: 'Codex' } },
+  { id: 'event-3', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Edited src/renderer/components/workspace/FilesRegion.tsx', kind: 'edit', status: 'completed', source: 'Claude Code' } },
+] : [];
 const details: TaskDetails = {
-  task, events: [], approvals: [], artifacts: [], verification: null,
+  task, events, approvals: [], artifacts: [], verification: null,
   steps: [
     { id: 'first', taskId: task.id, ordinal: 0, description: 'Implement memory retrieval with a long identifier ' + 'memory_scope_'.repeat(18), status: 'succeeded', dependsOn: [], assignedAdapterId: 'codex' },
-    { id: 'second', taskId: task.id, ordinal: 1, description: 'Verify the Plan layout', status: 'succeeded', dependsOn: ['first'], assignedAdapterId: 'claude-code' },
+    { id: 'second', taskId: task.id, ordinal: 1, description: 'Verify the Plan layout', status: running ? 'running' : 'succeeded', dependsOn: ['first'], assignedAdapterId: 'claude-code' },
   ],
   plan: {
     plannerAdapterId: 'codex', status: 'ready', docsDir: '/ui-fixture/.conductor/plans/ui-task',
@@ -71,11 +77,31 @@ window.conductor = {
       return structuredClone(chat);
     },
     cancel: async () => {},
+    delete: async () => ({ deleted: true, messages: 0 }),
+    mem0Health: async () => ({ reachable: true, detail: 'Fixture memory service', checkedAt: new Date().toISOString() }),
   },
+  settings: { get: async () => undefined, set: async () => {} },
   theme: { get: async () => 'light' },
-  workspace: { list: async () => projects, active: async () => projects[0]?.id ?? null, select: async () => {} },
+  workspace: {
+    list: async () => projects,
+    active: async () => projects[0]?.id ?? null,
+    select: async () => {},
+    changes: async () => ({
+      isRepository: true,
+      files: [
+        { path: 'src/renderer/components/chat/PlanDock.tsx', status: 'added' as const, additions: 132, deletions: 0 },
+        { path: 'src/renderer/components/workspace/FilesRegion.tsx', status: 'added' as const, additions: 178, deletions: 0 },
+        { path: 'src/renderer/App.tsx', status: 'modified' as const, additions: 4, deletions: 2 },
+      ],
+    }),
+    fileDiff: async ({ path }: { path: string }) => ({
+      path,
+      truncated: false,
+      patch: `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,4 @@\n import { createRoot } from 'react-dom/client';\n-import { App } from '../../src/renderer/App';\n+import { App } from '../../src/renderer/App';\n+import { FilesRegion } from '../../src/renderer/components/workspace/FilesRegion';\n`,
+    }),
+  },
   task: { list: async () => [task], listActive: async () => [], get: async () => task, details: async () => details, thread: async () => [task] },
-  approval: { list: async () => [] },
+  approval: { list: async () => [], resolve: async () => {} },
   agents: {
     list: async () => agents,
     models: async (agentId: string) => ({ agentId, models: [{ id: 'test-model', label: 'A model with an unusually long descriptive name', tier: 'balanced' }], efforts: ['low', 'medium', 'high', 'xhigh'], source: 'cli' }),

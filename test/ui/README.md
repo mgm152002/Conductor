@@ -7,6 +7,7 @@ This renders the application with synthetic IPC data. It does not execute agents
 or read a real project's data. Casual conversations persist in this fixture's
 browser localStorage only. Add `no-projects=1` to check project-free Chat.
 Use `draft=1#/work` to begin with a new project thread.
+Add `running=1#/work` to show the live CLI activity feed with synthetic stream events.
 The optional width and height fix the application surface so the minimum window
 can be checked inside a larger browser.
 

@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import type { Task, TaskStep } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
 import type { PlanTask } from '@shared/plan';
-import { buildTimeline, latestActivity } from '../../lib/timeline';
+import { buildTimeline, recentActivities } from '../../lib/timeline';
 import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/time';
 import { agentLabel, usageLabel } from '../../lib/usage-format';
 import { useWorkspaceStore } from '../../stores';
 import { ChevronRightIcon, FileTextIcon, LayersIcon, Spinner } from '../ui/icons';
 import { MessagesTimeline } from './MessagesTimeline';
+import { WorkIcon } from './WorkIcon';
 
 // Plan mode: the plan the planner agent wrote, as waves of tasks. Tasks in a
 // wave have no dependencies on each other and run in parallel; each row shows
@@ -35,7 +36,7 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
     () => step === undefined ? [] : buildTimeline(task, { ...details, events }).filter((item) => item.kind !== 'user'),
     [events, step, details, task],
   );
-  const activity = useMemo(() => latestActivity(timeline), [timeline]);
+  const activity = useMemo(() => recentActivities(timeline, 4), [timeline]);
   // A running plan task is expanded so the thread shows what the agent is
   // doing live, not just the plan row's status dot.
   const running = step?.status === 'running';
@@ -63,12 +64,22 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
           {[duration, usage !== undefined ? usageLabel(usage).replace(' tokens', ' tok') : undefined].filter(Boolean).join(' · ')}
         </span>
       </button>
-      {!open && activity !== undefined ? (
-        <p className="flex min-w-0 items-center gap-1.5 px-8 pb-1.5 text-3xs text-muted-foreground">
-          {running ? <Spinner size={9} className="shrink-0 text-info" /> : null}
-          <span className="truncate" title={activity.label}>{activity.label}</span>
-          {activity.source !== undefined ? <span className="shrink-0 text-muted-foreground/70">· {activity.source}</span> : null}
-        </p>
+      {!open && activity.length > 0 ? (
+        <ul className="flex min-w-0 flex-col gap-0.5 px-8 pb-1.5" aria-label="Recent activity">
+          {activity.map((entry, index) => {
+            const latest = index === activity.length - 1;
+            return (
+              <li key={entry.id} className="flex min-w-0 items-center gap-1.5 text-3xs text-muted-foreground">
+                {running && latest ? <Spinner size={9} className="shrink-0 text-info" /> : <WorkIcon icon={entry.icon} size={9} className="shrink-0" />}
+                {entry.source !== undefined ? <span className="shrink-0 text-muted-foreground/70">{entry.source}</span> : null}
+                <span className={cn('truncate', entry.tone === 'error' ? 'text-destructive-foreground' : running && latest ? 'text-shimmer' : '')} title={entry.detail ?? entry.label}>{entry.label}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {!open && activity.length === 0 && running ? (
+        <p className="flex items-center gap-1.5 px-8 pb-1.5 text-3xs text-muted-foreground"><Spinner size={9} className="shrink-0 text-info" />Starting…</p>
       ) : null}
       {open ? (
         <div className="border-t border-border/70 px-3 py-2.5">
@@ -132,7 +143,7 @@ export function PlanResults({ task, details }: { task: Task; details: TaskDetail
   );
 }
 
-export function PlanCard({ task, details }: { task: Task; details: TaskDetails }): React.JSX.Element | null {
+export function PlanCard({ task, details, embedded = false }: { task: Task; details: TaskDetails; embedded?: boolean }): React.JSX.Element | null {
   const plan = details.plan;
   const project = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === task.workspaceId));
   if (plan === null || plan === undefined) return null;
@@ -140,7 +151,7 @@ export function PlanCard({ task, details }: { task: Task; details: TaskDetails }
 
   if (plan.plan === undefined) {
     return (
-      <section aria-label="Plan" className="rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3 text-xs">
+      <section aria-label="Plan" className={cn('text-xs', embedded ? '' : 'rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3')}>
         <div className="flex items-center gap-2 text-muted-foreground">
           <LayersIcon size={13} />
           {plan.status === 'failed'
@@ -159,13 +170,15 @@ export function PlanCard({ task, details }: { task: Task; details: TaskDetails }
     ? plan.docsDir.slice(project.rootPath.length + 1) : plan.docsDir;
 
   return (
-    <section aria-label="Plan" className="flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3 [overflow-wrap:anywhere]">
+    <section aria-label="Plan" className={cn('flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]', !embedded && 'rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3')}>
       <header className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <LayersIcon size={13} className="shrink-0 text-primary" />
-          <span className="min-w-0 flex-1 font-medium text-foreground">{plan.plan.title}</span>
-          <span className="ml-auto shrink-0 text-3xs text-muted-foreground tabular-nums">{done}/{tasks.size} done · {plan.waves?.length ?? 0} wave{plan.waves?.length === 1 ? '' : 's'}</span>
-        </div>
+        {!embedded ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <LayersIcon size={13} className="shrink-0 text-primary" />
+            <span className="min-w-0 flex-1 font-medium text-foreground">{plan.plan.title}</span>
+            <span className="ml-auto shrink-0 text-3xs text-muted-foreground tabular-nums">{done}/{tasks.size} done · {plan.waves?.length ?? 0} wave{plan.waves?.length === 1 ? '' : 's'}</span>
+          </div>
+        ) : null}
         <p className="text-2xs text-muted-foreground">
           Planned by {planner}{plan.plannerRun?.model ? ` · ${plan.plannerRun.model}` : ''}{plan.plannerRun?.effort ? ` · ${plan.plannerRun.effort} effort` : ''}
           {details.usage?.byStep['planner'] ? ` (${usageLabel(details.usage.byStep['planner'])})` : ''}. Tasks in the same wave run in parallel; each task’s model follows its difficulty unless you chose one.

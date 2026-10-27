@@ -7,7 +7,7 @@ import { Button } from '../ui/primitives';
 import { XIcon } from '../ui/icons';
 import { PlanTimelineRegion } from '../workspace/PlanTimelineRegion';
 import { VerificationRegion } from '../workspace/VerificationRegion';
-import { ArtifactsRegion } from '../workspace/ArtifactsRegion';
+import { FilesRegion } from '../workspace/FilesRegion';
 import { ContextPanelRegion } from '../workspace/ContextPanelRegion';
 import { ActivityRegion } from '../workspace/ActivityRegion';
 
@@ -34,7 +34,6 @@ export function DetailsPanel({ task, details, embedded = false }: { task: Task; 
   }, [embedded, setOpen]);
   const counts: Partial<Record<DetailsTab, number>> = {
     plan: details?.steps.length ?? 0,
-    files: details?.artifacts.length ?? 0,
     context: task.contextRefs.length,
   };
   return (
@@ -77,7 +76,7 @@ export function DetailsPanel({ task, details, embedded = false }: { task: Task; 
       <div role="tabpanel" id={`${embedded ? 'work' : 'chat'}-details-content`} aria-labelledby={`${embedded ? 'work' : 'chat'}-details-${tab}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 [overflow-wrap:anywhere]">
         {tab === 'plan' ? <PlanTimelineRegion task={task} details={details} /> : null}
         {tab === 'checks' ? <VerificationRegion task={task} details={details} /> : null}
-        {tab === 'files' ? <ArtifactsRegion task={task} details={details} /> : null}
+        {tab === 'files' ? <FilesRegion task={task} details={details} /> : null}
         {tab === 'context' ? <ContextPanelRegion task={task} /> : null}
         {tab === 'activity' ? <ActivityRegion details={details} /> : null}
       </div>

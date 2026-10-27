@@ -47,3 +47,36 @@ export interface ArtifactPreview {
   text: string;
   truncated: boolean;
 }
+
+/** A file in the project's working tree that differs from the last commit. */
+export type ChangedFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'untracked'
+  | 'conflicted';
+
+export interface ChangedFile {
+  /** Path relative to the workspace root, using forward slashes. */
+  path: string;
+  /** Previous path when the change is a rename. */
+  previousPath?: string;
+  status: ChangedFileStatus;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface ChangedFileDiff {
+  path: string;
+  /** Unified diff text. Empty when the file has no textual changes. */
+  patch: string;
+  truncated: boolean;
+}
+
+/** Uncommitted files in a workspace, plus whether the folder is a Git repo. */
+export interface WorkspaceChanges {
+  files: ChangedFile[];
+  /** False when the workspace folder is not inside a Git work tree. */
+  isRepository: boolean;
+}

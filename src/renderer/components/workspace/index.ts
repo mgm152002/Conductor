@@ -3,6 +3,7 @@
 export { PlanTimelineRegion } from './PlanTimelineRegion';
 export { ActivityRegion } from './ActivityRegion';
 export { ArtifactsRegion } from './ArtifactsRegion';
+export { FilesRegion } from './FilesRegion';
 export { VerificationRegion } from './VerificationRegion';
 export { ContextPanelRegion } from './ContextPanelRegion';
 export { useFocusedTask } from './useFocusedTask';

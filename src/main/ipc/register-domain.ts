@@ -55,6 +55,7 @@ import { Mem0Error } from '../domain/mem0-client';
 import { parseRunOptions } from '../agents/run-resolver';
 import type { UsageRange, UsageSummary } from '@shared/usage';
 import { UsageSummaryRequest, WorkspaceDeleteRequest } from '@shared/ipc-contract';
+import { listWorkspaceChanges, readWorkspaceFileDiff } from '../domain/workspace-changes';
 
 // Wire the workspace, settings, and task-lifecycle services onto the validated
 // IPC router. Every handler goes through `router.handle`, which enforces the
@@ -155,6 +156,18 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     WorkspaceCreateRequest,
     (_event, input): Workspace => workspaces.create(input),
   );
+
+  router.handle('workspace.changes', A['workspace.changes'], async (_event, input) => {
+    const workspace = workspaces.get(input.workspaceId);
+    if (workspace === undefined) throw new Error(`Workspace ${input.workspaceId} not found`);
+    return listWorkspaceChanges(workspace.rootPath);
+  });
+
+  router.handle('workspace.fileDiff', A['workspace.fileDiff'], async (_event, input) => {
+    const workspace = workspaces.get(input.workspaceId);
+    if (workspace === undefined) throw new Error(`Workspace ${input.workspaceId} not found`);
+    return readWorkspaceFileDiff(workspace.rootPath, input.path);
+  });
 
   router.handle('workspace.select', WorkspaceSelectRequest, (_event, input) => {
     workspaces.select(input.id);

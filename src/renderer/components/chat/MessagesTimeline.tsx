@@ -2,27 +2,14 @@ import { useState } from 'react';
 import type { TimelineItem, WorkEntry } from '../../lib/timeline';
 import { cn } from '../../lib/cn';
 import { Markdown } from './Markdown';
+import { WorkIcon } from './WorkIcon';
 import {
-  ActivityIcon, AlertCircleIcon, CheckIcon, ChevronRightIcon, FileTextIcon, ListChecksIcon, PlayIcon,
-  SearchIcon, ShieldIcon, SparklesIcon, Spinner, TerminalIcon, XIcon,
+  AlertCircleIcon, CheckIcon, ChevronRightIcon, ListChecksIcon, SparklesIcon, Spinner, TerminalIcon, XIcon,
 } from '../ui/icons';
 import { AttachmentTray } from '../attachments';
 
 // Renders the chat timeline built by lib/timeline: right-aligned user bubble,
 // collapsible "work log" groups, assistant prose, errors, and diagnostics.
-
-const ICONS: Record<WorkEntry['icon'], (p: { size?: number; className?: string }) => React.JSX.Element> = {
-  terminal: TerminalIcon,
-  file: FileTextIcon,
-  thinking: SparklesIcon,
-  tool: PlayIcon,
-  search: SearchIcon,
-  read: FileTextIcon,
-  plan: ListChecksIcon,
-  state: ActivityIcon,
-  artifact: FileTextIcon,
-  approval: ShieldIcon,
-};
 
 function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }): React.JSX.Element {
   const checks = item.criteria.filter((criterion) => criterion !== 'response: nonempty');
@@ -55,7 +42,6 @@ function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }
 
 function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JSX.Element {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const Icon = ICONS[entry.icon];
   const expandable = entry.detail !== undefined && entry.detail !== '';
   // A running command/tool shows its output or arguments without a click, so
   // live threads explain what the agent is actually doing.
@@ -69,7 +55,7 @@ function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JS
         : null;
   const content = (
     <>
-      <Icon size={14} className="shrink-0 text-muted-foreground" />
+      <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-muted-foreground" />
       {entry.source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{entry.source}</span> : null}
       <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'running' && live ? 'text-shimmer' : entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
       {toneIcon}
@@ -144,7 +130,7 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
       {items.map((item, index) => (
         <li key={item.id}>
           {item.kind === 'user' ? <UserMessage item={item} /> : null}
-          {item.kind === 'work' ? <WorkGroup item={item} live={live && index === lastWorkIndex && index === items.length - 1} /> : null}
+          {item.kind === 'work' ? <WorkGroup item={item} live={live && index === lastWorkIndex} /> : null}
           {item.kind === 'notice' ? (
             <div role="status" className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               <SparklesIcon size={13} className="mt-0.5 shrink-0 text-primary" />

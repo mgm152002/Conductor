@@ -310,6 +310,21 @@ export function latestActivity(items: TimelineItem[]): WorkEntry | undefined {
   return undefined;
 }
 
+/**
+ * The most recent streamed activities in order, oldest first. Unlike
+ * {@link latestActivity}, this keeps a short tail so the live feed can show
+ * several CLI steps instead of collapsing the stream to one line.
+ */
+export function recentActivities(items: TimelineItem[], limit = 5): WorkEntry[] {
+  if (limit <= 0) return [];
+  const entries: WorkEntry[] = [];
+  for (const item of items) {
+    if (item.kind !== 'work') continue;
+    for (const entry of item.entries) if (entry.notice !== true) entries.push(entry);
+  }
+  return entries.slice(-limit);
+}
+
 /** Builds the same work-log presentation for a standalone Chat assistant reply. */
 export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
   const items: TimelineItem[] = [];
