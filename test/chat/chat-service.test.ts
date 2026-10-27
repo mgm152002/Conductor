@@ -84,12 +84,7 @@ describe('standalone casual chat', () => {
     await settled(service, second.thread.id);
     const secondInput = adapter.calls.started[1] as ObjectiveInput;
     expect(secondInput).not.toHaveProperty('attachments');
-    expect(secondInput.conversation?.[0]).not.toHaveProperty('attachments');
-    expect(secondInput.conversation).toEqual([{
-      objective: 'Summarize this',
-      reply: 'first answer',
-      state: 'complete',
-    }]);
+    expect(secondInput.conversation).toEqual([]);
 
     const reopened = new SqliteStore(path);
     stores.push(reopened);

@@ -159,11 +159,16 @@ export class ChatService {
       const user = history[i];
       const reply = history[i + 1];
       if (user?.role === 'user' && reply?.role === 'assistant') {
-        conversation.push({
-          objective: user.content,
-          reply: reply.content,
-          state: reply.status,
-        });
+        // Attachment-bearing exchanges stay visible in the UI, but do not
+        // enter later agent prompts. Their text can refer to files that are no
+        // longer current and otherwise distract from the new attachment.
+        if (user.attachments.length === 0) {
+          conversation.push({
+            objective: user.content,
+            reply: reply.content,
+            state: reply.status,
+          });
+        }
         i += 1;
       }
     }
