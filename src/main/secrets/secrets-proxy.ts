@@ -112,7 +112,15 @@ function substitute(value: unknown, token: string, realValue: string): unknown {
   }
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = substitute(child, token, realValue);
+    // Assignment to `__proto__` invokes Object.prototype's legacy setter and
+    // silently drops the own property. Define every key explicitly so unusual
+    // but valid request keys are preserved without changing the clone's prototype.
+    Object.defineProperty(out, key, {
+      value: substitute(child, token, realValue),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return out;
 }

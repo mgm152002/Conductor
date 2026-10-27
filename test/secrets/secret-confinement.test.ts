@@ -138,6 +138,27 @@ function requestArb(secretIds: readonly string[]) {
 }
 
 describe('Property 6: secret confinement', () => {
+  it('substitutes a placeholder stored under an own __proto__ key', async () => {
+    const request: Record<string, unknown> = {};
+    Object.defineProperty(request, '__proto__', {
+      value: secretToken('token'), enumerable: true, writable: true, configurable: true,
+    });
+    const proxy = new SecretsProxy(
+      mapResolver(Object.assign(Object.create(null) as Record<string, string>, { token: 'REAL-SECRET-token-VALUE' })),
+      allowAll,
+      recorder(),
+    );
+    let transported: unknown;
+
+    await proxy.egressRequest({ request, adapterId: 'adapter', target: 'host' }, async (resolved) => {
+      transported = resolved;
+      return 'ok';
+    });
+
+    expect(Object.hasOwn(transported as object, '__proto__')).toBe(true);
+    expect((transported as Record<string, unknown>)['__proto__']).toBe('REAL-SECRET-token-VALUE');
+  });
+
   it('real values surface only at the transport, on no other surface', async () => {
     await fc.assert(
       fc.asyncProperty(
