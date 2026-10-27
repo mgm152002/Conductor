@@ -90,35 +90,87 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
     // may take longer than that to answer.
     const mcpConfig = { mcpServers: { [CLAUDE_APPROVAL_SERVER]: { type: 'http', url: `${session.baseUrl}/mcp`, timeout: APPROVAL_TIMEOUT_MS } } };
     return {
-      args: ['-p', '--output-format', 'json', '--permission-mode', 'default',
+      args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
         '--mcp-config', JSON.stringify(mcpConfig), '--permission-prompt-tool', `mcp__${CLAUDE_APPROVAL_SERVER}__${PERMISSION_TOOL}`, ...modelArgs],
       cwd: data.rootPath, stdin,
     };
   }
 
   /**
-   * `--output-format json` prints one result envelope at the end (verified
-   * with Claude Code 2.1.310): `{type:'result', is_error, result, usage,
-   * total_cost_usd, modelUsage}`. The reply becomes stdout and the usage is
-   * recorded; anything else on stdout is passed through as text.
+   * `stream-json` emits one JSON object per line: assistant thinking/tool-use
+   * and tool results as they happen, then the final result envelope. Thinking
+   * and tool calls become activity rows; assistant text streams as the reply.
+   * Older builds and the read-only JSON mode still produce a single result
+   * envelope, which `parseResult` handles.
    */
   protected attach(live: GatedLive, child: ChildProcessWithoutNullStreams): void {
     const lines: string[] = [];
-    createInterface({ input: child.stdout }).on('line', (line) => { lines.push(line); });
+    let envelope: Json | null = null;
+    let assistantText = '';
+    createInterface({ input: child.stdout }).on('line', (line) => {
+      lines.push(line);
+      let event: Json | null = null;
+      try { event = obj(JSON.parse(line)); } catch { return; }
+      if (event === null) return;
+      if (event['type'] === 'assistant') {
+        const content = Array.isArray(obj(event['message'])?.['content']) ? obj(event['message'])!['content'] as unknown[] : [];
+        for (const raw of content) {
+          const block = obj(raw);
+          if (block === null) continue;
+          const type = str(block['type']);
+          if (type === 'text') {
+            const text = str(block['text']);
+            if (text !== undefined) {
+              assistantText += text;
+              live.events.push('stdout', text.replace(/\n+$/, ''));
+            }
+          } else if (type === 'thinking') {
+            const text = str(block['thinking']) ?? str(block['text']);
+            if (text !== undefined && text.trim() !== '') live.events.push('log', { message: text.trim(), kind: 'reasoning', source: 'Claude Code' });
+          } else if (type === 'tool_use') {
+            const tool = str(block['name']) ?? 'tool';
+            const id = str(block['id']);
+            live.events.push('log', {
+              message: `${tool}`,
+              kind: claudeToolKind(tool),
+              detail: claudeToolDetail(tool, obj(block['input']) ?? {}),
+              ...(id !== undefined ? { key: id } : {}),
+              status: 'running',
+              source: 'Claude Code',
+            });
+          }
+        }
+        return;
+      }
+      if (event['type'] === 'user') {
+        const content = Array.isArray(obj(event['message'])?.['content']) ? obj(event['message'])!['content'] as unknown[] : [];
+        for (const raw of content) {
+          const block = obj(raw);
+          const id = str(block?.['tool_use_id']);
+          if (block?.['type'] !== 'tool_result' || id === undefined) continue;
+          live.events.push('log', { key: id, status: block['is_error'] === true ? 'failed' : 'completed', source: 'Claude Code' });
+        }
+        return;
+      }
+      if (event['type'] === 'result') envelope = event;
+    });
     child.once('close', () => {
-      const envelope = parseResult(lines.join('\n'));
-      if (envelope === null) {
-        for (const line of lines) live.events.push('stdout', line);
+      const final = envelope ?? parseResult(lines.join('\n'));
+      if (final === null) {
+        for (const line of lines) if (!line.trim().startsWith('{')) live.events.push('stdout', line);
         return; // the exit code decides
       }
-      const usage = claudeUsage(envelope, pinnedModel(live.data, 'claude-code'));
+      const usage = claudeUsage(final, pinnedModel(live.data, 'claude-code'));
       if (usage !== undefined) live.events.push('log', { usage });
-      const text = str(envelope['result']) ?? '';
-      if (envelope['is_error'] === true) {
+      const text = str(final['result']) ?? '';
+      if (final['is_error'] === true) {
         this.finish(live, live.cancelled ? { status: 'cancelled' } : { status: 'failed', error: text || 'Claude Code reported an error' });
         return;
       }
-      if (text.trim() !== '') live.events.push('stdout', text);
+      // Streamed assistant text is already in the timeline; the result envelope
+      // repeats it, so only use it when no text block arrived.
+      const reply = assistantText.trim() !== '' ? '' : text;
+      if (reply.trim() !== '') live.events.push('stdout', reply);
       this.finish(live, live.cancelled ? { status: 'cancelled' } : { status: 'succeeded', exitCode: 0 });
     });
   }
@@ -133,6 +185,30 @@ function parseResult(output: string): Json | null {
   } catch {
     return null;
   }
+}
+
+/** The timeline icon family for a Claude Code tool. */
+export function claudeToolKind(tool: string): string {
+  if (tool === 'Bash' || tool === 'BashOutput') return 'execute';
+  if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') return 'edit';
+  if (tool === 'Glob' || tool === 'Grep' || tool === 'LS') return 'search';
+  if (tool === 'Read' || tool === 'NotebookRead') return 'read';
+  if (tool === 'WebFetch' || tool === 'WebSearch') return 'fetch';
+  return 'tool';
+}
+
+/** A short command/path/query summary for one Claude Code tool call. */
+export function claudeToolDetail(tool: string, input: Json): string | undefined {
+  if (tool === 'Bash' || tool === 'BashOutput') return str(input['command']);
+  if (tool === 'Glob') return str(input['pattern']) ?? str(input['path']);
+  if (tool === 'Grep') return [str(input['pattern']), str(input['path'])].filter(Boolean).join(' · ') || undefined;
+  if (tool === 'WebFetch') return str(input['url']);
+  if (tool === 'WebSearch') return str(input['query']);
+  const path = str(input['file_path']) ?? str(input['notebook_path']) ?? str(input['path']);
+  if (path !== undefined) return path;
+  const description = str(input['description']);
+  if (description !== undefined) return description;
+  return Object.keys(input).length > 0 ? JSON.stringify(input).slice(0, 2000) : undefined;
 }
 
 /** Token usage from a Claude Code result envelope. Input counts include cache reads and writes. */

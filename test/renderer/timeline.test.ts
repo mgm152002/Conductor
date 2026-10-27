@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskEvent } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
-import { buildTimeline } from '../../src/renderer/lib/timeline';
+import { buildTimeline, latestActivity } from '../../src/renderer/lib/timeline';
 
 const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 'COMPLETED', acceptanceCriteria: ['response: nonempty'], contextRefs: [], createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z' };
 let n = 0;
 const stdout = (line: unknown): TaskEvent => ({ id: `e${n++}`, taskId: 't', kind: 'stream', payload: { kind: 'stdout', data: typeof line === 'string' ? line : JSON.stringify(line) }, createdAt: `2026-10-24T00:00:${String(n).padStart(2, '0')}Z` });
+const log = (payload: Record<string, unknown>): TaskEvent => ({ id: `l${n++}`, taskId: 't', kind: 'log', payload, createdAt: `2026-10-24T00:00:${String(n).padStart(2, '0')}Z` });
 const details = (events: TaskEvent[]): TaskDetails => ({ task, steps: [], events, artifacts: [], attachments: [], approvals: [], verification: null });
 
 describe('chat timeline', () => {
@@ -82,5 +83,32 @@ describe('chat timeline', () => {
       stdout({ type: 'turn.failed', error: { message: 'rate limited' } }),
     ]));
     expect(items.filter((i) => i.kind === 'error').map((i) => (i as { text: string }).text)).toEqual(['No agent available', 'rate limited']);
+  });
+
+  it('merges a keyed tool completion after an assistant reply and keeps its source and detail', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Bash', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'Claude Code' }),
+      stdout('Running the suite'),
+      log({ message: 'Bash', key: 'tool-1', status: 'completed', source: 'Claude Code' }),
+      log({ message: 'The tests pass.\nEverything is green.', kind: 'reasoning', source: 'Claude Code' }),
+      stdout('All done.'),
+    ]));
+
+    expect(items.map((item) => item.kind)).toEqual(['user', 'work', 'assistant', 'work', 'assistant']);
+    const start = (items[1] as Extract<typeof items[number], { kind: 'work' }>).entries[0]!;
+    expect(start).toMatchObject({ label: 'Bash', detail: 'npm test', tone: 'success', icon: 'terminal', source: 'Claude Code' });
+    expect((items[3] as Extract<typeof items[number], { kind: 'work' }>).entries[0]).toMatchObject({
+      label: 'The tests pass.', detail: 'The tests pass.\nEverything is green.', icon: 'thinking', source: 'Claude Code',
+    });
+    expect((items[4] as Extract<typeof items[number], { kind: 'assistant' }>).text).toBe('All done.');
+  });
+
+  it('reports the latest real activity, skipping diagnostic notices', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Read src/a.ts', kind: 'read', status: 'completed', source: 'OpenCode' }),
+      stdout({ type: 'item.completed', item: { id: 'n', type: 'error', message: 'Ignoring unknown feature' } }),
+    ]));
+
+    expect(latestActivity(items)).toMatchObject({ label: 'Read src/a.ts', icon: 'read', source: 'OpenCode' });
   });
 });

@@ -17,6 +17,7 @@ const ICONS: Record<WorkEntry['icon'], (p: { size?: number; className?: string }
   thinking: SparklesIcon,
   tool: PlayIcon,
   search: SearchIcon,
+  read: FileTextIcon,
   plan: ListChecksIcon,
   state: ActivityIcon,
   artifact: FileTextIcon,
@@ -52,21 +53,25 @@ function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }
   );
 }
 
-function WorkRow({ entry }: { entry: WorkEntry }): React.JSX.Element {
-  const [open, setOpen] = useState(false);
+function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JSX.Element {
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const Icon = ICONS[entry.icon];
   const expandable = entry.detail !== undefined && entry.detail !== '';
+  // A running command/tool shows its output or arguments without a click, so
+  // live threads explain what the agent is actually doing.
+  const open = manualOpen ?? (live && entry.tone === 'running');
   const toneIcon = entry.tone === 'running'
     ? <Spinner size={12} className="text-info" />
     : entry.tone === 'error'
       ? <XIcon size={12} className="text-destructive" />
-      : entry.tone === 'success' && entry.icon === 'terminal'
+      : entry.tone === 'success' && (entry.icon === 'terminal' || entry.icon === 'tool')
         ? <CheckIcon size={12} className="text-success" />
         : null;
   const content = (
     <>
       <Icon size={14} className="shrink-0 text-muted-foreground" />
-      <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
+      {entry.source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{entry.source}</span> : null}
+      <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'running' && live ? 'text-shimmer' : entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
       {toneIcon}
       {expandable ? <ChevronRightIcon size={12} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} /> : null}
     </>
@@ -74,7 +79,7 @@ function WorkRow({ entry }: { entry: WorkEntry }): React.JSX.Element {
   return (
     <li>
       {expandable ? (
-        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={open} className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+        <button type="button" onClick={() => { setManualOpen(!open); }} aria-expanded={open} className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           {content}
         </button>
       ) : (
@@ -92,9 +97,11 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
   const entries = item.entries;
   const commands = entries.filter((e) => e.icon === 'terminal').length;
   const files = entries.filter((e) => e.icon === 'file').length;
+  const tools = entries.filter((e) => e.icon === 'tool' || e.icon === 'search' || e.icon === 'read').length;
   const summaryParts = [
     commands > 0 ? `${commands} command${commands === 1 ? '' : 's'}` : null,
     files > 0 ? `${files} file change${files === 1 ? '' : 's'}` : null,
+    tools > 0 ? `${tools} tool call${tools === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   const last = [...entries].reverse().find((e) => e.notice !== true) ?? entries[entries.length - 1]!;
   // Short groups and the live group stay expanded, like T3 Code's work log.
@@ -109,7 +116,7 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
           {!expanded ? <span className="ml-auto min-w-0 truncate text-muted-foreground/70">{last.label}</span> : null}
         </button>
       ) : null}
-      {expanded ? <ul className="flex flex-col py-1">{entries.map((entry) => <WorkRow key={entry.id} entry={entry} />)}</ul> : null}
+      {expanded ? <ul className="flex flex-col py-1">{entries.map((entry) => <WorkRow key={entry.id} entry={entry} live={live} />)}</ul> : null}
     </div>
   );
 }

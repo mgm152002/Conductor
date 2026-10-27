@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Task, TaskStep } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
 import type { PlanTask } from '@shared/plan';
-import { buildTimeline } from '../../lib/timeline';
+import { buildTimeline, latestActivity } from '../../lib/timeline';
 import { cn } from '../../lib/cn';
 import { formatDuration } from '../../lib/time';
 import { agentLabel, usageLabel } from '../../lib/usage-format';
@@ -24,20 +24,29 @@ const STATUS: Record<TaskStep['status'], { label: string; dot: string }> = {
 };
 
 function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: PlanTask; step: TaskStep | undefined; details: TaskDetails }): React.JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const status = STATUS[step?.status ?? 'pending'];
   const usage = step !== undefined ? details.usage?.byStep[step.id] : undefined;
-  const items = useMemo(() => {
-    if (!open || step === undefined) return [];
-    const events = details.events.filter((e) => e.stepId === step.id && e.kind !== 'transition');
-    return buildTimeline(task, { ...details, events }).filter((item) => item.kind !== 'user');
-  }, [open, step, details, task]);
+  const events = useMemo(
+    () => step === undefined ? [] : details.events.filter((e) => e.stepId === step.id && e.kind !== 'transition'),
+    [step, details],
+  );
+  const timeline = useMemo(
+    () => step === undefined ? [] : buildTimeline(task, { ...details, events }).filter((item) => item.kind !== 'user'),
+    [events, step, details, task],
+  );
+  const activity = useMemo(() => latestActivity(timeline), [timeline]);
+  // A running plan task is expanded so the thread shows what the agent is
+  // doing live, not just the plan row's status dot.
+  const running = step?.status === 'running';
+  const open = manualOpen ?? running;
+  const items = open ? timeline : [];
   const duration = step?.startedAt !== undefined && step.endedAt !== undefined ? formatDuration(Date.parse(step.endedAt) - Date.parse(step.startedAt)) : undefined;
   return (
     <li className="rounded-lg border border-border/70 bg-background/60">
       <button
         type="button"
-        onClick={() => { setOpen((v) => !v); }}
+        onClick={() => { setManualOpen(!open); }}
         aria-expanded={open}
         disabled={step === undefined}
         className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-accent/60 disabled:cursor-default"
@@ -54,6 +63,13 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
           {[duration, usage !== undefined ? usageLabel(usage).replace(' tokens', ' tok') : undefined].filter(Boolean).join(' · ')}
         </span>
       </button>
+      {!open && activity !== undefined ? (
+        <p className="flex min-w-0 items-center gap-1.5 px-8 pb-1.5 text-3xs text-muted-foreground">
+          {running ? <Spinner size={9} className="shrink-0 text-info" /> : null}
+          <span className="truncate" title={activity.label}>{activity.label}</span>
+          {activity.source !== undefined ? <span className="shrink-0 text-muted-foreground/70">· {activity.source}</span> : null}
+        </p>
+      ) : null}
       {open ? (
         <div className="border-t border-border/70 px-3 py-2.5">
           {planTask.details.length > 0 ? (
@@ -62,7 +78,7 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
             </ul>
           ) : null}
           {planTask.dependsOn.length > 0 ? <p className="mb-2 text-3xs text-muted-foreground">Depends on {planTask.dependsOn.join(', ')}</p> : null}
-          {items.length > 0 ? <MessagesTimeline items={items} live={step?.status === 'running'} /> : <p className="text-2xs text-muted-foreground">{step?.status === 'pending' ? 'Not started yet.' : 'No output recorded.'}</p>}
+          {items.length > 0 ? <MessagesTimeline items={items} live={running} /> : <p className="text-2xs text-muted-foreground">{step?.status === 'pending' ? 'Not started yet.' : 'No output recorded.'}</p>}
         </div>
       ) : null}
     </li>

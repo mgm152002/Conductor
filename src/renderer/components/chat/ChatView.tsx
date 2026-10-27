@@ -5,7 +5,7 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { buildTimeline, isAgentFallbackEvent, type TimelineItem } from '../../lib/timeline';
+import { buildTimeline, isAgentFallbackEvent, latestActivity, type TimelineItem } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { cn } from '../../lib/cn';
@@ -19,7 +19,7 @@ import { PendingApprovalPanel } from './PendingApprovalPanel';
 import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanCard, PlanResults, runLabel } from './PlanCard';
-import { formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
+import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
 // The main surface, in the T3 Code shape: a thread header, a centred message
 // timeline, and the composer docked at the bottom, with an optional details
@@ -41,10 +41,17 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
   const now = useNow(working);
   if (working) {
     const label = task.state === 'VERIFYING' ? 'Verifying results' : task.state === 'RUNNING' ? 'Working' : 'Preparing';
+    const runningStep = details?.steps.find((step) => step.status === 'running');
+    const activity = latestActivity(items);
+    const detail = activity !== undefined && activity.icon !== 'state' ? activity.label : runningStep?.description;
+    const source = activity?.source ?? (runningStep?.assignedAdapterId !== undefined ? agentLabel(runningStep.assignedAdapterId) : undefined);
     return (
-      <div className="flex items-center gap-2 px-1 text-[13px]" role="status">
-        <span className="text-shimmer font-medium">{label}…</span>
-        <span className="text-2xs text-muted-foreground tabular-nums">{formatDuration(now - Date.parse(task.createdAt))}</span>
+      <div className="flex min-w-0 items-center gap-2 px-1 text-[13px]" role="status">
+        <span className="min-w-0 truncate text-shimmer font-medium" title={detail !== undefined ? `${label}: ${detail}` : label}>
+          {label}{detail !== undefined ? ` · ${detail}` : '…'}
+        </span>
+        {source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{source}</span> : null}
+        <span className="ml-auto shrink-0 text-2xs text-muted-foreground tabular-nums">{formatDuration(now - Date.parse(task.createdAt))}</span>
       </div>
     );
   }

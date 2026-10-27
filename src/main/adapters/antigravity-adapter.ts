@@ -42,6 +42,31 @@ const COMMAND_TOOLS = new Set(['run_command', 'send_command_input', 'notebook_ex
 const PATH_KEY = /path|file|dir|uri/i;
 const HOOK_TIMEOUT_S = 3600;
 
+/** The timeline icon family for an Antigravity tool. */
+export function agyToolKind(name: string): string {
+  if (COMMAND_TOOLS.has(name)) return 'execute';
+  if (FILE_TOOLS.has(name)) return 'edit';
+  if (/grep|search|find|list/i.test(name)) return 'search';
+  if (/view|read|outline/i.test(name)) return 'read';
+  return 'tool';
+}
+
+/** A concise command/path summary for an Antigravity tool step. */
+export function agyToolDetail(info: Json): string | undefined {
+  const args = obj(info['args']) ?? obj(info['tool_args']) ?? obj(info['input']) ?? info;
+  const command = str(args['CommandLine']) ?? str(args['command']);
+  if (command !== undefined) return command;
+  for (const key of ['AbsolutePath', 'TargetFile', 'Path', 'DirectoryPath', 'pattern', 'Query']) {
+    const value = str(args[key]);
+    if (value !== undefined) return value;
+  }
+  const summary = str(args['toolSummary']);
+  if (summary !== undefined) return summary;
+  // A completion update may carry only the error; the caller renders that.
+  if (args['error'] !== undefined) return undefined;
+  return Object.keys(args).length > 0 ? JSON.stringify(args).slice(0, 2000) : undefined;
+}
+
 function pathArgs(args: Json): string[] {
   return Object.entries(args)
     .filter(([key, value]) => PATH_KEY.test(key) && typeof value === 'string' && /^(\/|~|file:\/\/)/.test(value))
@@ -191,10 +216,32 @@ export class AntigravityAdapter extends GatedAgentAdapter {
       if (event['event'] === 'step_update') {
         const step = obj(event['step_update']) ?? {};
         if (step['step_type'] === 'agent_response' && typeof step['text_delta'] === 'string') reply += step['text_delta'];
-        if (step['step_type'] === 'tool' && step['state'] !== 'ACTIVE') {
+        if (step['step_type'] === 'tool') {
+          const name = str(step['tool_name']) ?? 'tool';
           const info = obj(step['tool_info']) ?? {};
           const error = str(obj(info['error'])?.['message']);
-          live.events.push('log', { message: `${str(step['tool_name']) ?? 'tool'}: ${error ?? 'done'}` });
+          const state = str(step['state']);
+          const key = `${str(step['conversation_id']) ?? 'agy'}:${typeof step['step_index'] === 'number' ? step['step_index'] : name}`;
+          const detail = agyToolDetail(info);
+          if (state === 'ACTIVE') {
+            live.events.push('log', {
+              message: name,
+              kind: agyToolKind(name),
+              ...(detail !== undefined ? { detail } : {}),
+              key,
+              status: 'running',
+              source: 'Antigravity',
+            });
+          } else if (state === 'DONE' || state === 'ERROR' || state === 'CANCELED') {
+            live.events.push('log', {
+              message: name,
+              key,
+              ...(detail !== undefined ? { detail } : {}),
+              status: error !== undefined || state === 'ERROR' ? 'failed' : 'completed',
+              source: 'Antigravity',
+              ...(error !== undefined ? { detail: `${detail ? `${detail}\n` : ''}${error}` } : {}),
+            });
+          }
         }
       } else if (event['event'] === 'result') {
         result = obj(event['result']);

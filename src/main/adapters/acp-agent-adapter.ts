@@ -125,6 +125,49 @@ export function acpOutcome(options: unknown, decision: ToolApprovalDecision): Js
   return optionId !== undefined ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } };
 }
 
+function acpPaths(update: Json): string[] {
+  const paths = Array.isArray(update['locations'])
+    ? (update['locations'] as unknown[]).map((location) => str(obj(location)?.['path'])).filter((path): path is string => path !== undefined)
+    : [];
+  const raw = obj(update['rawInput']);
+  for (const key of ['path', 'filePath', 'file_path']) {
+    const value = str(raw?.[key]);
+    if (value !== undefined) paths.push(value);
+  }
+  return [...new Set(paths)];
+}
+
+/**
+ * A concise, human-readable detail for an ACP tool call. The timeline shows
+ * this under the activity row, so users can see the command, path or query the
+ * agent is working with instead of only "tool call".
+ */
+export function acpToolDetail(update: Json): string | undefined {
+  const lines: string[] = [];
+  const raw = obj(update['rawInput']);
+  if (raw !== null) {
+    const command = raw['command'];
+    const line = Array.isArray(command) ? command.filter((part): part is string => typeof part === 'string').join(' ') : str(command);
+    if (line !== undefined) lines.push(line);
+    for (const key of ['query', 'pattern', 'url']) {
+      const value = str(raw[key]);
+      if (value !== undefined) lines.push(value);
+    }
+  }
+  for (const path of acpPaths(update)) if (!lines.includes(path)) lines.push(path);
+  if (lines.length > 0) return lines.join('\n');
+  if (raw !== null && Object.keys(raw).length > 0) return JSON.stringify(raw).slice(0, 2000);
+  return undefined;
+}
+
+/** "Plan · 2/5 done" for an ACP plan update, or "Plan updated". */
+export function acpPlanLabel(update: Json): string {
+  const entries = Array.isArray(update['entries']) ? update['entries'].map(obj).filter((entry): entry is Json => entry !== null) : [];
+  if (entries.length === 0) return 'Plan updated';
+  const done = entries.filter((entry) => str(entry['status']) === 'completed').length;
+  return `Plan · ${done}/${entries.length} done`;
+}
+
 /** The model a new ACP session reports (config option or the unstable `models` field). */
 function currentModel(created: Json): string | undefined {
   const options = Array.isArray(created['configOptions']) ? (created['configOptions'] as unknown[]).map(obj) : [];
@@ -177,13 +220,34 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
     let sessionId: string | undefined;
     let model: string | undefined;
     let message = '';
+    let thought = '';
     // Tool calls declined during the current turn. ACP agents such as OpenCode
     // end the turn with stopReason "cancelled" when one is declined; that is
     // not a user cancellation, so `run` can ask the agent to carry on.
     let declinedTools = 0;
+    const flushThought = (): void => {
+      const text = thought.trim();
+      thought = '';
+      if (text !== '') live.events.push('log', { message: text, kind: 'reasoning', source: name });
+    };
     const flush = (): void => {
+      flushThought();
       if (message.trim() !== '') live.events.push('stdout', message.replace(/\n+$/, ''));
       message = '';
+    };
+    const activity = (update: Json, status: string): void => {
+      const title = str(update['title']);
+      const kind = str(update['kind']);
+      const key = str(update['toolCallId']);
+      const detail = acpToolDetail(update);
+      live.events.push('log', {
+        ...(title !== undefined ? { message: title } : {}),
+        ...(kind !== undefined ? { kind } : {}),
+        ...(detail !== undefined ? { detail } : {}),
+        ...(key !== undefined ? { key } : {}),
+        status,
+        source: name,
+      });
     };
 
     const onPermission = async (id: unknown, params: Json): Promise<void> => {
@@ -191,7 +255,7 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       const gateRequest = { ...acpGateRequest(name, toolCall), cwd: data.rootPath };
       const decision = await live.gate.decide(gateRequest);
       if (!isAccept(decision) && decision !== 'cancel') declinedTools += 1;
-      live.events.push('log', { message: `${gateRequest.summary}: ${isAccept(decision) ? 'approved' : 'declined'}`, detail: gateRequest.detail });
+      live.events.push('log', { message: `${gateRequest.summary}: ${isAccept(decision) ? 'approved' : 'declined'}`, detail: gateRequest.detail, source: name });
       send({ id, result: acpOutcome(params['options'], decision) });
     };
 
@@ -203,15 +267,25 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
           if (content?.['type'] === 'text' && typeof content['text'] === 'string') message += content['text'];
           break;
         }
+        case 'agent_thought_chunk': {
+          const content = obj(update['content']);
+          if (content?.['type'] === 'text' && typeof content['text'] === 'string') thought += content['text'];
+          break;
+        }
         case 'tool_call':
           flush();
-          live.events.push('log', { message: `${name}: ${str(update['title']) ?? 'tool call'}`, kind: str(update['kind']) });
+          activity(update, str(update['status']) === 'failed' ? 'failed' : 'running');
           break;
         case 'tool_call_update': {
           const status = str(update['status']);
-          if (status === 'failed') live.events.push('log', { message: `${name}: ${str(update['title']) ?? 'tool call'} failed` });
+          if (status === 'completed') activity(update, 'completed');
+          else if (status === 'failed') activity(update, 'failed');
           break;
         }
+        case 'plan':
+          flushThought();
+          live.events.push('log', { message: acpPlanLabel(update), kind: 'plan', source: name });
+          break;
         case 'usage_update': {
           // Context-window usage, plus the session's cost when the agent knows it.
           const cost = obj(update['cost']);

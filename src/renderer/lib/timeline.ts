@@ -15,11 +15,15 @@ export type WorkTone = 'neutral' | 'success' | 'error' | 'running';
 
 export interface WorkEntry {
   id: string;
-  icon: 'terminal' | 'file' | 'thinking' | 'tool' | 'search' | 'plan' | 'state' | 'artifact' | 'approval';
+  icon: 'terminal' | 'file' | 'thinking' | 'tool' | 'search' | 'read' | 'plan' | 'state' | 'artifact' | 'approval';
   label: string;
   detail?: string;
   tone: WorkTone;
   at: string;
+  /** Stable id used to merge a start event with its later completion. */
+  key?: string;
+  /** Agent or step that produced this activity. */
+  source?: string;
   /** Diagnostic notices (config warnings) never summarize a work group. */
   notice?: boolean;
 }
@@ -60,6 +64,34 @@ const STATE_LABELS: Record<string, string> = {
   RECOVERABLE_INTERRUPTION: 'Interrupted',
 };
 
+/** A compact one-line label for reasoning and other free-form activity. */
+function firstLine(text: string, limit = 120): string {
+  const line = text.trim().split('\n').find((entry) => entry.trim() !== '') ?? '';
+  const clean = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/\*\*/g, '').trim();
+  return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean;
+}
+
+/** Map adapter activity kinds to the lucide-style icon shown in the work log. */
+function iconForLogKind(kind: string | undefined): WorkEntry['icon'] {
+  switch (kind) {
+    case 'execute': case 'command': case 'run': case 'bash': case 'shell': return 'terminal';
+    case 'edit': case 'write': case 'file_change': case 'delete': case 'move': return 'file';
+    case 'search': case 'grep': case 'glob': case 'find': case 'fetch': return 'search';
+    case 'read': case 'open': return 'read';
+    case 'reasoning': case 'thought': case 'thinking': case 'think': return 'thinking';
+    case 'plan': case 'todo': return 'plan';
+    case 'approval': return 'approval';
+    default: return 'tool';
+  }
+}
+
+function toneForStatus(status: string | undefined): WorkTone {
+  if (status === 'failed' || status === 'error') return 'error';
+  if (status === 'running' || status === 'in_progress' || status === 'pending') return 'running';
+  if (status === 'completed' || status === 'success' || status === 'succeeded') return 'success';
+  return 'neutral';
+}
+
 /** Builds timeline items from task details. Pure; safe to unit test. */
 export function buildTimeline(task: Task, details: TaskDetails | null): TimelineItem[] {
   const items: TimelineItem[] = [{
@@ -78,6 +110,8 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   const diagnostics = new Map<string, { lines: string[]; at: string }>();
   // Codex reports an item twice (started, completed); later reports update the same entry.
   const byItemId = new Map<string, WorkEntry>();
+  // ACP/Claude activities carry a tool-call key, so start/completion stay one row.
+  const byKey = new Map<string, WorkEntry>();
 
   const flushWork = (): void => {
     if (work.length === 0) return;
@@ -155,10 +189,43 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
       }
       case 'log': {
         const text = str(payload?.['message']) ?? str(payload?.['text']) ?? (typeof event.payload === 'string' ? event.payload : undefined);
-        if (text !== undefined) {
-          if (isAgentFallbackEvent(event)) addNotice(event.id, text, event.createdAt);
-          else addWork({ id: event.id, icon: 'tool', label: text, tone: 'neutral', at: event.createdAt });
+        if (isAgentFallbackEvent(event)) {
+          if (text !== undefined) addNotice(event.id, text, event.createdAt);
+          break;
         }
+        const detail = str(payload?.['detail']);
+        const kind = str(payload?.['kind']);
+        const key = str(payload?.['key']) ?? str(payload?.['toolCallId']);
+        const status = str(payload?.['status']);
+        const source = str(payload?.['source']);
+        const tone = toneForStatus(status);
+        const existing = key !== undefined ? byKey.get(key) : undefined;
+        // A completion update only carries a key and status; enrich the row
+        // that the matching start event already added. The row may live in an
+        // earlier group if assistant prose was flushed in between.
+        if (existing !== undefined) {
+          if (text !== undefined) existing.label = kind === 'reasoning' ? firstLine(text) : text.trim();
+          if (detail !== undefined) existing.detail = detail;
+          if (kind !== undefined) existing.icon = iconForLogKind(kind);
+          if (source !== undefined) existing.source = source;
+          if (status !== undefined) existing.tone = tone;
+          break;
+        }
+        if (text === undefined && detail === undefined) break;
+        const label = kind === 'reasoning' ? firstLine(text ?? detail ?? 'Thinking') : (text ?? detail ?? 'Activity').trim();
+        if (label === '') break;
+        const entry: WorkEntry = {
+          id: key !== undefined ? `log:${key}:${event.id}` : event.id,
+          icon: iconForLogKind(kind),
+          label,
+          ...(detail !== undefined ? { detail } : kind === 'reasoning' && text !== undefined ? { detail: text } : {}),
+          tone,
+          at: event.createdAt,
+          ...(key !== undefined ? { key } : {}),
+          ...(source !== undefined ? { source } : {}),
+        };
+        if (key !== undefined) byKey.set(key, entry);
+        addWork(entry);
         break;
       }
       default:
@@ -221,7 +288,7 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     const entry = workEntryFor(itemType, item, completed, event, itemId);
     if (entry === null) return;
     const existing = byItemId.get(itemId);
-    if (existing !== undefined && work.includes(existing)) {
+    if (existing !== undefined) {
       Object.assign(existing, entry, { id: existing.id });
       return;
     }
@@ -230,14 +297,25 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   }
 }
 
+/** The latest thing an agent did (ignoring diagnostic notices). */
+export function latestActivity(items: TimelineItem[]): WorkEntry | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.kind !== 'work') continue;
+    const entries = item.entries.filter((entry) => entry.notice !== true);
+    const latest = entries[entries.length - 1];
+    if (latest !== undefined) return latest;
+  }
+  return undefined;
+}
+
 function workEntryFor(itemType: string | undefined, item: Json, completed: boolean, event: TaskEvent, itemId: string): WorkEntry | null {
   const base = { id: `${itemId}:${event.id}`, at: event.createdAt };
   switch (itemType) {
     case 'reasoning': {
       const text = str(item['text']);
       if (!completed || text === undefined || text.trim() === '') return null;
-      const firstLine = text.trim().split('\n')[0]!.replace(/^\*\*|\*\*$/g, '');
-      return { ...base, icon: 'thinking', label: firstLine.length > 120 ? `${firstLine.slice(0, 117)}…` : firstLine, detail: text.trim(), tone: 'neutral' };
+      return { ...base, icon: 'thinking', label: firstLine(text), detail: text.trim(), tone: 'neutral' };
     }
     case 'command_execution': {
       const command = str(item['command']) ?? 'command';
