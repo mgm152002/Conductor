@@ -69,6 +69,7 @@ import { assessDifficulty, economyGuidance } from './agents/model-routing';
 import { CONTEXT_BUDGET, capContext } from './agents/context-budget';
 import { UsageRecorder, usageSummary } from './usage/usage';
 import { QuotaRecorder } from './usage/quota';
+import { QuotaPollingService } from './usage/quota-polling';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
@@ -106,6 +107,8 @@ export interface AppServices {
   /** The renderer emitter proactive suggestions are surfaced through. */
   suggestionEvents: IpcSuggestionEmitter;
   dataControl: DataControlService;
+  /** Background and on-demand provider quota snapshot refreshes. */
+  quotaPolling: QuotaPollingService;
   router: IpcRouter;
   /** The renderer event emitter the orchestrator streams task progress through. */
   taskEvents: IpcTaskEventEmitter;
@@ -272,6 +275,7 @@ export async function bootstrap(): Promise<AppServices> {
   // Token usage per agent session, and the agent display names it is shown with.
   const usage = new UsageRecorder(store);
   const quota = new QuotaRecorder(store);
+  const quotaPolling = new QuotaPollingService({ quota });
   const agentName = (id: string): string => (registry.has(id) ? registry.resolve(id).record.name : id);
 
   // Plan mode: a chosen agent writes requirements and a task list; each task
@@ -477,6 +481,7 @@ export async function bootstrap(): Promise<AppServices> {
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
+    refreshUsageLimits: () => quotaPolling.refresh(),
     usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters() }),
   });
 
@@ -540,6 +545,7 @@ export async function bootstrap(): Promise<AppServices> {
     secrets: secretStore,
     suggestionEvents,
     dataControl,
+    quotaPolling,
     router,
     taskEvents,
     externalFlowEvents,

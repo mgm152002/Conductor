@@ -44,6 +44,7 @@ import type {
   TaskStep,
   TaskStepStatus,
 } from '@shared/domain';
+import type { UsageSummary } from '@shared/usage';
 
 // Task 11.4 — the end-to-end integration test for the M1–M3 vertical slice.
 //
@@ -226,6 +227,8 @@ function launch(opts: {
   consequential: FakeAdapter;
   storage?: DiskManagedStorage;
   evaluator?: CriterionEvaluator;
+  refreshUsageLimits?: () => Promise<void>;
+  usageSummary?: () => UsageSummary;
 }): Harness {
   const stateMachine = new TaskStateMachine(store, audit);
   const emitter = new RecordingTaskEventEmitter();
@@ -278,6 +281,8 @@ function launch(opts: {
     resumeService,
     cliCatalog: { list: () => [], rescan: () => [] } as never,
     dataControl: new DataControlService(store, settings, audit),
+    ...(opts.refreshUsageLimits !== undefined ? { refreshUsageLimits: opts.refreshUsageLimits } : {}),
+    ...(opts.usageSummary !== undefined ? { usageSummary: opts.usageSummary } : {}),
   });
 
   return {
@@ -292,6 +297,14 @@ function launch(opts: {
     benign: opts.benign,
     consequential: opts.consequential,
   };
+}
+
+function emptyUsageSummary(): UsageSummary {
+  const totals = {
+    key: 'all', label: 'All agents', sessions: 0, inputTokens: 0, cachedInputTokens: 0,
+    outputTokens: 0, reasoningTokens: 0, totalTokens: 0,
+  };
+  return { range: '7d', totals, byAgent: [], byProject: [], byModel: [], clients: [] };
 }
 
 // ---- Durable read helpers (read straight from SQLite, not any memory cache) ----
@@ -605,5 +618,46 @@ describe('E2E: IPC → stream → approval → crash → relaunch → resume →
       .prepare('SELECT verified FROM checkpoints WHERE id = ?')
       .get(verify.verifiedCheckpointId) as { verified: number };
     expect(verifiedCheckpoint.verified).toBe(1);
+  });
+});
+
+describe('Usage summary quota refresh', () => {
+  it('awaits quota refresh before reading the usage summary', async () => {
+    const order: string[] = [];
+    const built = buildRegistry({});
+    const h = launch({
+      ...built,
+      refreshUsageLimits: async () => {
+        await Promise.resolve();
+        order.push('refresh');
+      },
+      usageSummary: () => {
+        order.push('summary');
+        return emptyUsageSummary();
+      },
+    });
+
+    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d' }));
+
+    expect(order).toEqual(['refresh', 'summary']);
+    expect(result.range).toBe('7d');
+  });
+
+  it('returns the stored summary when quota refresh fails', async () => {
+    let refreshes = 0;
+    const built = buildRegistry({});
+    const h = launch({
+      ...built,
+      refreshUsageLimits: async () => {
+        refreshes += 1;
+        throw new Error('provider unavailable');
+      },
+      usageSummary: emptyUsageSummary,
+    });
+
+    const result = expectOk(await h.ipcMain.invoke<UsageSummary>('usage.summary', { range: '7d' }));
+
+    expect(refreshes).toBe(1);
+    expect(result).toEqual(emptyUsageSummary());
   });
 });

@@ -80,9 +80,11 @@ app.whenReady().then(async () => {
   services.connectorRuntime.start();
   services.suggestionEvents.setWebContentsResolver(getWebContents);
   services.mcp.startHealthChecks();
+  services.quotaPolling.start();
   app.on('before-quit', () => {
     void services.chat.stop();
     services.connectorRuntime.stop();
+    services.quotaPolling.stop();
     void services.mcp.stop();
   });
 

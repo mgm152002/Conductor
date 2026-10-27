@@ -97,6 +97,8 @@ export interface DomainHandlerDeps {
    * ones, with its session/weekly limit windows under `limits`.
    */
   usageSummary?: (input: UsageSummaryQuery) => UsageSummary;
+  /** Refresh provider quota snapshots before serving an explicit usage read. */
+  refreshUsageLimits?: () => Promise<void>;
 }
 
 export function registerDomainHandlers(deps: DomainHandlerDeps): void {
@@ -166,7 +168,7 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     return deps.deleteThread(input.threadId);
   });
 
-  router.handle('usage.summary', UsageSummaryRequest, (_event, input): UsageSummary => {
+  router.handle('usage.summary', UsageSummaryRequest, async (_event, input): Promise<UsageSummary> => {
     if (deps.usageSummary === undefined) throw new Error('Usage is not available.');
     // Validation above has already rejected unknown ranges, so this query is
     // exactly the extended overview contract (including `clients` and limits).
@@ -174,6 +176,9 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
       range: input.range,
       ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
     };
+    // A temporary provider/CLI failure must not hide the last valid snapshot
+    // already stored locally. The background poller will retry on its cadence.
+    await deps.refreshUsageLimits?.().catch(() => undefined);
     return deps.usageSummary(query);
   });
 
