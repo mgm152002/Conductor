@@ -1,5 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { pathToFileURL } from 'node:url';
 import { GatedAgentAdapter, objectivePrompt, pinnedEffort, pinnedModel, type GatedAdapterConfig, type GatedLive, type Launch } from './gated-agent-adapter';
 import type { CliEnvironment } from './local-cli-adapter';
 import { isAccept, isSensitivePath, type GateRequest, type ToolApprovalDecision, type ToolApprover } from './tool-gate';
@@ -28,6 +30,19 @@ const RPC_TIMEOUT_MS = 120_000;
 const PROTOCOL_VERSION = 1;
 /** How many times a turn ended by a declined tool is continued. */
 const DECLINE_CONTINUATIONS = 2;
+
+/** Native ACP content blocks, restricted to capabilities advertised by the agent. */
+function attachmentBlocks(data: GatedLive['data'], imageCapable: boolean): Json[] {
+  return (data.attachments ?? []).map((attachment): Json => {
+    if (attachment.kind === 'image' && imageCapable) {
+      return { type: 'image', mimeType: attachment.mimeType, data: readFileSync(attachment.path).toString('base64') };
+    }
+    return {
+      type: 'resource_link', uri: pathToFileURL(attachment.path).href, name: attachment.name,
+      mimeType: attachment.mimeType, size: attachment.sizeBytes,
+    };
+  });
+}
 
 /**
  * Sent when the agent ended its turn right after Conductor declined a tool
@@ -335,11 +350,13 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
     };
 
     const run = async (): Promise<void> => {
-      await request('initialize', {
+      const initialized = obj(await request('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
         clientInfo: { name: 'conductor', version: '0.1.0' },
-      });
+      }));
+      const promptCapabilities = obj(obj(initialized?.['agentCapabilities'])?.['promptCapabilities']);
+      const imageCapable = promptCapabilities?.['image'] === true;
       const pinned = pinnedModel(data, this.spec.modelKey);
       const effort = pinnedEffort(data, this.spec.modelKey);
       const created = obj(await request('session/new', {
@@ -353,9 +370,10 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       if (effort !== undefined) await this.selectEffort(live, request, sessionId, created ?? {}, effort);
       if (live.cancelled) { this.finish(live, { status: 'cancelled' }); return; }
       const sid = sessionId;
-      const turn = async (text: string): Promise<Json | null> => {
+      const turn = async (text: string, includeAttachments = false): Promise<Json | null> => {
         declinedTools = 0;
-        const reply = obj(await request('session/prompt', { sessionId: sid, prompt: [{ type: 'text', text }] }, null));
+        const prompt = [{ type: 'text', text }, ...(includeAttachments ? attachmentBlocks(data, imageCapable) : [])];
+        const reply = obj(await request('session/prompt', { sessionId: sid, prompt }, null));
         flush();
         const usage = obj(reply?.['usage']);
         if (usage !== null) {
@@ -367,7 +385,7 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
         }
         return reply;
       };
-      let done = await turn(objectivePrompt(data));
+      let done = await turn(objectivePrompt(data), true);
       // A declined tool is not a user cancellation: OpenCode ends the turn
       // instead of carrying on, so continue the same session and ask it to use
       // the read-only tools. Bounded, and skipped for real cancellations.

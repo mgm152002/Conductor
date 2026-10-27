@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '../../lib/cn';
 import { XIcon } from './icons';
 
@@ -127,7 +128,7 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
     return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  const dialog = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
       <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn('relative z-10 w-full rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl outline-none', width)}>
@@ -143,6 +144,11 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
       </div>
     </div>
   );
+  // Project threads set `container-type: inline-size` on their layout, which
+  // makes it the containing block for fixed-position descendants and traps
+  // modals inside the scrolled thread. Portal every dialog to <body> so image
+  // previews and confirmations always render above the whole app.
+  return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
 }
 
 export const inputClassName = 'h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 disabled:opacity-50';

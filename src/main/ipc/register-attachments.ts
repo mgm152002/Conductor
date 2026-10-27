@@ -15,5 +15,6 @@ export function registerAttachmentHandlers(router: IpcRouter, attachments: Attac
     maxPayloadBytes: MAX_ATTACHMENT_BYTES + 4096,
   });
   router.handle('attachment.preview', ATTACHMENT_SCHEMAS['attachment.preview'], (_event, { id }) => safe(() => attachments.preview(id)));
+  router.handle('attachment.thumbnail', ATTACHMENT_SCHEMAS['attachment.thumbnail'], (_event, { id }) => safe(() => attachments.thumbnail(id)));
   router.handle('attachment.discard', ATTACHMENT_SCHEMAS['attachment.discard'], (_event, { id }) => safe(() => attachments.discard(id)));
 }

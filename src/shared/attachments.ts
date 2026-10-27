@@ -295,6 +295,7 @@ export const ATTACHMENT_SCHEMAS = {
     bytes: AttachmentBytesSchema,
   }).strict(),
   'attachment.preview': z.object({ id: AttachmentIdSchema }).strict(),
+  'attachment.thumbnail': z.object({ id: AttachmentIdSchema }).strict(),
   'attachment.discard': z.object({ id: AttachmentIdSchema }).strict(),
 } as const;
 
@@ -306,6 +307,7 @@ export type AttachmentIngestBytesInput = z.infer<
   (typeof ATTACHMENT_SCHEMAS)['attachment.ingestBytes']
 >;
 export type AttachmentPreviewInput = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.preview']>;
+export type AttachmentThumbnailInput = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.thumbnail']>;
 export type AttachmentDiscardInput = z.infer<(typeof ATTACHMENT_SCHEMAS)['attachment.discard']>;
 
 /**
@@ -322,6 +324,8 @@ export interface AttachmentBridge {
   ingestBytes(input: AttachmentIngestBytesInput): Promise<AttachmentIngestResult>;
   /** Render a preview by id; refuses ids the main process did not record. */
   preview(id: string): Promise<AttachmentPreview>;
+  /** A small cached PNG thumbnail for an image attachment, or null. */
+  thumbnail(id: string): Promise<string | null>;
   /** Remove an unbound draft attachment; linked attachments are kept. */
   discard(id: string): Promise<void>;
 }

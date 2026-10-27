@@ -31,6 +31,8 @@ describe('attachment validation boundaries', () => {
   it('rejects malformed ids, arbitrary preview paths, empty files and oversized bytes', () => {
     expect(AttachmentIdsSchema.safeParse(['../../secret']).success).toBe(false);
     expect(ATTACHMENT_SCHEMAS['attachment.preview'].safeParse({ id: ids[0], path: '/etc/passwd' }).success).toBe(false);
+    expect(ATTACHMENT_SCHEMAS['attachment.thumbnail'].safeParse({ id: ids[0] }).success).toBe(true);
+    expect(ATTACHMENT_SCHEMAS['attachment.thumbnail'].safeParse({ id: ids[0], path: '/etc/passwd' }).success).toBe(false);
     expect(attachmentSizeError(0)).toMatch(/empty/i);
     expect(attachmentSizeError(MAX_ATTACHMENT_BYTES)).toBeNull();
     expect(attachmentSizeError(MAX_ATTACHMENT_BYTES + 1)).toMatch(/larger/i);

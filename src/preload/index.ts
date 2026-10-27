@@ -120,6 +120,7 @@ const attachment: AttachmentBridge = {
   ingest: (input) => invoke('attachment.ingestPaths', input),
   ingestBytes: (input) => invoke('attachment.ingestBytes', input),
   preview: (id) => invoke('attachment.preview', { id }),
+  thumbnail: (id) => invoke('attachment.thumbnail', { id }),
   discard: (id) => invoke('attachment.discard', { id }),
 };
 
