@@ -68,6 +68,7 @@ import { RunResolver } from './agents/run-resolver';
 import { assessDifficulty, economyGuidance } from './agents/model-routing';
 import { CONTEXT_BUDGET, capContext } from './agents/context-budget';
 import { UsageRecorder, usageSummary } from './usage/usage';
+import { QuotaRecorder } from './usage/quota';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
@@ -270,12 +271,13 @@ export async function bootstrap(): Promise<AppServices> {
 
   // Token usage per agent session, and the agent display names it is shown with.
   const usage = new UsageRecorder(store);
+  const quota = new QuotaRecorder(store);
   const agentName = (id: string): string => (registry.has(id) ? registry.resolve(id).record.name : id);
 
   // Plan mode: a chosen agent writes requirements and a task list; each task
   // runs on its agent and independent tasks run in parallel.
   const planner = new AgentPlanner({
-    store, registry, usage, emitter: taskEvents, agentName,
+    store, registry, usage, quota, emitter: taskEvents, agentName,
     getTask: (id) => stateMachine.getTask(id),
     baseInput: async (task, requiredCapability) => ({
       ...await executionInput(task, { description: 'Write the plan', requiredCapability }),
@@ -296,7 +298,7 @@ export async function bootstrap(): Promise<AppServices> {
     canceller,
     audit,
     {
-      registry, permissions, emitter: taskEvents, storage, planner, usage,
+      registry, permissions, emitter: taskEvents, storage, planner, usage, quota,
       contextProvider: persistentContext,
       criterionEvaluator: evidenceEvaluator(store),
       // CLI agents can have side effects; retries are explicit through the UI.
@@ -475,7 +477,7 @@ export async function bootstrap(): Promise<AppServices> {
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
-    usageSummary: (input) => usageSummary(store, input, agentName),
+    usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters() }),
   });
 
   registerKnowledgeHandlers({router,store,context,memory});

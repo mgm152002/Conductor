@@ -15,6 +15,7 @@ import { isCodexProtocol } from '../orchestrator/thread-context';
 import { responseText } from '../adapters/objective-cli-adapter';
 import { classifyFailure, retryableOnAnotherAgent, tailLines, type FailureKind } from '../adapters/failure-classification';
 import { usageFromEvent, type UsageRecorder } from '../usage/usage';
+import { quotaFromEvent, type QuotaRecorder } from '../usage/quota';
 import { computeWaves, extractPlanJson, MAX_PLAN_TASKS, planSlug, planTasks, referencedCriteria, renderRequirements, renderTasks, validatePlan, type PlanTaskStatus } from './plan-doc';
 
 // Plan mode. A task created with a planner agent gets a task_plans row; when
@@ -34,6 +35,7 @@ export interface AgentPlannerDeps {
   baseInput: (task: Task, requiredCapability: string) => Record<string, unknown> | Promise<Record<string, unknown>>;
   agentName: (adapterId: string) => string;
   usage?: UsageRecorder;
+  quota?: QuotaRecorder;
   emitter?: TaskEventEmitter;
   fallback?: Planner;
   /** Model and effort for a plan task on its agent (composer → Settings → Auto by difficulty). */
@@ -289,6 +291,10 @@ export class AgentPlanner implements Planner {
     const usage = usageFromEvent(ev);
     if (usage !== undefined) {
       try { this.deps.usage?.record({ sessionId, taskId, adapterId: plannerId, sample: usage }); } catch { /* informational */ }
+    }
+    const quota = quotaFromEvent(ev);
+    if (quota !== undefined) {
+      try { this.deps.quota?.record({ adapterId: plannerId, sample: quota }); } catch { /* informational */ }
     }
     if (ev.kind === 'stderr' && typeof ev.data === 'string') { stderr.push(ev.data); return; }
     if (ev.kind !== 'stdout' || typeof ev.data !== 'string') return;

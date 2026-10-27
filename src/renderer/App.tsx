@@ -12,6 +12,7 @@ import {
   RecentActivityScreen,
   SettingsScreen,
   SkillsScreen,
+  UsageScreen,
   WorkflowsScreen,
 } from './screens';
 
@@ -28,6 +29,7 @@ const SCREENS: Record<NavEntryId, () => React.JSX.Element> = {
   skills: SkillsScreen,
   'connected-apps': ConnectedAppsScreen,
   memory: MemoryScreen,
+  usage: UsageScreen,
   settings: SettingsScreen,
 };
 

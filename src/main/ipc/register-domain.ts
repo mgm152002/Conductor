@@ -61,6 +61,16 @@ import { UsageSummaryRequest, WorkspaceDeleteRequest } from '@shared/ipc-contrac
 // allowlist and validates payloads with the channel's Zod schema before
 // running.
 
+/**
+ * Validated query for the usage overview. `range` mirrors the shared
+ * `UsageRange` union; `UsageSummaryRequest` rejects any other value before the
+ * handler or dependency runs.
+ */
+export interface UsageSummaryQuery {
+  range: UsageRange;
+  workspaceId?: string;
+}
+
 export interface DomainHandlerDeps {
   router: IpcRouter;
   runner: TaskRunner;
@@ -81,8 +91,12 @@ export interface DomainHandlerDeps {
   deleteProject?: (workspaceId: string) => Promise<ProjectDeletionResult>;
   /** Deletes a conversation thread and everything stored for its tasks. */
   deleteThread?: (threadId: string) => Promise<ThreadDeletionResult>;
-  /** Token usage totals. */
-  usageSummary?: (input: { range: UsageRange; workspaceId?: string }) => UsageSummary;
+  /**
+   * Token usage overview. The extended summary keeps the legacy totals and
+   * breakdowns and adds `clients`: every attached CLI, including zero-usage
+   * ones, with its session/weekly limit windows under `limits`.
+   */
+  usageSummary?: (input: UsageSummaryQuery) => UsageSummary;
 }
 
 export function registerDomainHandlers(deps: DomainHandlerDeps): void {
@@ -154,7 +168,13 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
 
   router.handle('usage.summary', UsageSummaryRequest, (_event, input): UsageSummary => {
     if (deps.usageSummary === undefined) throw new Error('Usage is not available.');
-    return deps.usageSummary({ range: input.range, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}) });
+    // Validation above has already rejected unknown ranges, so this query is
+    // exactly the extended overview contract (including `clients` and limits).
+    const query: UsageSummaryQuery = {
+      range: input.range,
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    };
+    return deps.usageSummary(query);
   });
 
   router.handle(

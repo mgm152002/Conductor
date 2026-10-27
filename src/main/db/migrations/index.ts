@@ -1177,6 +1177,43 @@ const migration022: Migration = {
   },
 };
 
+// Migration 23 — per-CLI quota windows. The latest snapshot a CLI reported for
+// its session and weekly limits, keyed by adapter and window kind so a new
+// sample overwrites the previous one. Percentages are nullable: a missing
+// value means "not reported" and must stay distinguishable from a reported 0.
+// remaining_percent / used_percent are checked into the inclusive 0..100 range;
+// resets_at is the provider's reset time and reported_at is when the CLI
+// supplied the sample. Only quota values and their source are stored; no
+// prompts or secrets.
+const migration023: Migration = {
+  version: 23,
+  name: 'agent_usage_limits',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_usage_limits (
+        adapter_id        TEXT NOT NULL,
+        window_kind       TEXT NOT NULL
+                            CHECK (window_kind IN ('session', 'weekly')),
+        remaining_percent REAL
+                            CHECK (remaining_percent IS NULL
+                              OR (remaining_percent >= 0 AND remaining_percent <= 100)),
+        used_percent      REAL
+                            CHECK (used_percent IS NULL
+                              OR (used_percent >= 0 AND used_percent <= 100)),
+        resets_at         TEXT,
+        reported_at       TEXT NOT NULL,
+        source            TEXT,
+        window_minutes    INTEGER
+                            CHECK (window_minutes IS NULL OR window_minutes >= 0),
+        updated_at        TEXT NOT NULL,
+        PRIMARY KEY (adapter_id, window_kind)
+      );
+      CREATE INDEX idx_agent_usage_limits_reported
+        ON agent_usage_limits (reported_at);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1201,4 +1238,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration020,
   migration021,
   migration022,
+  migration023,
 ];

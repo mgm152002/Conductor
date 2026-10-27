@@ -142,6 +142,16 @@ function on(channel: EventChannel, handler: ((payload: ChatConversation) => void
   return () => { ipcRenderer.removeListener(channel, listener); };
 }
 
+/**
+ * Query accepted by the usage overview bridge. `range` mirrors the shared
+ * `UsageRange` union; the main process validates it against
+ * `UsageSummaryRequest` and rejects unknown values.
+ */
+export interface UsageSummaryQuery {
+  range: UsageRange;
+  workspaceId?: string;
+}
+
 const conductor = {
   chat,
   attachment,
@@ -161,7 +171,13 @@ const conductor = {
     delete: (id: string): Promise<ProjectDeletionResult> => invoke('workspace.delete', { id, confirmed: true }),
   },
   usage: {
-    summary: (input: { range: UsageRange; workspaceId?: string }): Promise<UsageSummary> => invoke('usage.summary', input),
+    /**
+     * Extended usage overview for the selected range. `UsageSummary.clients`
+     * carries every attached CLI and its session/weekly `limits`; the legacy
+     * totals and breakdowns stay on the same response.
+     */
+    summary: (input: UsageSummaryQuery): Promise<UsageSummary> =>
+      invoke<UsageSummary>('usage.summary', input),
   },
   settings: {
     get: (key: string): Promise<unknown> => invoke('settings.get', { key }),

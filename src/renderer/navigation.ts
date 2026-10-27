@@ -1,7 +1,7 @@
 // Single source of truth for the left-sidebar navigation. Requirement 22.3
-// mandates EXACTLY these nine entries, in this order:
+// mandates EXACTLY these ten entries, in this order:
 //   Home, Projects, Active tasks, Recent activity, Workflows, Skills,
-//   Connected apps, Memory, Settings.
+//   Connected apps, Memory, Usage, Settings.
 // The sidebar renders this list and the router builds its routes from it, so
 // the set cannot drift between the two.
 
@@ -23,6 +23,7 @@ export const NAV_ENTRIES = [
   { id: 'skills', label: 'Skills', path: '/skills' },
   { id: 'connected-apps', label: 'Connected apps', path: '/connected-apps' },
   { id: 'memory', label: 'Memory', path: '/memory' },
+  { id: 'usage', label: 'Usage', path: '/usage' },
   { id: 'settings', label: 'Settings', path: '/settings' },
 ] as const satisfies readonly NavEntry[];
 

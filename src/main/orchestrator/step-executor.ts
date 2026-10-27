@@ -10,6 +10,7 @@ import type {
 } from '../domain/permission-service';
 import type { ManagedStorage } from '../storage/managed-storage';
 import { usageFromEvent, type UsageRecorder } from '../usage/usage';
+import { quotaFromEvent, type QuotaRecorder } from '../usage/quota';
 import { classifyFailure, retryableOnAnotherAgent, tailLines, type FailureKind } from '../adapters/failure-classification';
 import { stepReply } from './thread-context';
 import type { TaskStateMachine } from './state-machine';
@@ -144,6 +145,8 @@ export interface StepExecutorOptions {
   maxParallel?: number;
   /** Records token usage reported in adapter streams. */
   usage?: UsageRecorder;
+  /** Records quota windows reported in adapter streams. */
+  quota?: QuotaRecorder;
   /** Called after each step settles (succeeded, failed or cancelled). */
   onStepSettled?: (taskId: string, stepId: string) => void;
   /** Settings-configured fallback model for an agent after a retryable failure. */
@@ -188,6 +191,7 @@ export class StepExecutor {
   private readonly baseBackoffMs: number;
   private readonly maxParallel: number;
   private readonly usage: UsageRecorder | undefined;
+  private readonly quota: QuotaRecorder | undefined;
   private readonly resolveInput: StepExecutorOptions['resolveInput'];
   private readonly onStepSettled: ((taskId: string, stepId: string) => void) | undefined;
   private readonly fallbackModel: StepExecutorOptions['fallbackModel'];
@@ -213,6 +217,7 @@ export class StepExecutor {
     this.baseBackoffMs = options.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;
     this.maxParallel = Math.max(1, options.maxParallel ?? DEFAULT_MAX_PARALLEL);
     this.usage = options.usage;
+    this.quota = options.quota;
     this.resolveInput = options.resolveInput;
     this.onStepSettled = options.onStepSettled;
     this.fallbackModel = options.fallbackModel;
@@ -650,6 +655,11 @@ export class StepExecutor {
       if (usage !== undefined) {
         try { this.usage!.record({ sessionId, taskId, stepId: step.id, adapterId: handle.adapterId, sample: usage }); }
         catch { /* usage is informational; never fail a step over it */ }
+      }
+      const quota = this.quota !== undefined ? quotaFromEvent(ev) : undefined;
+      if (quota !== undefined) {
+        try { this.quota!.record({ adapterId: handle.adapterId, sample: quota }); }
+        catch { /* quota is informational; never fail a step over it */ }
       }
 
       const now = new Date().toISOString();

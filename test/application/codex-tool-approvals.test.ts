@@ -98,6 +98,30 @@ describe('Codex over app-server with per-tool-call approvals', () => {
     });
   });
 
+  it('reads the current quota snapshot when a session starts', async () => {
+    // `setup` writes the fake codex binary at the temp root.
+    await setup();
+    const adapter = new CodexAppServerAdapter(
+      { id: 'codex', name: 'Codex', command: join(root!, 'codex'), capabilities: [] },
+      async () => 'decline',
+    );
+    const handle = await adapter.start({ objective: 'make notes', rootPath: root!, mode: 'read_only', models: { codex: 'gpt-good' } });
+    let quota: unknown;
+    for await (const event of adapter.stream(handle)) {
+      if (event.kind !== 'log') continue;
+      const data = event.data as { quota?: unknown } | null;
+      if (data !== null && typeof data === 'object' && data.quota !== undefined) quota = data.quota;
+    }
+    expect(await adapter.await(handle)).toMatchObject({ status: 'succeeded' });
+    expect(quota).toMatchObject({
+      source: 'codex',
+      windows: [
+        { kind: 'session', usedPercent: 25, remainingPercent: 75 },
+        { kind: 'weekly', usedPercent: 60, remainingPercent: 40 },
+      ],
+    });
+  }, 30_000);
+
   it('starts without an up-front approval and asks only when Codex runs a command', async () => {
     const { s, runner, machine, permissions, workspace } = await setup();
     const task = await runner.create({ workspaceId: workspace.id, objective: 'make notes', acceptanceCriteria: ['contains: decision=accept'] });

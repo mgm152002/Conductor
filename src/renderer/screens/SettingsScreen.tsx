@@ -1,7 +1,6 @@
 import { ExecutionSettings } from '../components/settings/ExecutionSettings';
 import { IntegrationSettings } from '../components/settings/IntegrationSettings';
 import { AgentModels } from '../components/settings/AgentModels';
-import { UsageSettings } from '../components/settings/UsageSettings';
 import { ScreenScaffold } from './ScreenScaffold';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
 import { useThemeStore } from '../stores';
@@ -22,7 +21,6 @@ export function SettingsScreen(): React.JSX.Element {
         <WorkspaceManager />
         <ExecutionSettings />
         <AgentModels />
-        <UsageSettings />
         <IntegrationSettings />
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold text-foreground">

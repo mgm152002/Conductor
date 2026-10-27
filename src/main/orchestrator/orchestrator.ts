@@ -3,6 +3,7 @@ import type { Store } from '../db/types';
 import type { AuditLog } from '../domain/audit-log';
 import type { WorkspaceService } from '../domain/workspace-service';
 import type { UsageRecorder } from '../usage/usage';
+import type { QuotaRecorder } from '../usage/quota';
 import {
   PermissionService,
   type PermissionSubject,
@@ -240,6 +241,8 @@ export interface OrchestratorOptions {
   maxParallelSteps?: number;
   /** Records token usage reported by agents. */
   usage?: UsageRecorder;
+  /** Records quota windows reported by agents. */
+  quota?: QuotaRecorder;
   /** Called after each step settles. */
   onStepSettled?: (taskId: string, stepId: string) => void;
   resolveInput?: import('./step-executor').StepExecutorOptions['resolveInput'];
@@ -316,6 +319,7 @@ export class Orchestrator {
           : {}),
         ...(options.maxParallelSteps !== undefined ? { maxParallel: options.maxParallelSteps } : {}),
         ...(options.usage !== undefined ? { usage: options.usage } : {}),
+        ...(options.quota !== undefined ? { quota: options.quota } : {}),
         ...(options.resolveInput !== undefined ? { resolveInput: options.resolveInput } : {}),
         ...(options.onStepSettled !== undefined ? { onStepSettled: options.onStepSettled } : {}),
         ...(options.fallbackModel !== undefined ? { fallbackModel: options.fallbackModel } : {}),

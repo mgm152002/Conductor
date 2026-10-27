@@ -5,6 +5,7 @@ import type {
   AdapterRecord, AdapterResult, AdapterSessionHandle, AdapterStreamEvent, AdapterStreamEventKind, AgentAdapter, AgentSession, CapabilityDescriptor,
 } from '@shared/adapter';
 import { assertNoRawSecret } from '../secrets/secrets-proxy';
+import { quotaSampleFromCodexRateLimits } from '../usage/quota';
 import { CliNotFoundError, defaultCliEnvironment, discoverOnPath, type CliEnvironment } from './local-cli-adapter';
 import type { ObjectiveInput } from './objective-cli-adapter';
 import { attachmentPromptFields, codexMcpOverrides, effortFor } from './objective-cli-adapter';
@@ -302,6 +303,14 @@ export class CodexAppServerAdapter implements AgentAdapter {
             reasoningTokens: n('reasoningOutputTokens'), totalTokens: n('totalTokens'), ...(threadModel ? { model: threadModel } : {}) } });
           break;
         }
+        case 'account/rateLimits/updated':
+        case 'account/rateLimit/updated': {
+          // Codex reports its quota as `{ rateLimits: { primary, secondary } }`;
+          // primary is the session window and secondary the weekly window.
+          const quota = quotaSampleFromCodexRateLimits(params, { source: this.config.id });
+          if (quota !== undefined) this.push(live, 'log', { quota });
+          break;
+        }
         case 'warning':
         case 'guardianWarning':
         case 'deprecationNotice': {
@@ -310,7 +319,13 @@ export class CodexAppServerAdapter implements AgentAdapter {
           break;
         }
         default:
-          break; // deltas, config warnings, rate limits, …
+          // Keep accepting newer/renamed rate-limit notifications: any
+          // `.../rateLimits/updated`-shaped method carries the same snapshot.
+          if (/rate.?limits?(\/updated)?$/i.test(method)) {
+            const quota = quotaSampleFromCodexRateLimits(params, { source: this.config.id });
+            if (quota !== undefined) this.push(live, 'log', { quota });
+          }
+          break; // deltas, config warnings, other notifications
       }
     };
 
@@ -329,6 +344,20 @@ export class CodexAppServerAdapter implements AgentAdapter {
 
     await request('initialize', { clientInfo: { name: 'conductor', version: '0.1.0' }, capabilities: null });
     send({ method: 'initialized' });
+
+    // Ask for the current quota snapshot up front. Codex only pushes
+    // `account/rateLimits/updated` when the window changes, so without this
+    // read a fresh install (or a quiet account) shows every window as
+    // "Not reported" even though Codex knows the percentages. Older builds
+    // may not expose the method, so a short race keeps session start fast.
+    const rateLimits = await Promise.race([
+      request('account/rateLimits/read', {}).catch(() => undefined),
+      new Promise<undefined>((resolve) => { setTimeout(() => { resolve(undefined); }, 1500); }),
+    ]);
+    if (rateLimits !== undefined) {
+      const quota = quotaSampleFromCodexRateLimits(rateLimits, { source: this.config.id });
+      if (quota !== undefined) this.push(live, 'log', { quota });
+    }
 
     const policy = approvalPolicyFor(data.mode, this.config.autoApprove?.() === true);
     const effort = effortFor('codex', data.efforts);

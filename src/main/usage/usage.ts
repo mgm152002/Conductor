@@ -1,6 +1,8 @@
 import type { AdapterStreamEvent } from '@shared/adapter';
-import type { UsageRange, UsageRow, UsageSummary } from '@shared/usage';
+import type { AdapterRecord } from '@shared/domain';
+import type { UsageClient, UsageLimitWindow, UsageRange, UsageRow, UsageSummary } from '@shared/usage';
 import type { Store } from '../db/types';
+import { isQuotaWindowCurrent } from './quota';
 
 // Token usage per agent session. Adapters report usage as a `log` stream
 // event whose data is `{ usage: UsageSample }` carrying the session's running
@@ -91,11 +93,15 @@ export class UsageRecorder {
   }
 }
 
-const RANGE_DAYS: Record<UsageRange, number | null> = { '7d': 7, '30d': 30, all: null };
+const RANGE_DAYS: Record<UsageRange, number | null> = { '24h': 1, '7d': 7, '30d': 30, '90d': 90, all: null };
 
 interface Aggregate {
   key: string; sessions: number; input: number; cached: number; output: number; reasoning: number; total: number; cost: number | null;
 }
+
+const emptyAggregate = (key: string): Aggregate => ({
+  key, sessions: 0, input: 0, cached: 0, output: 0, reasoning: 0, total: 0, cost: null,
+});
 
 function toRow(a: Aggregate, label: string): UsageRow {
   return {
@@ -104,11 +110,49 @@ function toRow(a: Aggregate, label: string): UsageRow {
   };
 }
 
+/** A stored quota window as returned by `agent_usage_limits`. */
+interface LimitRow {
+  adapter_id: string;
+  window_kind: string;
+  remaining_percent: number | null;
+  used_percent: number | null;
+  resets_at: string | null;
+  reported_at: string;
+  source: string | null;
+  window_minutes: number | null;
+}
+
+function toLimitWindow(row: LimitRow): UsageLimitWindow {
+  return {
+    kind: row.window_kind === 'weekly' ? 'weekly' : 'session',
+    ...(row.remaining_percent !== null ? { remainingPercent: row.remaining_percent } : {}),
+    ...(row.used_percent !== null ? { usedPercent: row.used_percent } : {}),
+    ...(row.resets_at !== null ? { resetsAt: row.resets_at } : {}),
+    ...(row.reported_at ? { reportedAt: row.reported_at } : {}),
+    ...(row.source !== null ? { source: row.source } : {}),
+    ...(row.window_minutes !== null ? { windowMinutes: row.window_minutes } : {}),
+  };
+}
+
+export interface UsageSummaryOptions {
+  /**
+   * The currently registered adapters (from `registry.listAdapters()`). Every
+   * attached local CLI agent appears under `clients`, even with no usage in the
+   * selected range or no reported limits.
+   */
+  adapters?: readonly AdapterRecord[];
+}
+
 const SUMS = `COUNT(*) AS sessions, SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(output_tokens) AS output,
   SUM(reasoning_tokens) AS reasoning, SUM(total_tokens) AS total, SUM(cost_usd) AS cost`;
 
-/** Usage totals for a time range, by agent and by project. */
-export function usageSummary(store: Store, input: { range: UsageRange; workspaceId?: string | undefined }, agentName: (id: string) => string): UsageSummary {
+/** Usage totals for a time range, by agent/project/model and per attached CLI. */
+export function usageSummary(
+  store: Store,
+  input: { range: UsageRange; workspaceId?: string | undefined },
+  agentName: (id: string) => string,
+  options: UsageSummaryOptions = {},
+): UsageSummary {
   const days = RANGE_DAYS[input.range];
   const where: string[] = [];
   const params: unknown[] = [];
@@ -122,6 +166,39 @@ export function usageSummary(store: Store, input: { range: UsageRange; workspace
   const byModel = store.db.prepare(`SELECT adapter_id || ' · ' || COALESCE(model, 'default model') AS key, ${SUMS} FROM agent_usage u ${clause}
     GROUP BY adapter_id, model ORDER BY total DESC LIMIT 20`).all(...params) as Aggregate[];
   const zero = (a: Aggregate): Aggregate => ({ ...a, sessions: a.sessions ?? 0, input: a.input ?? 0, cached: a.cached ?? 0, output: a.output ?? 0, reasoning: a.reasoning ?? 0, total: a.total ?? 0, cost: a.cost ?? null });
+
+  const limitsByAdapter = new Map<string, UsageLimitWindow[]>();
+  const limitRows = store.db.prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at,
+    reported_at, source, window_minutes FROM agent_usage_limits
+    ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 ELSE 1 END`).all() as LimitRow[];
+  const now = new Date();
+  for (const row of limitRows) {
+    const window = toLimitWindow(row);
+    // An expired window is stale, not a current limit: leave it unreported.
+    if (!isQuotaWindowCurrent(window, now)) continue;
+    const list = limitsByAdapter.get(row.adapter_id) ?? [];
+    list.push(window);
+    limitsByAdapter.set(row.adapter_id, list);
+  }
+
+  const agents = byAgent.map((a) => zero(a));
+  const used = new Map(agents.map((a) => [a.key, a]));
+  const clients = new Map<string, UsageClient>();
+  for (const adapter of options.adapters ?? []) {
+    if (adapter.class !== 'local_cli_agent') continue;
+    const aggregate = used.get(adapter.id) ?? emptyAggregate(adapter.id);
+    clients.set(adapter.id, {
+      ...toRow(aggregate, adapter.name || agentName(adapter.id)),
+      limits: limitsByAdapter.get(adapter.id) ?? [],
+    });
+  }
+  // Keep historical usage from CLIs that are no longer registered visible.
+  for (const aggregate of agents) {
+    if (clients.has(aggregate.key)) continue;
+    clients.set(aggregate.key, { ...toRow(aggregate, agentName(aggregate.key)), limits: limitsByAdapter.get(aggregate.key) ?? [] });
+  }
+  const clientList = [...clients.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
+
   return {
     range: input.range,
     totals: toRow(zero(totals), 'All agents'),
@@ -131,6 +208,7 @@ export function usageSummary(store: Store, input: { range: UsageRange; workspace
       const [agent, model] = a.key.split(' · ');
       return toRow(zero(a), `${agentName(agent ?? '')} · ${model ?? ''}`);
     }),
+    clients: clientList,
   };
 }
 

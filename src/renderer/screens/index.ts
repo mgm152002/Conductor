@@ -9,4 +9,5 @@ export { WorkflowsScreen } from './WorkflowsScreen';
 export { SkillsScreen } from './SkillsScreen';
 export { ConnectedAppsScreen } from './ConnectedAppsScreen';
 export { MemoryScreen } from './MemoryScreen';
+export { UsageScreen } from './UsageScreen';
 export { SettingsScreen } from './SettingsScreen';

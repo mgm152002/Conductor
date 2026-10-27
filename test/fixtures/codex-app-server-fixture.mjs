@@ -57,6 +57,12 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   switch (m.method) {
     case 'initialize': send({ id: m.id, result: { userAgent: 'fixture' } }); break;
     case 'initialized': break;
+    case 'account/rateLimits/read':
+      send({ id: m.id, result: { rateLimits: {
+        primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: Math.floor(Date.now() / 1000) + 3600 },
+        secondary: { usedPercent: 60, windowDurationMins: 10080, resetsAt: Math.floor(Date.now() / 1000) + 5 * 86400 },
+      } } });
+      break;
     case 'thread/start':
     case 'thread/resume':
       if (!((m.params.approvalPolicy === 'untrusted' && m.params.sandbox === 'workspace-write')

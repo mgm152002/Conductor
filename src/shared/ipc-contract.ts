@@ -50,7 +50,7 @@ export const WorkspaceDeleteRequest = z.object({
 });
 
 export const UsageSummaryRequest = z.object({
-  range: z.enum(['7d', '30d', 'all']),
+  range: z.enum(['24h', '7d', '30d', '90d', 'all']),
   workspaceId: z.string().uuid().optional(),
 });
 

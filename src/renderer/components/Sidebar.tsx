@@ -15,7 +15,7 @@ import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import {
   ActivityIcon, BrainIcon, ChevronRightIcon, FolderIcon, LayersIcon, ListChecksIcon, PlugIcon,
-  PlusIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, WorkflowIcon,
+  PlusIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
 import { DeleteChatDialog } from './threads/DeleteChatDialog';
@@ -37,6 +37,7 @@ const NAV_ICONS: Partial<Record<NavEntryId, (p: { size?: number }) => React.JSX.
   skills: SparklesIcon,
   'connected-apps': PlugIcon,
   memory: BrainIcon,
+  usage: UsageIcon,
   settings: SettingsIcon,
 };
 
