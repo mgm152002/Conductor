@@ -371,7 +371,11 @@ export function quotaSampleFromOpenCodeFreeTier(
 /** The quota an adapter stream event reports, if any. */
 export function quotaFromEvent(ev: AdapterStreamEvent): NormalizedQuotaSample | undefined {
   if (ev.kind !== 'log') return undefined;
-  return normalizeQuotaSample(obj(ev.data)?.['quota']);
+  // Judge window expiry as of when the event was emitted, not the wall clock:
+  // replayed/checkpointed events keep their original `at`, and callers
+  // re-normalize through QuotaRecorder with the recording time before storing.
+  const at = new Date(ev.at);
+  return normalizeQuotaSample(obj(ev.data)?.['quota'], Number.isFinite(at.getTime()) ? { now: at } : {});
 }
 
 /**

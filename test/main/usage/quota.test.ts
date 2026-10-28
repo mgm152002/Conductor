@@ -413,6 +413,9 @@ describe('quota stream events', () => {
     });
     expect(quotaFromEvent(event(data, 'stdout'))).toBeUndefined();
     expect(quotaFromEvent(event({ usage: { totalTokens: 10 } }))).toBeUndefined();
+    // Expiry is judged as of the event's `at`, not the wall clock: the same
+    // payload emitted after its reset has passed reports no quota.
+    expect(quotaFromEvent({ ...event(data), at: at(2 * HOUR) })).toBeUndefined();
   });
 });
 
