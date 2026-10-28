@@ -13,6 +13,7 @@ import { ORCHESTRATOR_SUBJECT } from '../domain/proactive-signals';
 import type { SuggestionEmitter } from '../orchestrator/suggestion-emitter';
 import type { IpcRouter } from './router';
 import type { ModelCatalogService } from '../agents/model-catalog';
+import type { LearningCronService } from '../domain/learning-cron';
 
 /** Relays surfaced suggestions to the renderer (non-blocking notice). */
 export class IpcSuggestionEmitter implements SuggestionEmitter {
@@ -35,6 +36,7 @@ export interface IntegrationDeps {
   assistant: ProactiveAssistant;
   learning: SelfLearningEngine;
   learningLoop: LearningLoop;
+  learningCron?: LearningCronService;
   /** Models and effort levels each agent CLI offers. */
   modelCatalogs?: ModelCatalogService;
 }
@@ -93,4 +95,17 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('learning.approve', S['learning.approve'], (_e, input) => deps.learning.approve(input.id));
   router.handle('learning.reject', S['learning.reject'], (_e, input) => deps.learning.reject(input.id));
   router.handle('learning.stats', S['learning.stats'], () => deps.learningLoop.agentStats());
+  router.handle('learning.status', S['learning.status'], () => {
+    if (deps.learningCron === undefined) throw new Error('Learning cron is not configured');
+    return deps.learningCron.getStatus();
+  });
+  router.handle('learning.setConfig', S['learning.setConfig'], (_e, input) => {
+    if (deps.learningCron === undefined) throw new Error('Learning cron is not configured');
+    return deps.learningCron.setConfig(input);
+  });
+  router.handle('learning.runNow', S['learning.runNow'], () => {
+    if (deps.learningCron === undefined) throw new Error('Learning cron is not configured');
+    return deps.learningCron.runNow('manual');
+  });
+  router.handle('learning.purgeRoutingApprovals', S['learning.purgeRoutingApprovals'], () => deps.learning.purgeRoutingApprovals());
 }

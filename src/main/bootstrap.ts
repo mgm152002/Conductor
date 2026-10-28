@@ -62,6 +62,8 @@ import { McpService } from './mcp/mcp-service';
 import { RemoteHostService } from './adapters/remote-hosts';
 import { IpcSuggestionEmitter, registerIntegrationHandlers } from './ipc/register-integrations';
 import { ToolApprovalBroker } from './orchestrator/tool-approvals';
+import { AgentQuestionBroker } from './orchestrator/agent-questions';
+import { ensureWorktree } from './domain/worktree';
 import { AgentPlanner } from './plan/agent-planner';
 import { ModelCatalogService } from './agents/model-catalog';
 import { RunResolver } from './agents/run-resolver';
@@ -74,6 +76,8 @@ import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
+import { AgentLearningAnalyzer } from './domain/learning-analyzer';
+import { LearningCronService } from './domain/learning-cron';
 
 // Main-process composition root. Opens the store, runs migrations, constructs
 // the domain services, and registers the validated IPC handlers. Later
@@ -101,6 +105,7 @@ export interface AppServices {
   connectorEvents: IpcConnectorEventEmitter;
   selfLearning: SelfLearningEngine;
   learningLoop: LearningLoop;
+  learningCron: LearningCronService;
   mcp: McpService;
   remoteHosts: RemoteHostService;
   secrets: SecretStore;
@@ -194,6 +199,13 @@ export async function bootstrap(): Promise<AppServices> {
   // user approves; approved rules steer routing and roll back on regression.
   const selfLearning = new SelfLearningEngine(store, audit);
   const learningLoop = new LearningLoop(store, selfLearning);
+  // Learning cron: every 5 minutes the user-approved LLM reviews success
+  // rates + logs and proposes routing (auto-approved only in auto mode).
+  const learningCron = new LearningCronService({
+    settings, audit, learningLoop, engine: selfLearning,
+    analyzer: new AgentLearningAnalyzer(registry, join(app.getPath('userData'), 'learning-sandbox')),
+    availableAgents: () => registry.listAdapters().filter((a) => a.available).map((a) => a.id),
+  });
 
   // MCP: servers are added untrusted/disabled; approval enables them, lists
   // their tools, and makes them available to Codex runs (non read-only mode).
@@ -239,6 +251,19 @@ export async function bootstrap(): Promise<AppServices> {
   );
   registerChatHandlers(router, chat);
 
+  // One worktree per thread, created before the agent's first step runs.
+  // Follow-ups in the thread reuse it; non-Git projects run in place.
+  const worktrees = new Map<string, Promise<string>>();
+  const threadRoot = (task: Task): Promise<string> => {
+    const root = workspaces.get(task.workspaceId)!.rootPath;
+    const key = task.threadId ?? task.id;
+    const cached = worktrees.get(key);
+    if (cached !== undefined) return cached;
+    const pending = ensureWorktree(root, key).then((info) => info.path).catch(() => root);
+    worktrees.set(key, pending);
+    return pending;
+  };
+
   const executionInput = async (task: Task, step: { description: string; requiredCapability: string }): Promise<Record<string, unknown>> => {
     const mode = permissions.grantsFor({type:'agent',id:'orchestrator'})[0]?.profile ?? 'read_only';
     const difficulty = assessDifficulty(task.objective);
@@ -256,7 +281,7 @@ export async function bootstrap(): Promise<AppServices> {
       task, step, recordUsage: false, ...(guidance ? { guidance } : {}),
     });
     return {objective:task.objective,description:step.description,acceptanceCriteria:task.acceptanceCriteria,
-      rootPath:workspaces.get(task.workspaceId)!.rootPath,
+      rootPath: await threadRoot(task),
       mode,
       attachments: await runner.executionAttachments(task),
       ...threadInput(task, step.requiredCapability),
@@ -374,10 +399,15 @@ export async function bootstrap(): Promise<AppServices> {
   const toolApprovals = new ToolApprovalBroker(store, permissions, (taskId) => {
     taskEvents.emit('task.updated', orchestrator.getTask(taskId));
   });
+  // Agent questions (Codex requestUserInput, MCP elicitation, ACP question
+  // tools) park here until the user answers in the thread.
+  const agentQuestions = new AgentQuestionBroker((request) => {
+    taskEvents.emit('question.requested', request);
+  });
   const cliCatalog = new CliCatalog({ registrar: new CliRegistrar(registry, undefined, (provider) => {
     const decision = dataControl.beginExternalFlow({provider,target:'Agent CLI provider'});
     if (decision.status === 'blocked') throw new Error(decision.message);
-  }, (request, signal) => toolApprovals.request(request, signal), autoApprove) });
+  }, (request, signal) => toolApprovals.request(request, signal), autoApprove, (prompt, signal) => agentQuestions.ask(prompt, signal)) });
   // Proactive assistant: suggestions from stuck tasks, repeated failures, new
   // email questions and upcoming events. Suggest-only unless an auto-run rule
   // exists and permissions allow; external side effects always wait.
@@ -478,6 +508,7 @@ export async function bootstrap(): Promise<AppServices> {
     resumeService,
     cliCatalog,
     dataControl,
+    questions: agentQuestions,
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
@@ -487,7 +518,7 @@ export async function bootstrap(): Promise<AppServices> {
 
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);
@@ -540,6 +571,7 @@ export async function bootstrap(): Promise<AppServices> {
     connectorEvents,
     selfLearning,
     learningLoop,
+    learningCron,
     mcp,
     remoteHosts,
     secrets: secretStore,

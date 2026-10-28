@@ -99,6 +99,21 @@ export class LearningLoop {
     }
   }
 
+  /** Every comparability key with recorded outcomes, oldest first seen. */
+  comparabilityKeys(): string[] {
+    const rows = this.store.db.prepare('SELECT DISTINCT comparability_key FROM task_outcomes ORDER BY comparability_key ASC').all() as { comparability_key: string }[];
+    return rows.map((r) => r.comparability_key);
+  }
+
+  /** Per-agent performance for every comparability key (for the LLM digest). */
+  allAgentStats(): { comparabilityKey: string; agents: { adapterId: string; stats: PerformanceBaseline }[] }[] {
+    return this.comparabilityKeys().map((comparabilityKey) => ({ comparabilityKey, agents: this.agentStats(comparabilityKey) }));
+  }
+
+  outcomeCount(): number {
+    return (this.store.db.prepare('SELECT COUNT(*) AS n FROM task_outcomes').get() as { n: number }).n;
+  }
+
   /** Per-agent performance for a comparability key (for the UI). */
   agentStats(key = 'capability:objective.fulfill'): { adapterId: string; stats: PerformanceBaseline }[] {
     const byAgent = new Map<string, TaskOutcome[]>();

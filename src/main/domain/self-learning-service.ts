@@ -401,6 +401,34 @@ export class SelfLearningEngine {
     return { status: 'rolled_back', improvementId: proposalId, baseline, observed };
   }
 
+  /**
+   * Purge old routing approvals: delete every `routing_rule` proposal that is
+   * pending (`proposed`) or in effect (`approved`), so no previously approved
+   * routing keeps steering tasks. Rejected / rolled-back routing history and
+   * non-routing proposals are kept. Outcomes attributed to a purged rule are
+   * detached (`improvement_id` cleared) rather than deleted. Audited as one
+   * event carrying the removed ids.
+   */
+  purgeRoutingApprovals(actor = 'user'): { removed: number; removedIds: string[] } {
+    const rows = this.store.db
+      .prepare(`SELECT id FROM improvement_proposals WHERE kind = 'routing_rule' AND status IN ('proposed', 'approved') ORDER BY created_at ASC, rowid ASC`)
+      .all() as { id: string }[];
+    const removedIds = rows.map((r) => r.id);
+    if (removedIds.length > 0) {
+      this.store.transaction(({ db }) => {
+        const placeholders = removedIds.map(() => '?').join(', ');
+        db.prepare(`DELETE FROM improvement_proposals WHERE id IN (${placeholders})`).run(...removedIds);
+        db.prepare(`UPDATE task_outcomes SET improvement_id = NULL WHERE improvement_id IN (${placeholders})`).run(...removedIds);
+      });
+      this.audit.append({
+        actor,
+        action: 'routing_approvals_purged',
+        redactedPayload: { removed: removedIds.length, removedIds },
+      });
+    }
+    return { removed: removedIds.length, removedIds };
+  }
+
   // ---- Reads ----
 
   getOutcome(id: string): TaskOutcome | undefined {

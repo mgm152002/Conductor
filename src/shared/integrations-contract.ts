@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { McpDiscoveryEntry, McpInvocationResult, McpServer } from './mcp';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
+import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
 
 // Validated IPC for integrations: stored secrets, MCP servers, remote SSH
 // hosts, proactive suggestions, self-learning proposals and the agent list.
@@ -48,6 +49,21 @@ export const INTEGRATION_SCHEMAS = {
   'learning.approve': z.object({ id: uuid }),
   'learning.reject': z.object({ id: uuid }),
   'learning.stats': z.void(),
+  'learning.status': z.void(),
+  'learning.setConfig': z.object({
+    enabled: z.boolean().optional(),
+    mode: z.enum(['manual', 'auto']).optional(),
+    analyzerAgentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
+    // '' clears the pinned model back to Default / Auto.
+    analyzerModel: z.union([z.literal(''), z.string().trim().regex(/^[\w./:@-]{1,100}$/)]).optional(),
+  }),
+  'learning.runNow': z.void(),
+  'learning.purgeRoutingApprovals': z.object({
+    // Required confirmation; the renderer sends it only after the user
+    // confirms in the purge dialog, so old approvals can't be wiped by a
+    // stray or unconfirmed invoke.
+    confirmed: z.literal(true),
+  }),
 } as const;
 
 export type IntegrationRequest<C extends keyof typeof INTEGRATION_SCHEMAS> = z.infer<(typeof INTEGRATION_SCHEMAS)[C]>;
@@ -92,5 +108,9 @@ export interface IntegrationsBridge {
     approve(id: string): Promise<ImprovementProposal>;
     reject(id: string): Promise<ImprovementProposal>;
     stats(): Promise<AgentStat[]>;
+    status(): Promise<LearningStatus>;
+    setConfig(input: Partial<LearningConfig>): Promise<LearningConfig>;
+    runNow(): Promise<LearningRun>;
+    purgeRoutingApprovals(): Promise<RoutingPurgeResult>;
   };
 }

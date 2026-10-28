@@ -4,7 +4,7 @@
 export { HomeScreen } from './HomeScreen';
 export { ProjectsScreen } from './ProjectsScreen';
 export { ActiveTasksScreen } from './ActiveTasksScreen';
-export { RecentActivityScreen } from './RecentActivityScreen';
+export { LearningScreen } from './LearningScreen';
 export { WorkflowsScreen } from './WorkflowsScreen';
 export { SkillsScreen } from './SkillsScreen';
 export { ConnectedAppsScreen } from './ConnectedAppsScreen';

@@ -31,7 +31,7 @@ import type { AutomationBridge } from '@shared/automation-contract';
 import type { ConnectorBridge, SystemBridge } from '@shared/connector-contract';
 import type { IntegrationsBridge } from '@shared/integrations-contract';
 import type { ArtifactPreview, ChangedFileDiff, TaskDetails, WorkspaceChanges } from '@shared/task-view';
-import type { ApprovalRequest, AuditEvent, PermissionProfile } from '@shared/domain';
+import type { AgentQuestionAnswers, AgentQuestionRequest, ApprovalRequest, AuditEvent, PermissionProfile } from '@shared/domain';
 import type { CatalogEntryView, InstallOutcome } from '@shared/catalog';
 import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
 
@@ -113,6 +113,9 @@ const integrations: IntegrationsBridge = {
   learning: {
     proposals: () => invoke('learning.proposals'), approve: (id) => invoke('learning.approve', { id }),
     reject: (id) => invoke('learning.reject', { id }), stats: () => invoke('learning.stats'),
+    status: () => invoke('learning.status'), setConfig: (input) => invoke('learning.setConfig', input),
+    runNow: () => invoke('learning.runNow'),
+    purgeRoutingApprovals: () => invoke('learning.purgeRoutingApprovals', { confirmed: true }),
   },
 };
 const attachment: AttachmentBridge = {
@@ -171,10 +174,10 @@ const conductor = {
     select: (id: string): Promise<void> => invoke('workspace.select', { id }),
     /** Delete a project and everything Conductor stored for it (not its files). */
     delete: (id: string): Promise<ProjectDeletionResult> => invoke('workspace.delete', { id, confirmed: true }),
-    /** Uncommitted files in the project working tree (read-only). */
-    changes: (workspaceId: string): Promise<WorkspaceChanges> => invoke('workspace.changes', { workspaceId }),
+    /** Uncommitted files in the project (or thread worktree) working tree. */
+    changes: (workspaceId: string, taskId?: string): Promise<WorkspaceChanges> => invoke('workspace.changes', { workspaceId, ...(taskId ? { taskId } : {}) }),
     /** Unified diff for one changed file, capped and redacted by the main process. */
-    fileDiff: (input: { workspaceId: string; path: string }): Promise<ChangedFileDiff> => invoke('workspace.fileDiff', input),
+    fileDiff: (input: { workspaceId: string; path: string; taskId?: string }): Promise<ChangedFileDiff> => invoke('workspace.fileDiff', input),
   },
   usage: {
     /**
@@ -229,6 +232,10 @@ const conductor = {
        */
       confirmed?: boolean;
     }): Promise<ResumeActResult> => invoke('resume.act', input),
+  },
+  question: {
+    list: (): Promise<AgentQuestionRequest[]> => invoke('question.list'),
+    answer: (input: { id: string; answers: AgentQuestionAnswers }): Promise<void> => invoke('question.answer', input),
   },
   approval: {
     list: ():Promise<ApprovalRequest[]> => invoke('approval.list'),
