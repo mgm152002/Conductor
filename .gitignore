@@ -8,8 +8,11 @@ dist/
 
 # Local orchestration state
 .conductor/
-.kiro/settings/
+.kiro/
 .superpowers/
+
+# Local docs / specs (kept on disk, not published)
+docs/
 
 # Local env / secrets
 .runtime/
