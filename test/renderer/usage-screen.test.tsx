@@ -161,7 +161,7 @@ describe('Usage screen views', () => {
 
     const tokens = renderUsage({ view: 'tokens' });
     expect(tokens).toContain('aria-label="Token usage"');
-    expect(tokens).toContain('>Total tokens<');
+    expect(tokens).toContain('>Processed tokens<');
     expect(tokens).toContain('>18k<');
     expectPressed(tokens, 'Cost', false);
     expectPressed(tokens, 'Tokens', true);
@@ -226,13 +226,13 @@ describe('Usage Limits cards', () => {
 
     expect(html).toContain('12%');
     expect(html).toContain('left');
-    expect(html).toMatch(/Resets in 5d/);
+    expect(html).toMatch(/5d 0h/);
 
     // A reported zero is a real exhausted window, not "not reported".
     const session = progressbarTag(html, 'Codex session limit');
     expect(session).toContain('aria-valuenow="0"');
     expect(session).toContain('aria-valuetext="0% left"');
-    expect(html).toMatch(/Resets in 1h/);
+    expect(html).toMatch(/1h 3m/);
   });
 
   it('shows the provider label for a multi-group quota window', () => {
@@ -265,12 +265,12 @@ describe('Usage Limits cards', () => {
     const card = /<article aria-label="OpenCode limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
     const bar = progressbarTag(card, 'OpenCode Free models daily limit');
 
-    expect(card).toContain('>Daily<');
+    expect(card).toContain('>Daily');
     expect(card).toContain('Free models');
     expect(card).toContain('Remaining percentage not reported');
-    expect(card).toMatch(/Resets in 12h/);
+    expect(card).toMatch(/12h 0m/);
     expect(card).not.toContain('% left');
-    expect(card).toContain('sm:grid-cols-3');
+    expect(card).toContain('limit-track');
     expect(bar).toContain('aria-valuemin="0"');
     expect(bar).toContain('aria-valuemax="100"');
     expect(bar).toContain('aria-valuetext="Remaining percentage not reported"');
@@ -281,8 +281,7 @@ describe('Usage Limits cards', () => {
     const html = renderUsage({ view: 'limits' });
     const card = /<article aria-label="Codex limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
 
-    expect(card).toContain('sm:grid-cols-2');
-    expect(card).not.toContain('sm:grid-cols-3');
+    expect(card).toContain('limit-track');
     expect(card).not.toContain('>Daily<');
   });
 });

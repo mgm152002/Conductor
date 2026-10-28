@@ -1,13 +1,11 @@
 import type { UsageRange } from '@shared/usage';
-import { cn } from '../../lib/cn';
 import { USAGE_RANGES } from '../../lib/usage-format';
 import { RotateIcon, Spinner } from '../ui/icons';
 import { Button } from '../ui/primitives';
 
-// The Usage screen header controls: a Cost/Tokens/Limits segmented control, the
-// four range chips, and a refresh action. Every control is a native button, so
-// Tab + Enter/Space and the shared focus ring make the header keyboard
-// accessible (Requirement 2.1, 2.5).
+// The Usage screen header controls, in the T3 shape: two pill segmented
+// controls (view, then range) floating at the top-right, plus a refresh
+// action. Every control is a native button for keyboard access.
 
 export type UsageView = 'cost' | 'tokens' | 'limits';
 
@@ -36,44 +34,34 @@ export function UsageHeader({
 }: UsageHeaderProps): React.JSX.Element {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <div
-        role="group"
-        aria-label="Usage view"
-        className="flex shrink-0 items-center gap-0.5 rounded-lg bg-accent p-0.5"
-      >
-        {USAGE_VIEWS.map((entry) => {
-          const selected = entry.id === view;
-          return (
-            <Button
-              key={entry.id}
-              size="xs"
-              variant={selected ? 'default' : 'ghost'}
-              aria-pressed={selected}
-              onClick={() => { onViewChange(entry.id); }}
-              className={cn('rounded-md', selected && 'shadow-xs')}
-            >
-              {entry.label}
-            </Button>
-          );
-        })}
+      <div role="group" aria-label="Usage view" className="seg-control shrink-0">
+        {USAGE_VIEWS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            data-active={entry.id === view}
+            aria-pressed={entry.id === view}
+            onClick={() => { onViewChange(entry.id); }}
+            className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {entry.label}
+          </button>
+        ))}
       </div>
 
-      <div role="group" aria-label="Usage range" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
-        {USAGE_RANGES.map((entry) => {
-          const selected = entry.id === range;
-          return (
-            <Button
-              key={entry.id}
-              size="xs"
-              variant="ghost"
-              aria-pressed={selected}
-              onClick={() => { onRangeChange(entry.id); }}
-              className={cn(selected && 'bg-accent text-foreground')}
-            >
-              {entry.label}
-            </Button>
-          );
-        })}
+      <div role="group" aria-label="Usage range" className="seg-control min-w-0 overflow-x-auto">
+        {USAGE_RANGES.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            data-active={entry.id === range}
+            aria-pressed={entry.id === range}
+            onClick={() => { onRangeChange(entry.id); }}
+            className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {entry.label}
+          </button>
+        ))}
       </div>
 
       <Button

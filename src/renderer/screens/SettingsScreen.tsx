@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ExecutionSettings } from '../components/settings/ExecutionSettings';
 import { IntegrationSettings } from '../components/settings/IntegrationSettings';
 import { AgentModels } from '../components/settings/AgentModels';
@@ -5,10 +6,19 @@ import { ScreenScaffold } from './ScreenScaffold';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
 import { useThemeStore } from '../stores';
 
-// Settings surfaces workspace management (create/list/select wired to the
-// `window.conductor` bridge) and the current appearance. Appearance follows the
-// macOS system setting automatically (Requirement 22.1, 22.2); it is shown here
-// as read-only status so the user can confirm the app is tracking the OS.
+// Settings in the T3 shape: a label above each grouped card, rows divided by
+// hairlines, controls on the right. Each settings area keeps its own logic;
+// this screen only gives them the shared grouped-card chrome.
+
+function SettingGroup({ label, children }: { label: string; children: ReactNode }): React.JSX.Element {
+  return (
+    <section>
+      <h2 className="group-label">{label}</h2>
+      <div className="group-card px-4 py-4">{children}</div>
+    </section>
+  );
+}
+
 export function SettingsScreen(): React.JSX.Element {
   const appearance = useThemeStore((s) => s.appearance);
 
@@ -18,21 +28,31 @@ export function SettingsScreen(): React.JSX.Element {
       description="Manage workspaces, permission profiles, appearance, connected accounts, and data control."
     >
       <div className="flex flex-col gap-8">
-        <WorkspaceManager />
-        <ExecutionSettings />
-        <AgentModels />
-        <IntegrationSettings />
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-foreground">
-            Appearance
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Following the macOS system setting — currently{' '}
-            <span className="font-medium text-foreground">
-              {appearance}
-            </span>
-            .
-          </p>
+        <SettingGroup label="Projects">
+          <WorkspaceManager />
+        </SettingGroup>
+        <SettingGroup label="Execution & data">
+          <ExecutionSettings />
+        </SettingGroup>
+        <SettingGroup label="Agent models">
+          <AgentModels />
+        </SettingGroup>
+        <SettingGroup label="Integrations">
+          <IntegrationSettings />
+        </SettingGroup>
+        <section>
+          <h2 className="group-label">Appearance</h2>
+          <div className="group-card">
+            <div className="group-row">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-foreground">System appearance</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Conductor follows the macOS setting automatically.</p>
+              </div>
+              <span className="seg-control">
+                <span className="seg-item" data-active="true">{appearance === 'dark' ? 'Dark' : 'Light'}</span>
+              </span>
+            </div>
+          </div>
         </section>
       </div>
     </ScreenScaffold>

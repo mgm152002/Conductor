@@ -44,6 +44,7 @@ export const PlugIcon = (p: IconProps) => <Icon {...p}><path d="M9 2v5M15 2v5M6 
 export const ActivityIcon = (p: IconProps) => <Icon {...p}><path d="M3 12h4l3-8 4 16 3-8h4" /></Icon>;
 export const ListChecksIcon = (p: IconProps) => <Icon {...p}><path d="m3 7 2 2 3-3M3 16l2 2 3-3M12 7h9M12 17h9" /></Icon>;
 export const PanelRightIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></Icon>;
+export const PanelLeftIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></Icon>;
 export const AlertTriangleIcon = (p: IconProps) => <Icon {...p}><path d="M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" /></Icon>;
 export const AlertCircleIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></Icon>;
 export const RotateIcon = (p: IconProps) => <Icon {...p}><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /></Icon>;

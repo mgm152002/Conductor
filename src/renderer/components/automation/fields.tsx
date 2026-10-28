@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 export const inputClass = 'w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 disabled:opacity-50';
 export const buttonClass = 'inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring';
 export const primaryButtonClass = 'inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring';
-export const panelClass = 'rounded-xl border border-border bg-card p-4';
+export const panelClass = 'group-card p-4';
 export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string | undefined }): React.JSX.Element {
   return <label className="flex flex-col gap-1.5 text-sm"><span className="text-xs font-medium text-foreground">{label}</span>{hint && <span className="text-2xs text-muted-foreground">{hint}</span>}{children}</label>;
 }

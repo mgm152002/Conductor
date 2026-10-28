@@ -2,8 +2,8 @@ import type { SVGProps } from 'react';
 import type {
   UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageSummary,
 } from '@shared/usage';
-import { cn } from '../../lib/cn';
 import { clientLabel, compactNumber, formatCost } from '../../lib/usage-format';
+import { relativeTime } from '../../lib/time';
 import {
   ActivityIcon,
   BrainIcon,
@@ -113,28 +113,39 @@ export function UsageLimitsView({
               : `${reporting} of ${summary.clients.length} CLIs reporting`}
           </span>
         </div>
+        <p className="text-3xs text-muted-foreground">
+          Fetched from each CLI when this screen opens and every 5 minutes while it stays open.
+          OpenCode reports Session/Weekly only with an active Go subscription (otherwise just the
+          free-model Daily window, whose percentage OpenCode does not publish); Antigravity
+          reports Weekly only.
+        </p>
 
         <div className="flex flex-col gap-3">
           {summary.clients.map((client) => {
             const label = clientLabel(client);
             const hasLimits = client.limits.length > 0;
             const daily = findLimit(client.limits, 'daily');
+            const reportedAt = client.limits.reduce<string | undefined>(
+              (latest, limit) => (limit.reportedAt !== undefined && (latest === undefined || limit.reportedAt > latest) ? limit.reportedAt : latest),
+              undefined,
+            );
             return (
               <article
                 key={client.key}
                 aria-label={`${label} limits`}
-                className="rounded-xl border border-border/60 bg-card/40 px-4 py-3"
+                className="flex flex-col gap-2"
               >
-                <header className="flex items-center gap-2 pb-2.5">
+                <header className="flex items-center gap-2">
                   <CliIcon id={client.key} />
                   <h3 className="truncate text-sm font-medium text-foreground">{label}</h3>
                   <span className="ml-auto text-3xs text-muted-foreground tabular-nums">
                     {sessionLabel(client.sessions)} · {compactNumber(client.totalTokens)} tokens
+                    {reportedAt !== undefined ? <> · limits {relativeTime(reportedAt, typeof now === 'number' ? now : now.getTime())}</> : null}
                   </span>
                   {hasLimits ? null : <Badge>No limits</Badge>}
                 </header>
 
-                <div className={cn('grid gap-2', daily !== undefined ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+                <div className="flex flex-col gap-2">
                   {daily !== undefined ? (
                     <UsageLimitCard
                       title="Daily"

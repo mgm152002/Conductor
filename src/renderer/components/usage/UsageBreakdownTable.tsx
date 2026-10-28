@@ -62,42 +62,40 @@ export function UsageClientCard({
   return (
     <article
       aria-label={`${clientLabel(client)} usage`}
-      className="flex flex-col gap-2.5 rounded-xl border border-border px-4 py-3"
+      className="flex flex-col gap-2 border-b border-border py-3.5 last:border-b-0"
     >
       <header className="flex items-center gap-2">
+        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary/80" />
         <h4 className="truncate text-sm font-medium text-foreground">{clientLabel(client)}</h4>
-        <span className="text-3xs text-muted-foreground">{client.key}</span>
+        <span className="text-3xs text-muted-foreground">{client.sessions} session{client.sessions === 1 ? '' : 's'}</span>
         {empty ? <Badge className="ml-auto">No usage</Badge> : null}
-      </header>
-
-      <div className="flex items-baseline gap-2">
-        <span className={cn('font-semibold text-foreground tabular-nums', empty ? 'text-lg' : 'text-2xl')}>
+        <span className={cn('ml-auto font-medium text-foreground tabular-nums', empty ? 'text-sm' : 'text-base')}>
           {primaryValue}
         </span>
-        <span className="text-2xs text-muted-foreground">{primaryLabel}</span>
-        <span className="ml-auto text-3xs text-muted-foreground tabular-nums">{percent}%</span>
+      </header>
+
+      <div className="flex items-baseline gap-2 pl-4">
+        <span className="text-2xs text-muted-foreground">{primaryLabel} · {percent}% of total</span>
       </div>
 
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/70">
-        {empty ? (
-          <div className="h-full w-full rounded-full border border-dashed border-border/80" />
-        ) : (
-          <div className="h-full rounded-full bg-primary/80" style={{ width: `${Math.max(2, percent)}%` }} />
+      <div className="ml-4 h-[3px] w-auto overflow-hidden rounded-full bg-muted">
+        {empty ? null : (
+          <div className="h-full rounded-full bg-foreground/70" style={{ width: `${Math.max(2, percent)}%` }} />
         )}
       </div>
 
-      <p className="text-3xs text-muted-foreground">
-        {client.sessions} session{client.sessions === 1 ? '' : 's'} · {compactNumber(client.inputTokens)} input
+      <p className="pl-4 text-3xs text-muted-foreground">
+        {compactNumber(client.inputTokens)} input
         {' · '}{compactNumber(client.outputTokens)} output
         {client.cachedInputTokens > 0 ? ` · ${compactNumber(client.cachedInputTokens)} cached` : ''}
         {client.reasoningTokens > 0 ? ` · ${compactNumber(client.reasoningTokens)} reasoning` : ''}
       </p>
       {primaryHint !== undefined ? (
-        <p className="text-3xs text-muted-foreground/80">{primaryHint}</p>
+        <p className="pl-4 text-3xs text-muted-foreground/80">{primaryHint}</p>
       ) : null}
 
       {empty ? (
-        <p className="rounded-lg border border-dashed border-border px-3 py-2 text-center text-3xs text-muted-foreground">
+        <p className="pl-4 text-3xs text-muted-foreground">
           No usage recorded for this CLI in the selected range.
         </p>
       ) : null}
@@ -118,18 +116,18 @@ export function UsageMetric({
   emphasis?: boolean;
 }): React.JSX.Element {
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <dt className="text-3xs text-muted-foreground uppercase">{label}</dt>
+    <div className="py-1">
+      <dt className="text-2xs text-muted-foreground">{label}</dt>
       <dd
         className={
           emphasis
-            ? 'text-lg font-semibold text-foreground tabular-nums'
-            : 'text-sm font-semibold text-foreground tabular-nums'
+            ? 'mt-0.5 text-xl font-medium text-foreground tabular-nums'
+            : 'mt-0.5 text-base font-medium text-foreground tabular-nums'
         }
       >
         {value}
       </dd>
-      {hint !== undefined ? <p className="text-3xs text-muted-foreground">{hint}</p> : null}
+      {hint !== undefined ? <p className="mt-0.5 text-3xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

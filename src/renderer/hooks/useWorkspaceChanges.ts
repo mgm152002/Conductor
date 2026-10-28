@@ -9,6 +9,7 @@ export function useWorkspaceChanges(
   workspaceId: string | null,
   refreshKey: string,
   live: boolean,
+  taskId?: string | null,
 ): {
   changes: WorkspaceChanges | null;
   loading: boolean;
@@ -31,7 +32,7 @@ export function useWorkspaceChanges(
     const sequence = ++request.current;
     if (!quiet) setLoading(true);
     try {
-      const next = await window.conductor.workspace.changes(workspaceId);
+      const next = await window.conductor.workspace.changes(workspaceId, taskId ?? undefined);
       if (sequence !== request.current) return;
       setChanges(next);
       setError(null);
@@ -41,7 +42,7 @@ export function useWorkspaceChanges(
     } finally {
       if (sequence === request.current && !quiet) setLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, taskId]);
 
   useEffect(() => {
     void load(false);

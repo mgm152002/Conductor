@@ -29,13 +29,6 @@ export interface UsageLimitCardProps {
   className?: string;
 }
 
-/** Fill colour by remaining percentage: healthy, low, or nearly exhausted. */
-function remainingTone(percent: number): string {
-  if (percent >= 50) return 'bg-success';
-  if (percent >= 20) return 'bg-warning';
-  return 'bg-destructive';
-}
-
 /** Badge tone that mirrors the bar colour. */
 function badgeTone(percent: number): 'success' | 'warning' | 'destructive' {
   if (percent >= 50) return 'success';
@@ -60,23 +53,24 @@ export function UsageLimitCard({
   const ariaLabel = `${clientLabel} ${label !== undefined ? `${label} ` : ''}${title.toLowerCase()} limit`;
 
   return (
-    <div className={cn('flex flex-col gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2.5', className)}>
-      <div className="flex items-center gap-2">
-        <p className="shrink-0 text-xs font-medium text-foreground">{title}</p>
-        {label !== undefined ? (
-          <span className="min-w-0 truncate text-3xs text-muted-foreground">{label}</span>
-        ) : null}
-        <Badge tone={reported ? badgeTone(percent) : 'neutral'} className="ml-auto shrink-0">
-          {reported ? `${percent}% left` : 'Not reported'}
-        </Badge>
-      </div>
-
-      {reported ? (
-        <>
-          <p className="flex items-baseline gap-1.5">
-            <span className="text-2xl leading-none font-semibold text-foreground tabular-nums">{percent}%</span>
+    <div className={cn('group-card flex items-center gap-4 px-4 py-3', className)}>
+      <div className="w-36 shrink-0">
+        <p className="text-[13px] text-foreground">
+          {title}
+          {label !== undefined ? <span className="block truncate text-3xs text-muted-foreground">{label}</span> : null}
+        </p>
+        {reported ? (
+          <p className="mt-0.5 flex items-baseline gap-1">
+            <span className="text-[22px] leading-none font-medium text-foreground tabular-nums">{percent}%</span>
             <span className="text-2xs text-muted-foreground">left</span>
           </p>
+        ) : (
+          <p className="mt-0.5 text-2xs font-medium text-muted-foreground">{tracked ? 'Not reported' : 'Not reported by this CLI'}</p>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        {reported ? (
           <div
             role="progressbar"
             aria-label={ariaLabel}
@@ -84,63 +78,37 @@ export function UsageLimitCard({
             aria-valuemax={100}
             aria-valuenow={percent}
             aria-valuetext={`${percent}% left`}
-            className="h-2.5 w-full overflow-hidden rounded-full bg-muted/70"
+            className="limit-track"
           >
-            <div
-              className={cn('h-full rounded-full transition-[width]', remainingTone(percent))}
-              style={{ width: `${percent}%` }}
-              aria-hidden="true"
-            />
+            <div className="limit-fill" style={{ width: `${percent}%` }} aria-hidden="true" />
+            <span className="absolute inset-y-0 left-2 flex items-center text-3xs font-medium text-foreground/80 tabular-nums">{percent}%</span>
+            {reset !== undefined ? (
+              <span className="absolute inset-y-0 right-1.5 flex items-center gap-1 rounded bg-black/25 px-1.5 text-3xs text-foreground/85 tabular-nums">
+                <RotateIcon size={9} aria-hidden="true" />{reset}
+              </span>
+            ) : null}
           </div>
-          <p className="flex min-h-4 items-center gap-1 text-3xs text-muted-foreground">
-            {reset !== undefined ? (
-              <>
-                <RotateIcon size={10} aria-hidden="true" />
-                <span>Resets in {reset}</span>
-              </>
-            ) : (
-              <span>Current window</span>
-            )}
-          </p>
-        </>
-      ) : tracked ? (
-        <>
+        ) : (
           <div
             role="progressbar"
             aria-label={ariaLabel}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-valuetext="Remaining percentage not reported"
-            className="h-2.5 w-full overflow-hidden rounded-full border border-dashed border-border/80 bg-muted/30"
-          />
-          <p className="text-2xs font-medium text-muted-foreground">Remaining percentage not reported</p>
-          <p className="flex min-h-4 items-center gap-1 text-3xs text-muted-foreground">
+            aria-valuetext={tracked ? 'Remaining percentage not reported' : 'Not reported by this CLI'}
+            className="limit-track opacity-60"
+          >
+            <span className="absolute inset-y-0 left-2 flex items-center text-3xs text-muted-foreground">
+              {tracked ? 'Remaining percentage not reported' : `No ${title.toLowerCase()} quota window has been reported.`}
+            </span>
             {reset !== undefined ? (
-              <>
-                <RotateIcon size={10} aria-hidden="true" />
-                <span>Resets in {reset}</span>
-              </>
-            ) : (
-              <span>Current window</span>
-            )}
-          </p>
-        </>
-      ) : (
-        <>
-          <div
-            role="progressbar"
-            aria-label={ariaLabel}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuetext="Not reported by this CLI"
-            className="h-2.5 w-full overflow-hidden rounded-full border border-dashed border-border/80 bg-muted/30"
-          />
-          <p className="text-2xs font-medium text-muted-foreground">Not reported by this CLI</p>
-          <p className="text-3xs text-muted-foreground/80">
-            No {title.toLowerCase()} quota window has been reported.
-          </p>
-        </>
-      )}
+              <span className="absolute inset-y-0 right-1.5 flex items-center gap-1 rounded bg-black/25 px-1.5 text-3xs text-foreground/85 tabular-nums">
+                <RotateIcon size={9} aria-hidden="true" />{reset}
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+      {reported ? <Badge tone={badgeTone(percent)} className="hidden shrink-0 sm:inline-flex">{percent}% left</Badge> : null}
     </div>
   );
 }

@@ -14,7 +14,7 @@ import { cn } from '../lib/cn';
 import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import {
-  ActivityIcon, BrainIcon, ChevronRightIcon, FolderIcon, LayersIcon, ListChecksIcon, PlugIcon,
+  BrainIcon, ChevronRightIcon, LayersIcon, ListChecksIcon, PlugIcon,
   PlusIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
@@ -32,7 +32,7 @@ const THREADS_PER_PROJECT = 8;
 const NAV_ICONS: Partial<Record<NavEntryId, (p: { size?: number }) => React.JSX.Element>> = {
   projects: LayersIcon,
   'active-tasks': ListChecksIcon,
-  'recent-activity': ActivityIcon,
+  learning: BrainIcon,
   workflows: WorkflowIcon,
   skills: SparklesIcon,
   'connected-apps': PlugIcon,
@@ -43,7 +43,6 @@ const NAV_ICONS: Partial<Record<NavEntryId, (p: { size?: number }) => React.JSX.
 
 const NAV_LABELS: Partial<Record<NavEntryId, string>> = {
   'connected-apps': 'Connections',
-  'recent-activity': 'Activity',
 };
 
 function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { thread: ThreadView; selected: boolean; pendingApproval: boolean; onOpen: () => void; onDelete: () => void }): React.JSX.Element {
@@ -53,7 +52,7 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { th
   return (
     <li
       className={cn(
-        'group/thread flex h-7 items-center rounded-md pr-1 transition-colors',
+        'group/thread flex items-center rounded-lg pr-1 transition-colors',
         'focus-within:bg-sidebar-row-hover',
         selected ? 'bg-sidebar-row-active text-sidebar-foreground shadow-xs dark:shadow-none' : 'text-sidebar-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
       )}
@@ -63,18 +62,23 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { th
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
         title={thread.root.objective}
-        className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md pl-7 text-left text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-lg py-1.5 pr-1 pl-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
-        <span className="min-w-0 flex-1 truncate">{threadTitle(thread.root)}</span>
-        {thread.tasks.length > 1 ? <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums" title={`${thread.tasks.length} messages`}>{thread.tasks.length}</span> : null}
-        {showPill ? (
-          <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium', status.colorClass)}>
-            <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
-            {status.label}
-          </span>
-        ) : (
-          <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums">{relativeTime(task.updatedAt)}</span>
-        )}
+        <span className="flex w-full min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{threadTitle(thread.root)}</span>
+          {showPill ? (
+            <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium', status.colorClass)}>
+              <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
+              {status.label}
+            </span>
+          ) : (
+            <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums">{relativeTime(task.updatedAt)}</span>
+          )}
+        </span>
+        <span className="flex w-full min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground/80">
+          <span className="truncate font-mono">{`conductor/${thread.key.slice(0, 8)}`}</span>
+          {thread.tasks.length > 1 ? <span className="shrink-0 tabular-nums" title={`${thread.tasks.length} messages`}>· {thread.tasks.length} messages</span> : null}
+        </span>
       </button>
       <button
         type="button"
@@ -89,20 +93,24 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { th
   );
 }
 
-function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds }: {
+function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, query = '', onNavigate }: {
   project: Workspace;
   active: boolean;
   tasks: Task[];
   focusedKey: string | null;
   pendingTaskIds: ReadonlySet<string>;
+  query?: string;
+  onNavigate?: (() => void) | undefined;
 }): React.JSX.Element {
-  const collapsed = useUiStore((s) => s.collapsedProjects[project.id] === true);
+  const collapsed = useUiStore((s) => s.collapsedProjects[project.id] === true) && query === '';
   const toggle = useUiStore((s) => s.toggleProject);
   const { openThread, newThread } = useThreadNavigation();
   const [expanded, setExpanded] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deletingThread, setDeletingThread] = useState<ThreadView | null>(null);
-  const threads = useMemo(() => groupThreads(tasks), [tasks]);
+  const allThreads = useMemo(() => groupThreads(tasks), [tasks]);
+  const threads = query === '' ? allThreads : allThreads.filter((t) => threadTitle(t.root).toLowerCase().includes(query));
+  if (query !== '' && threads.length === 0) return <></>;
   const visible = expanded ? threads : threads.slice(0, THREADS_PER_PROJECT);
   const working = threads.filter((thread) => isWorkingState(thread.latest.state)).length;
 
@@ -117,7 +125,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds }: {
           title={project.rootPath}
         >
           <ChevronRightIcon size={12} className={cn('shrink-0 text-sidebar-muted-foreground transition-transform duration-150', !collapsed && 'rotate-90')} />
-          <FolderIcon size={14} className={cn('shrink-0', active ? 'text-primary' : 'text-sidebar-muted-foreground')} />
+          <span aria-hidden="true" className={cn('flex size-5 shrink-0 items-center justify-center rounded-md text-3xs font-bold tracking-wide', active ? 'bg-primary/20 text-primary' : 'bg-sidebar-row-active text-sidebar-muted-foreground')}>{project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}</span>
           <span className={cn('min-w-0 flex-1 truncate font-medium', active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/85')}>{project.name}</span>
           {working > 0 ? <span className="shrink-0 rounded-full bg-sky-500/12 px-1.5 text-3xs font-medium text-sky-600 tabular-nums dark:text-sky-300">{working}</span> : null}
         </button>
@@ -153,7 +161,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds }: {
                 thread={thread}
                 selected={focusedKey === thread.key}
                 pendingApproval={thread.tasks.some((task) => pendingTaskIds.has(task.id))}
-                onOpen={() => { void openThread(thread.latest); }}
+                onOpen={() => { void openThread(thread.latest); onNavigate?.(); }}
                 onDelete={() => { setDeletingThread(thread); }}
               />
             ))}
@@ -171,8 +179,9 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds }: {
   );
 }
 
-function ChatHistory(): React.JSX.Element {
-  const threads = useChatStore((state) => state.threads);
+function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: (() => void) | undefined }): React.JSX.Element {
+  const allThreads = useChatStore((state) => state.threads);
+  const threads = query === '' ? allThreads : allThreads.filter((t) => t.title.toLowerCase().includes(query));
   const selectedId = useChatStore((state) => state.selectedId);
   const [error, setError] = useState<string | null>(null);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
@@ -193,7 +202,7 @@ function ChatHistory(): React.JSX.Element {
     <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
     {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
     {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : <ul className="flex flex-col gap-1">{threads.map((thread) => <li key={thread.id} className={cn('group/chat flex h-8 items-center rounded-md pr-1 transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
-      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       </button>
       <button
@@ -210,7 +219,7 @@ function ChatHistory(): React.JSX.Element {
   </>;
 }
 
-export function Sidebar(): React.JSX.Element {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React.JSX.Element {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const tasks = useTaskStore((s) => s.tasks);
@@ -253,13 +262,23 @@ export function Sidebar(): React.JSX.Element {
   const focusedTask = pickFocusedTask(tasks, focusedTaskId, activeWorkspaceId);
   const focusedKey = location.pathname === '/work' && !draft && focusedTask !== null ? threadKey(focusedTask) : null;
   const selectedChat = useChatStore((state) => state.selectedId);
+  const [query, setQuery] = useState('');
 
   return (
-    <nav aria-label="Primary" className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <nav aria-label="Primary" className="flex h-full w-[268px] shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       {/* Title-bar strip: leaves room for the macOS traffic lights. */}
       <div className="app-drag flex h-(--topbar-height) shrink-0 items-center justify-between pr-2 pl-20">
         <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground/90">Conductor</span>
         <SuggestionsInbox />
+      </div>
+
+      <div className="px-3 pb-2">
+        <label className="flex h-8 items-center gap-2 rounded-lg bg-white/4 px-2.5 text-sidebar-muted-foreground ring-1 ring-sidebar-border transition-colors focus-within:bg-white/6 focus-within:text-sidebar-foreground dark:bg-white/4">
+          <span aria-hidden="true" className="text-[13px]">⌕</span>
+          <span className="sr-only">Search threads</span>
+          <input value={query} onChange={(event) => { setQuery(event.target.value.toLowerCase()); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground" />
+          {query !== '' ? <button type="button" onClick={() => { setQuery(''); }} aria-label="Clear search" className="cursor-pointer text-xs hover:text-sidebar-foreground">✕</button> : null}
+        </label>
       </div>
 
       <SurfaceTabs />
@@ -267,7 +286,7 @@ export function Sidebar(): React.JSX.Element {
       <div className="px-2 pb-2">
         <button
           type="button"
-          onClick={() => { if (onHome) useChatStore.getState().select(null); else void newThread(); }}
+          onClick={() => { if (onHome) useChatStore.getState().select(null); else void newThread(); onNavigate?.(); }}
           className={cn(
             'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
             'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
@@ -281,7 +300,7 @@ export function Sidebar(): React.JSX.Element {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {onHome ? <ChatHistory /> : <>
+        {onHome ? <ChatHistory query={query} onNavigate={onNavigate} /> : <>
         <div className="flex h-7 items-center justify-between px-1.5">
           <span className="text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Projects</span>
           <button
@@ -309,6 +328,8 @@ export function Sidebar(): React.JSX.Element {
                 tasks={byProject.get(project.id) ?? []}
                 focusedKey={focusedKey}
                 pendingTaskIds={pendingTaskIds}
+                query={query}
+                onNavigate={onNavigate}
               />
             ))}
           </ul>
@@ -316,13 +337,15 @@ export function Sidebar(): React.JSX.Element {
         </>}
       </div>
 
-      <ul className="flex shrink-0 flex-col gap-px border-t border-sidebar-border p-2">
+      <p className="shrink-0 px-4 pt-2 text-2xs text-sidebar-muted-foreground/80">Settled · local-first</p>
+      <ul className="flex shrink-0 flex-col gap-px p-2">
         {NAV_ENTRIES.filter((entry) => entry.id !== 'home' && (!onHome || entry.id === 'settings' || entry.id === 'connected-apps')).map((entry) => {
           const Icon = NAV_ICONS[entry.id];
           return (
             <li key={entry.id}>
               <NavLink
                 to={entry.path}
+                onClick={onNavigate}
                 className={({ isActive }) => cn(
                   'flex h-7 items-center gap-2 rounded-md px-2 text-[13px] transition-colors',
                   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',

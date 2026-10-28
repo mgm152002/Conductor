@@ -58,7 +58,7 @@ export function WorkspaceManager(): React.JSX.Element {
             No workspaces yet. Create one below to start.
           </p>
         ) : (
-          <ul className="flex flex-col gap-1">
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
             {workspaces.map((workspace) => {
               const isActive = workspace.id === activeWorkspaceId;
               return (
@@ -73,8 +73,8 @@ export function WorkspaceManager(): React.JSX.Element {
                     aria-pressed={isActive}
                     className={
                       isActive
-                        ? 'flex w-full flex-col items-start gap-0.5 rounded-lg border border-input bg-accent px-3 py-2 text-left  '
-                        : 'flex w-full flex-col items-start gap-0.5 rounded-lg border border-border px-3 py-2 text-left transition-colors hover:bg-accent  '
+                        ? 'flex w-full flex-col items-start gap-0.5 bg-accent px-3 py-2.5 text-left'
+                        : 'flex w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-accent'
                     }
                   >
                     <span className="flex w-full items-center justify-between gap-2">
@@ -102,7 +102,7 @@ export function WorkspaceManager(): React.JSX.Element {
       </div>
 
       <form
-        className="flex flex-col gap-2 rounded-lg border border-border p-3"
+        className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3"
         onSubmit={(event) => {
           void handleCreate(event);
         }}
@@ -122,7 +122,7 @@ export function WorkspaceManager(): React.JSX.Element {
           onChange={(event) => {
             setName(event.target.value);
           }}
-          className="rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
+          className="inset-field px-3 py-2 text-sm"
           placeholder="My project"
         />
         <label
@@ -138,7 +138,7 @@ export function WorkspaceManager(): React.JSX.Element {
           onChange={(event) => {
             setRootPath(event.target.value);
           }}
-          className="rounded-md border border-input bg-card px-3 py-2 font-mono text-sm text-foreground outline-none focus:border-ring"
+          className="inset-field px-3 py-2 font-mono text-sm"
           placeholder="/Users/you/projects/my-project"
         />
         {error !== null ? (
@@ -147,7 +147,7 @@ export function WorkspaceManager(): React.JSX.Element {
         <button
           type="submit"
           disabled={!canCreate}
-          className="self-start rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          className="self-start rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {submitting ? 'Creating…' : 'Create workspace'}
         </button>
