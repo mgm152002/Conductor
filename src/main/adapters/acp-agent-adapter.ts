@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { GatedAgentAdapter, objectivePrompt, pinnedEffort, pinnedModel, type GatedAdapterConfig, type GatedLive, type Launch } from './gated-agent-adapter';
 import type { CliEnvironment } from './local-cli-adapter';
-import { isAccept, isSensitivePath, type GateRequest, type ToolApprovalDecision, type ToolApprover } from './tool-gate';
+import { isAccept, isSensitivePath, type GateRequest, type QuestionAsker, type ToolApprovalDecision, type ToolApprover } from './tool-gate';
 
 // Agents driven over the Agent Client Protocol (JSON-RPC 2.0, one JSON object
 // per line on stdio; https://agentclientprotocol.com):
@@ -123,6 +123,23 @@ export function acpGateRequest(agentName: string, toolCall: Json): GateRequest {
   }
 }
 
+/** Questions embedded in an ACP permission/tool request (e.g. OpenCode's question tool), if any. */
+export function acpQuestions(toolCall: Json): { id: string; question: string; options?: { id: string; label: string; description?: string }[]; multiSelect?: boolean }[] {
+  const raw = obj(toolCall['rawInput']);
+  const list = Array.isArray(raw?.['questions']) ? raw['questions'] : Array.isArray(toolCall['questions']) ? toolCall['questions'] : [];
+  return list.map(obj).filter((q): q is Json => q !== null).map((q, index) => {
+    const options = Array.isArray(q['options']) ? q['options'].map(obj).filter((o): o is Json => o !== null)
+      .map((o, optionIndex) => ({ id: str(o['id']) ?? `option-${optionIndex}`, label: str(o['label']) ?? str(o['id']) ?? `Option ${optionIndex + 1}`, ...(str(o['description']) ? { description: str(o['description'])! } : {}) })) : [];
+    return {
+      id: str(q['id']) ?? `q${index + 1}`,
+      question: str(q['question']) ?? str(q['header']) ?? 'The agent has a question',
+      ...(str(q['header']) ? { header: str(q['header'])! } : {}),
+      ...(options.length > 0 ? { options } : {}),
+      ...(q['multiSelect'] === true || q['multiple'] === true ? { multiSelect: true } : {}),
+    };
+  }).filter((q) => q.question.trim() !== '');
+}
+
 /** The ACP outcome for a gate decision, using only options the agent offered. */
 export function acpOutcome(options: unknown, decision: ToolApprovalDecision): Json {
   const list = Array.isArray(options) ? options.map(obj).filter((o): o is Json => o !== null) : [];
@@ -210,7 +227,7 @@ export const ACP_AGENTS: Record<string, AcpAgentSpec> = {
 };
 
 export class AcpAgentAdapter extends GatedAgentAdapter {
-  constructor(config: GatedAdapterConfig, private readonly spec: AcpAgentSpec, approver: ToolApprover, env?: CliEnvironment, beforeStart?: (id: string) => void) {
+  constructor(config: GatedAdapterConfig, private readonly spec: AcpAgentSpec, approver: ToolApprover, env?: CliEnvironment, beforeStart?: (id: string) => void, private readonly questioner?: QuestionAsker) {
     super(config, approver, env, beforeStart, 'acp');
   }
 
@@ -236,19 +253,42 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
     let model: string | undefined;
     let message = '';
     let thought = '';
+    // Streamed snapshots: thought and reply text are pushed incrementally
+    // under a stable key so the timeline updates one row in place instead of
+    // staying silent until the turn ends.
+    let thoughtPushed = 0;
+    let messagePushed = 0;
+    let lastThoughtPush = 0;
+    let lastMessagePush = 0;
+    const pushThought = (force = false): void => {
+      const now = Date.now();
+      if (!force && (thought.length - thoughtPushed < 24 || now - lastThoughtPush < 300)) return;
+      thoughtPushed = thought.length;
+      lastThoughtPush = now;
+      if (thought.trim() !== '') live.events.push('log', { message: thought, kind: 'reasoning', key: 'acp:thought', status: force ? 'neutral' : 'running', source: name });
+    };
+    const pushMessage = (force = false): void => {
+      const now = Date.now();
+      if (!force && (message.length - messagePushed < 24 || now - lastMessagePush < 300)) return;
+      messagePushed = message.length;
+      lastMessagePush = now;
+      if (message.trim() !== '') live.events.push('log', { message, kind: 'reply', key: 'acp:reply', status: force ? 'neutral' : 'running', source: name });
+    };
     // Tool calls declined during the current turn. ACP agents such as OpenCode
     // end the turn with stopReason "cancelled" when one is declined; that is
     // not a user cancellation, so `run` can ask the agent to carry on.
     let declinedTools = 0;
     const flushThought = (): void => {
-      const text = thought.trim();
+      pushThought(true);
       thought = '';
-      if (text !== '') live.events.push('log', { message: text, kind: 'reasoning', source: name });
+      thoughtPushed = 0;
     };
     const flush = (): void => {
       flushThought();
+      pushMessage(true);
       if (message.trim() !== '') live.events.push('stdout', message.replace(/\n+$/, ''));
       message = '';
+      messagePushed = 0;
     };
     const activity = (update: Json, status: string): void => {
       const title = str(update['title']);
@@ -267,6 +307,23 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
 
     const onPermission = async (id: unknown, params: Json): Promise<void> => {
       const toolCall = obj(params['toolCall']) ?? {};
+      // A question tool asks the user something instead of requesting a
+      // permission: surface it for human review and answer with the option
+      // whose label matches the user's choice.
+      const questions = acpQuestions(toolCall);
+      if (questions.length > 0 && this.questioner !== undefined && data.taskId !== undefined) {
+        const controller = new AbortController();
+        const abort = (): void => { controller.abort(); };
+        live.cleanup.push(abort);
+        const answers = await this.questioner({ taskId: data.taskId, ...(data.stepId ? { stepId: data.stepId } : {}), agent: name, questions }, controller.signal).catch(() => null);
+        const first = answers?.[questions[0]!.id]?.[0];
+        const options = Array.isArray(params['options']) ? params['options'].map(obj).filter((o): o is Json => o !== null) : [];
+        const match = first === undefined ? undefined : options.find((o) => str(o['name']) === first || str(o['optionId']) === first);
+        send({ id, result: match !== undefined && typeof match['optionId'] === 'string'
+          ? { outcome: { outcome: 'selected', optionId: match['optionId'] } }
+          : { outcome: { outcome: 'cancelled' } } });
+        return;
+      }
       const gateRequest = { ...acpGateRequest(name, toolCall), cwd: data.rootPath };
       const decision = await live.gate.decide(gateRequest);
       if (!isAccept(decision) && decision !== 'cancel') declinedTools += 1;
@@ -279,12 +336,12 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       switch (update['sessionUpdate']) {
         case 'agent_message_chunk': {
           const content = obj(update['content']);
-          if (content?.['type'] === 'text' && typeof content['text'] === 'string') message += content['text'];
+          if (content?.['type'] === 'text' && typeof content['text'] === 'string') { message += content['text']; pushMessage(); }
           break;
         }
         case 'agent_thought_chunk': {
           const content = obj(update['content']);
-          if (content?.['type'] === 'text' && typeof content['text'] === 'string') thought += content['text'];
+          if (content?.['type'] === 'text' && typeof content['text'] === 'string') { thought += content['text']; pushThought(); }
           break;
         }
         case 'tool_call':

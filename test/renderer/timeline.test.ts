@@ -36,6 +36,27 @@ describe('chat timeline', () => {
     expect(items[2]).toMatchObject({ text: 'Done.' });
   });
 
+  it('streams reply snapshots into one assistant item and dedupes the final reply', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Hello', kind: 'reply', key: 'codex:reply:m1', status: 'running', source: 'Codex' }),
+      log({ message: 'Hello world', kind: 'reply', key: 'codex:reply:m1', status: 'running', source: 'Codex' }),
+      stdout({ type: 'item.completed', item: { id: 'm1', type: 'agent_message', text: 'Hello world' } }),
+    ]));
+    const replies = items.filter((i) => i.kind === 'assistant');
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ text: 'Hello world' });
+  });
+
+  it('updates a running reasoning entry in place instead of stacking rows', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Inspecting', kind: 'reasoning', key: 'acp:thought', status: 'running', source: 'OpenCode' }),
+      log({ message: 'Inspecting the parser', kind: 'reasoning', key: 'acp:thought', status: 'neutral', source: 'OpenCode' }),
+    ]));
+    const work = items.find((i) => i.kind === 'work') as Extract<typeof items[number], { kind: 'work' }>;
+    expect(work.entries).toHaveLength(1);
+    expect(work.entries[0]).toMatchObject({ label: 'Inspecting the parser', tone: 'neutral' });
+  });
+
   it('shows Codex item notices as neutral, not errors', () => {
     const items = buildTimeline(task, details([stdout({ type: 'item.completed', item: { id: 'n', type: 'error', message: 'Ignoring unknown feature' } })]));
     expect(items.map((i) => i.kind)).toEqual(['user', 'work']);

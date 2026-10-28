@@ -108,6 +108,9 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   let work: WorkEntry[] = [];
   let workIndex = 0;
   let prose: { lines: string[]; at: string; id: string } | null = null;
+  // Live reply snapshots (ACP/Codex deltas) update one assistant item in
+  // place; the final full reply dedupes against it instead of repeating.
+  let replySnapshot: { kind: 'assistant'; id: string; text: string; at: string } | null = null;
   const diagnostics = new Map<string, { lines: string[]; at: string }>();
   // Codex reports an item twice (started, completed); later reports update the same entry.
   const byItemId = new Map<string, WorkEntry>();
@@ -119,10 +122,19 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     items.push({ kind: 'work', id: `work:${workIndex++}:${work[0]!.id}`, entries: work });
     work = [];
   };
+  /** Fold a completed reply into the streamed snapshot when they overlap. */
+  const absorbReply = (text: string): boolean => {
+    if (replySnapshot === null || text === '') return false;
+    if (text === replySnapshot.text || text.startsWith(replySnapshot.text) || replySnapshot.text.startsWith(text)) {
+      if (text.length > replySnapshot.text.length) replySnapshot.text = text;
+      return true;
+    }
+    return false;
+  };
   const flushProse = (): void => {
     if (prose === null) return;
     const text = prose.lines.join('\n').trim();
-    if (text !== '') items.push({ kind: 'assistant', id: prose.id, text, at: prose.at });
+    if (text !== '' && !absorbReply(text)) items.push({ kind: 'assistant', id: prose.id, text, at: prose.at });
     prose = null;
   };
   const addWork = (entry: WorkEntry): void => { flushProse(); work.push(entry); };
@@ -134,7 +146,7 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   const addReply = (id: string, text: string, at: string): void => {
     flushProse();
     flushWork();
-    if (text.trim() !== '') items.push({ kind: 'assistant', id, text: text.trim(), at });
+    if (text.trim() !== '' && !absorbReply(text.trim())) items.push({ kind: 'assistant', id, text: text.trim(), at });
   };
   const addError = (id: string, text: string, at: string): void => {
     flushProse();
@@ -196,6 +208,17 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
         }
         const detail = str(payload?.['detail']);
         const kind = str(payload?.['kind']);
+        if (kind === 'reply' && text !== undefined && text.trim() !== '') {
+          // Streamed reply snapshot: update the one assistant item in place.
+          flushWork();
+          if (replySnapshot === null) {
+            replySnapshot = { kind: 'assistant', id: `reply-live:${event.id}`, text: text.trim(), at: event.createdAt };
+            items.push(replySnapshot);
+          } else {
+            replySnapshot.text = text.trim();
+          }
+          break;
+        }
         const key = str(payload?.['key']) ?? str(payload?.['toolCallId']);
         const status = str(payload?.['status']);
         const source = str(payload?.['source']);

@@ -56,6 +56,9 @@ import { parseRunOptions } from '../agents/run-resolver';
 import type { UsageRange, UsageSummary } from '@shared/usage';
 import { UsageSummaryRequest, WorkspaceDeleteRequest } from '@shared/ipc-contract';
 import { listWorkspaceChanges, readWorkspaceFileDiff } from '../domain/workspace-changes';
+import { worktreeBranch, worktreePathFor } from '../domain/worktree';
+import { existsSync } from 'node:fs';
+import type { AgentQuestionBroker } from '../orchestrator/agent-questions';
 
 // Wire the workspace, settings, and task-lifecycle services onto the validated
 // IPC router. Every handler goes through `router.handle`, which enforces the
@@ -89,6 +92,8 @@ export interface DomainHandlerDeps {
   resumeService: ResumeService;
   cliCatalog: CliCatalog;
   dataControl: DataControlService;
+  /** Pending agent questions awaiting human review. */
+  questions?: AgentQuestionBroker;
   flushMemories?: () => Promise<void>;
   /** Deletes a project and everything stored for it. */
   deleteProject?: (workspaceId: string) => Promise<ProjectDeletionResult>;
@@ -157,16 +162,34 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     (_event, input): Workspace => workspaces.create(input),
   );
 
+  // A thread's changes come from its own worktree when one exists; the
+  // project checkout itself is never where the agent wrote.
+  const changesRoot = (workspaceId: string, taskId?: string): { root: string; branch?: string } => {
+    const workspace = workspaces.get(workspaceId);
+    if (workspace === undefined) throw new Error(`Workspace ${workspaceId} not found`);
+    if (taskId === undefined) return { root: workspace.rootPath };
+    const task = deps.orchestrator.getTask(taskId);
+    const key = task?.threadId ?? taskId;
+    const path = worktreePathFor(workspace.rootPath, key);
+    return existsSync(path) ? { root: path, branch: worktreeBranch(key) } : { root: workspace.rootPath };
+  };
+
   router.handle('workspace.changes', A['workspace.changes'], async (_event, input) => {
-    const workspace = workspaces.get(input.workspaceId);
-    if (workspace === undefined) throw new Error(`Workspace ${input.workspaceId} not found`);
-    return listWorkspaceChanges(workspace.rootPath);
+    const { root, branch } = changesRoot(input.workspaceId, input.taskId);
+    const changes = await listWorkspaceChanges(root);
+    return { ...changes, ...(branch !== undefined ? { worktree: true, branch } : {}) };
   });
 
   router.handle('workspace.fileDiff', A['workspace.fileDiff'], async (_event, input) => {
-    const workspace = workspaces.get(input.workspaceId);
-    if (workspace === undefined) throw new Error(`Workspace ${input.workspaceId} not found`);
-    return readWorkspaceFileDiff(workspace.rootPath, input.path);
+    const { root } = changesRoot(input.workspaceId, input.taskId);
+    return readWorkspaceFileDiff(root, input.path);
+  });
+
+  router.handle('question.list', A['question.list'], () => deps.questions?.listPending() ?? []);
+  router.handle('question.answer', A['question.answer'], (_event, input) => {
+    if (deps.questions === undefined || !deps.questions.answer(input.id, input.answers)) {
+      throw new Error('That question is no longer waiting for an answer.');
+    }
   });
 
   router.handle('workspace.select', WorkspaceSelectRequest, (_event, input) => {

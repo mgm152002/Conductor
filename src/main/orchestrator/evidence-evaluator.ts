@@ -4,6 +4,7 @@ import type { Store } from '../db/types';
 import type { CriterionEvaluator } from './verifier';
 import { responseText } from '../adapters/objective-cli-adapter';
 import { isCodexProtocol } from './thread-context';
+import { worktreePathFor } from '../domain/worktree';
 
 /** Explicit evidence rules; only the successful final session can verify its step. */
 export function evidenceEvaluator(store: Store): CriterionEvaluator {
@@ -37,7 +38,9 @@ export function evidenceEvaluator(store: Store): CriterionEvaluator {
     }
     if (/^file:/i.test(rule)) {
       const row=store.db.prepare('SELECT root_path FROM workspaces WHERE id=?').get(task.workspaceId) as {root_path:string};
-      const root=realpathSync(row.root_path); const path=resolve(root,rule.slice(rule.indexOf(':')+1).trim());
+      // The agent worked in the thread's worktree when one exists.
+      const candidate = worktreePathFor(row.root_path, task.threadId ?? task.id);
+      const root=realpathSync(existsSync(candidate) ? candidate : row.root_path); const path=resolve(root,rule.slice(rule.indexOf(':')+1).trim());
       if (!existsSync(path)) return fail('Expected file does not exist.');
       const ownerRelative=relative(root,realpathSync(path));
       if (ownerRelative==='..' || ownerRelative.startsWith('../') || isAbsolute(ownerRelative)) return fail('File criterion must stay within the workspace, including symlinks.');

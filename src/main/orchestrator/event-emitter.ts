@@ -25,7 +25,7 @@ import type { EventChannel } from '@shared/ipc-contract';
  */
 export type TaskEventChannel = Extract<
   EventChannel,
-  'task.updated' | 'task.stream'
+  'task.updated' | 'task.stream' | 'question.requested'
 >;
 
 /**

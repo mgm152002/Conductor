@@ -14,12 +14,17 @@ import { ActivityRegion } from '../workspace/ActivityRegion';
 const TABS: { id: DetailsTab; label: string }[] = [
   { id: 'plan', label: 'Plan' },
   { id: 'checks', label: 'Checks' },
-  { id: 'files', label: 'Files' },
+  { id: 'files', label: 'Changes' },
   { id: 'context', label: 'Context' },
   { id: 'activity', label: 'Log' },
 ];
 
-/** Right-hand thread inspector: plan, verification, artifacts, context and raw log. */
+/**
+ * Thread inspector as a floating window over the conversation (T3 style):
+ * it never takes layout space or pushes the thread aside. It opens from the
+ * header toggle or the floating environment card, and closes with Escape,
+ * the close button, or the header toggle.
+ */
 export function DetailsPanel({ task, details, embedded = false }: { task: Task; details: TaskDetails | null; embedded?: boolean }): React.JSX.Element {
   const tab = useUiStore((s) => s.detailsTab);
   const openDetails = useUiStore((s) => s.openDetails);
@@ -37,9 +42,17 @@ export function DetailsPanel({ task, details, embedded = false }: { task: Task; 
     context: task.contextRefs.length,
   };
   return (
-    <aside aria-label="Thread details" className={cn('flex h-full min-h-0 min-w-0 flex-col bg-background', embedded ? 'w-full' : 'thread-details border-l border-border')}>
-      <div className="app-drag flex h-(--topbar-height) shrink-0 items-center gap-1 border-b border-border px-2">
-        <div role="tablist" aria-label="Details" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+    <aside
+      aria-label="Thread details"
+      className={cn(
+        'flex min-h-0 min-w-0 flex-col',
+        embedded
+          ? 'h-full w-full bg-background'
+          : 'absolute top-14 right-4 bottom-4 z-20 w-[380px] max-w-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-2xl',
+      )}
+    >
+      <div className="flex h-11 shrink-0 items-center gap-1 px-2 pt-1.5">
+        <div role="tablist" aria-label="Details" className="seg-control min-w-0 flex-1 overflow-x-auto">
           {TABS.map((item) => (
             <button
               key={item.id}
@@ -61,9 +74,9 @@ export function DetailsPanel({ task, details, embedded = false }: { task: Task; 
                 openDetails(next.id);
                 document.getElementById(`${embedded ? 'work' : 'chat'}-details-${next.id}`)?.focus();
               }}
+              data-active={tab === item.id}
               className={cn(
-                'flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 text-xs transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-                tab === item.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                'seg-item shrink-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
               )}
             >
               {item.label}

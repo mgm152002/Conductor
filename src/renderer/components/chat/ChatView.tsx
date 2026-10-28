@@ -5,7 +5,7 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { buildTimeline, isAgentFallbackEvent, type TimelineItem } from '../../lib/timeline';
+import { buildTimeline, isAgentFallbackEvent, latestActivity, type TimelineItem } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { cn } from '../../lib/cn';
@@ -16,6 +16,8 @@ import { Composer } from './Composer';
 import { DetailsPanel } from './DetailsPanel';
 import { MessagesTimeline } from './MessagesTimeline';
 import { PendingApprovalPanel } from './PendingApprovalPanel';
+import { PendingQuestionPanel } from './PendingQuestionPanel';
+import { EnvironmentCard } from './EnvironmentCard';
 import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanResults, runLabel } from './PlanCard';
@@ -42,7 +44,11 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
   const working = isWorkingState(task.state);
   const now = useNow(working);
   if (working) {
-    const label = task.state === 'VERIFYING' ? 'Verifying results' : task.state === 'RUNNING' ? 'Working' : 'Preparing';
+    // Show what the agent is actually doing right now, not a static label.
+    const current = latestActivity(items);
+    const label = task.state === 'VERIFYING' ? 'Verifying results'
+      : current !== undefined ? current.label
+        : task.state === 'RUNNING' ? 'Working' : 'Preparing';
     const runningSteps = details?.steps.filter((step) => step.status === 'running') ?? [];
     const source = runningSteps.length > 1
       ? `${runningSteps.length} agents`
@@ -178,6 +184,7 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
 
   return (
     <div className="thread-layout relative flex min-h-0 min-w-0 flex-1">
+      {!detailsOpen ? <EnvironmentCard task={latest} project={project} /> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <ChatHeader project={project} task={latest} title={turns[0] ?? latest} />
         <div
@@ -204,9 +211,10 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
           <AgentSetupNotice />
           <Mem0OfflineNotice />
           <PendingApprovalPanel task={latest} />
+          <PendingQuestionPanel scopeId={latest.id} />
           <PlanDock task={latest} details={latestDetails} />
           <LiveActivityFeed task={latest} details={latestDetails} />
-          <Composer task={latest} />
+          <Composer task={latest} currentAgentId={[...(latestDetails?.steps ?? [])].reverse().find((s) => s.assignedAdapterId !== undefined)?.assignedAdapterId} />
         </div>
       </div>
       {detailsOpen ? (
@@ -229,7 +237,7 @@ function DraftHero(): React.JSX.Element {
         <p className="mb-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
           <FolderIcon size={13} />{project?.name ?? 'No project'}
         </p>
-        <h2 className="mb-6 text-center text-2xl font-semibold tracking-tight text-foreground">What should we work on?</h2>
+        <h2 className="mb-6 text-center text-[28px] font-medium tracking-tight text-foreground">What should we build in <span className="underline decoration-dotted decoration-muted-foreground/60 underline-offset-4">{project?.name ?? 'Conductor'}</span>?</h2>
         <AgentSetupNotice />
         <Mem0OfflineNotice />
         <Composer task={null} autoFocus variant="hero" />

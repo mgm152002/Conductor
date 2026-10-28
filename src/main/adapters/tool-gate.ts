@@ -41,6 +41,19 @@ export interface ToolGateOptions {
 /** Asks the user (through Conductor's approval UI) and resolves with their decision. */
 export type ToolApprover = (request: ToolApprovalRequest, signal: AbortSignal) => Promise<ToolApprovalDecision>;
 
+export interface AgentQuestionPrompt {
+  taskId: string;
+  stepId?: string;
+  agent: string;
+  questions: import('@shared/domain').AgentQuestion[];
+}
+
+/** Asks the user questions an agent raised mid-run; null means no answer. */
+export type QuestionAsker = (
+  prompt: AgentQuestionPrompt,
+  signal: AbortSignal,
+) => Promise<import('@shared/domain').AgentQuestionAnswers | null>;
+
 export interface GateRequest {
   kind: ToolApprovalKind;
   summary: string;

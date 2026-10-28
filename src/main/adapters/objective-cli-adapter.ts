@@ -24,6 +24,9 @@ export interface ObjectiveAttachment extends AttachmentRef {
 }
 
 export interface ObjectiveInput {
+  /** Owning task (Work) or chat thread (Chat): scopes approvals and agent questions. */
+  taskId?: string;
+  stepId?: string;
   /** Casual chat invocation: no project context, tools, or inherited MCP. */
   conversationOnly?: boolean;
   objective: string;

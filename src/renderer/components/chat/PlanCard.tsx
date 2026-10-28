@@ -44,13 +44,13 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
   const items = open ? timeline : [];
   const duration = step?.startedAt !== undefined && step.endedAt !== undefined ? formatDuration(Date.parse(step.endedAt) - Date.parse(step.startedAt)) : undefined;
   return (
-    <li className="rounded-lg border border-border/70 bg-background/60">
+    <li>
       <button
         type="button"
         onClick={() => { setManualOpen(!open); }}
         aria-expanded={open}
         disabled={step === undefined}
-        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-accent/60 disabled:cursor-default"
+        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-accent/70 disabled:cursor-default"
       >
         <ChevronRightIcon size={11} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90', step === undefined && 'opacity-0')} />
         <span className={cn('size-1.5 shrink-0 rounded-full', status.dot)} aria-hidden="true" />
@@ -65,7 +65,7 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
         </span>
       </button>
       {!open && activity.length > 0 ? (
-        <ul className="flex min-w-0 flex-col gap-0.5 px-8 pb-1.5" aria-label="Recent activity">
+        <ul className="flex min-w-0 flex-col gap-0.5 px-9 pb-2" aria-label="Recent activity">
           {activity.map((entry, index) => {
             const latest = index === activity.length - 1;
             return (
@@ -79,10 +79,10 @@ function PlanTaskRow({ task, planTask, step, details }: { task: Task; planTask: 
         </ul>
       ) : null}
       {!open && activity.length === 0 && running ? (
-        <p className="flex items-center gap-1.5 px-8 pb-1.5 text-3xs text-muted-foreground"><Spinner size={9} className="shrink-0 text-info" />Starting…</p>
+        <p className="flex items-center gap-1.5 px-9 pb-2 text-3xs text-muted-foreground"><Spinner size={9} className="shrink-0 text-info" />Starting…</p>
       ) : null}
       {open ? (
-        <div className="border-t border-border/70 px-3 py-2.5">
+        <div className="mx-3 mb-2 ml-9 border-l border-border pl-3">
           {planTask.details.length > 0 ? (
             <ul className="mb-2 list-disc pl-4 text-2xs text-muted-foreground">
               {planTask.details.map((d, i) => <li key={i}>{d}</li>)}
@@ -151,7 +151,7 @@ export function PlanCard({ task, details, embedded = false }: { task: Task; deta
 
   if (plan.plan === undefined) {
     return (
-      <section aria-label="Plan" className={cn('text-xs', embedded ? '' : 'rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3')}>
+      <section aria-label="Plan" className={cn('text-xs', embedded ? '' : 'group-card px-3.5 py-3')}>
         <div className="flex items-center gap-2 text-muted-foreground">
           <LayersIcon size={13} />
           {plan.status === 'failed'
@@ -170,32 +170,32 @@ export function PlanCard({ task, details, embedded = false }: { task: Task; deta
     ? plan.docsDir.slice(project.rootPath.length + 1) : plan.docsDir;
 
   return (
-    <section aria-label="Plan" className={cn('flex min-w-0 flex-col gap-3 [overflow-wrap:anywhere]', !embedded && 'rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3')}>
-      <header className="flex flex-col gap-1">
+    <section aria-label="Plan" className={cn('min-w-0 [overflow-wrap:anywhere]', !embedded && 'group-card overflow-hidden')}>
+      <header className={cn('flex flex-col gap-0.5', !embedded && 'px-3.5 pt-3 pb-2')}>
         {!embedded ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
             <LayersIcon size={13} className="shrink-0 text-primary" />
-            <span className="min-w-0 flex-1 font-medium text-foreground">{plan.plan.title}</span>
-            <span className="ml-auto shrink-0 text-3xs text-muted-foreground tabular-nums">{done}/{tasks.size} done · {plan.waves?.length ?? 0} wave{plan.waves?.length === 1 ? '' : 's'}</span>
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{plan.plan.title}</span>
+            <span className="ml-auto shrink-0 rounded-full bg-accent px-2 py-0.5 text-3xs text-muted-foreground tabular-nums">{done}/{tasks.size} done</span>
           </div>
         ) : null}
-        <p className="text-2xs text-muted-foreground">
+        <p className="truncate text-2xs text-muted-foreground" title={`Planned by ${planner}`}>
           Planned by {planner}{plan.plannerRun?.model ? ` · ${plan.plannerRun.model}` : ''}{plan.plannerRun?.effort ? ` · ${plan.plannerRun.effort} effort` : ''}
-          {details.usage?.byStep['planner'] ? ` (${usageLabel(details.usage.byStep['planner'])})` : ''}. Tasks in the same wave run in parallel; each task’s model follows its difficulty unless you chose one.
+          {details.usage?.byStep['planner'] ? ` (${usageLabel(details.usage.byStep['planner'])})` : ''}
         </p>
         {docs !== undefined ? (
-          <p className="flex items-center gap-1 text-3xs text-muted-foreground" title={plan.docsDir}>
+          <p className="flex items-center gap-1 text-3xs text-muted-foreground/80" title={plan.docsDir}>
             <FileTextIcon size={11} /><span className="truncate font-mono">{docs}/requirements.md, tasks.md</span>
           </p>
         ) : null}
       </header>
-      <ol className="flex flex-col gap-2.5">
+      <ol className="flex flex-col">
         {(plan.waves ?? []).map((wave) => (
-          <li key={wave.id} className="flex flex-col gap-1">
-            <p className="text-3xs font-medium tracking-wide text-muted-foreground uppercase">
+          <li key={wave.id} className="flex flex-col">
+            <p className="px-3.5 pt-2 pb-1 text-3xs font-medium text-muted-foreground/80">
               Wave {wave.id}{wave.tasks.length > 1 ? ` · ${wave.tasks.length} in parallel` : ''}
             </p>
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col divide-y divide-border/60 border-t border-border/60">
               {wave.tasks.map((id) => {
                 const planTask = tasks.get(id);
                 return planTask !== undefined ? <PlanTaskRow key={id} task={task} planTask={planTask} step={stepFor(id)} details={details} /> : null;

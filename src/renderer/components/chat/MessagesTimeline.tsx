@@ -93,7 +93,7 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
   // Short groups and the live group stay expanded, like T3 Code's work log.
   const expanded = open || live || entries.length <= 3;
   return (
-    <div className="rounded-xl border border-border/70 bg-muted/40">
+    <div className="group-card">
       {entries.length > 3 && !live ? (
         <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded} className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           <ChevronRightIcon size={12} className={cn('transition-transform', expanded && 'rotate-90')} />
@@ -137,7 +137,12 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
               <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{item.text}</p>
             </div>
           ) : null}
-          {item.kind === 'assistant' ? <div className="px-1"><Markdown text={item.text} /></div> : null}
+          {item.kind === 'assistant' ? (
+            <div className="px-1">
+              <Markdown text={item.text} />
+              {live && index === items.length - 1 ? <span aria-hidden="true" className="animate-status-pulse ml-0.5 inline-block h-3.5 w-[7px] translate-y-0.5 rounded-[2px] bg-primary/70" /> : null}
+            </div>
+          ) : null}
           {item.kind === 'error' && item.stale === true ? (
             <div className="flex items-start gap-2 rounded-xl border border-border px-3 py-2 text-xs text-muted-foreground">
               <AlertCircleIcon size={13} className="mt-0.5 shrink-0" />

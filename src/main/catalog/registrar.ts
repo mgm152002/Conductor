@@ -82,7 +82,9 @@ export class CliRegistrar {
      */
     private readonly toolApprover?: ToolApprover,
     /** The user's "auto-approve everything" toggle, read per tool call. */
-    private readonly autoApprove?: () => boolean) {
+    private readonly autoApprove?: () => boolean,
+    /** Asks the user questions an agent raises mid-run (Codex, ACP agents). */
+    private readonly questioner?: import('../adapters/tool-gate').QuestionAsker) {
     this.registry = registry;
     this.env = env;
   }
@@ -144,11 +146,11 @@ export class CliRegistrar {
   private gatedAdapter(entry: CatalogEntry, command: string, approver: ToolApprover, capabilities: CapabilityDescriptor[]): AgentAdapter | undefined {
     const config = { id: entry.id, name: entry.displayName, command, capabilities, ...(this.autoApprove !== undefined ? { autoApprove: this.autoApprove } : {}) };
     switch (entry.id) {
-      case 'codex': return new CodexAppServerAdapter(config, approver, this.env, this.beforeStart);
+      case 'codex': return new CodexAppServerAdapter(config, approver, this.env, this.beforeStart, this.questioner);
       case 'claude-code': return new ClaudeCodeAdapter(config, approver, this.env, this.beforeStart);
       case 'antigravity': return new AntigravityAdapter(config, approver, this.env, this.beforeStart);
       case 'opencode':
-      case 'kiro': return new AcpAgentAdapter(config, ACP_AGENTS[entry.id]!, approver, this.env, this.beforeStart);
+      case 'kiro': return new AcpAgentAdapter(config, ACP_AGENTS[entry.id]!, approver, this.env, this.beforeStart, this.questioner);
       default: return undefined;
     }
   }

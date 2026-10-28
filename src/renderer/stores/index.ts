@@ -5,6 +5,7 @@
 export { useWorkspaceStore } from './workspace-store';
 export { useTaskStore, selectActiveTasks } from './task-store';
 export { useApprovalStore } from './approval-store';
+export { useQuestionStore } from './question-store';
 export { useResumeStore } from './resume-store';
 export { useThemeStore } from './theme-store';
 export { useCliCatalogStore } from './cli-catalog-store';

@@ -6,6 +6,7 @@ import type { Store } from '../db/types';
 import type { ManagedStorage } from '../storage/managed-storage';
 import type { AuditLog } from './audit-log';
 import { Mem0Error } from './mem0-client';
+import { removeWorktree } from './worktree';
 
 // Deleting a conversation thread removes every message (task) in it and what
 // Conductor stored for those tasks: steps, events, checkpoints, sessions,
@@ -81,6 +82,9 @@ export async function deleteThread(deps: ThreadDeletionDeps, threadId: string): 
     db.exec('DELETE FROM tasks WHERE id IN (SELECT id FROM deleting_tasks)');
     db.exec('DELETE FROM deleting_tasks');
   });
+
+  // The thread's worktree goes with it; its branch stays for recovery.
+  if (root) await removeWorktree(root.root_path, threadId).catch(() => undefined);
 
   let removedOutputs = 0;
   for (const id of artifactIds) {

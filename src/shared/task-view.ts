@@ -79,4 +79,8 @@ export interface WorkspaceChanges {
   files: ChangedFile[];
   /** False when the workspace folder is not inside a Git work tree. */
   isRepository: boolean;
+  /** True when these changes come from the thread's own Git worktree. */
+  worktree?: boolean;
+  /** The thread worktree's branch, e.g. `conductor/<thread>`. */
+  branch?: string;
 }

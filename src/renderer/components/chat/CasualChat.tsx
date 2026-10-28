@@ -7,6 +7,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { MessagesTimeline } from './MessagesTimeline';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
+import { PendingQuestionPanel } from './PendingQuestionPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { ArrowUpIcon, StopIcon, TrashIcon } from '../ui/icons';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
@@ -35,7 +36,13 @@ export function CasualChat(): React.JSX.Element {
   const currentSelection = useRef(selectedId);
   currentSelection.current = selectedId;
   const busy = submitting || conversation?.messages.some((message) => message.status === 'streaming') === true;
-  const selectedAgent = conversation?.thread.agentId ?? (agents.some((agent) => agent.id === agentId) ? agentId : agents[0]?.id ?? '');
+  // Mid-thread switching: a local pick wins over the thread's last agent, so
+  // the next message can move to another CLI (and its models) in the same
+  // conversation; history is passed to whichever agent runs next.
+  const selectedAgent = (agents.some((agent) => agent.id === agentId) ? agentId : '')
+    || conversation?.thread.agentId || agents[0]?.id || '';
+
+  useEffect(() => { setAgentId(''); setRunChoice({}); }, [selectedId]);
 
   useEffect(() => {
     setError(null);
@@ -119,7 +126,8 @@ export function CasualChat(): React.JSX.Element {
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">
             {conversation?.messages.map((message) => (
               <article key={message.id} aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl bg-accent px-4 py-3')}>
-                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">Thinking…</p> : null}
+                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Thinking…'}</p> : null}
+                {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 px-1 text-xs text-muted-foreground"><span className="text-shimmer">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Working…'}</span></p> : null}
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
@@ -137,6 +145,7 @@ export function CasualChat(): React.JSX.Element {
         {error ? <p role="alert" className="mb-2 text-xs text-destructive-foreground [overflow-wrap:anywhere]">{error} {loadFailed ? <button type="button" onClick={() => { setRevision((value) => value + 1); }} className="underline">Retry loading</button> : null}</p> : null}
         {!agents.length ? <p className="mb-3 text-xs text-muted-foreground">Connect a local agent in <NavLink to="/connected-apps" className="underline">Connections</NavLink> to start chatting. No project is needed.</p> : null}
         <Mem0OfflineNotice />
+        {selectedId !== null ? <PendingQuestionPanel scopeId={selectedId} /> : null}
         <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-border bg-card p-3 shadow-xs focus-within:border-ring/50">
           <label htmlFor="casual-message" className="sr-only">Message</label>
           <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} onKeyDown={(event) => {
@@ -157,7 +166,7 @@ export function CasualChat(): React.JSX.Element {
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
               <label htmlFor="chat-agent" className="sr-only">Chat agent</label>
-              <select id="chat-agent" value={selectedAgent} disabled={busy || hasMessages} onChange={(event) => { setAgentId(event.target.value); setRunChoice({}); }} className="max-w-full truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
+              <select id="chat-agent" value={selectedAgent} disabled={busy} title="Switch CLI for the next message in this conversation" onChange={(event) => { setAgentId(event.target.value); setRunChoice({}); }} className="max-w-full truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
                 {!selectedAgent ? <option value="">Choose an agent</option> : null}
                 {selectedAgent && !agents.some((agent) => agent.id === selectedAgent) ? <option value={selectedAgent}>{selectedAgent} (unavailable)</option> : null}
                 {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}

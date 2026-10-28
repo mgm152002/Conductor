@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ApprovalRequest, Task } from '@shared/domain';
-import { useApprovalStore, useTaskStore, useWorkspaceStore } from '../stores';
+import { useApprovalStore, useQuestionStore, useTaskStore, useWorkspaceStore } from '../stores';
 import { isTerminalTask } from '../stores/task-store';
 import { pickFocusedTask } from '../components/workspace/useFocusedTask';
 
@@ -68,6 +68,14 @@ export function useTaskEvents(): { errors: string[]; retry: () => void } {
       const event = payload as { taskId?: string };
       if (event && typeof event.taskId === 'string') useTaskStore.getState().bumpDetails(event.taskId);
     });
+    const stopQuestions = window.conductor.on('question.requested', (payload) => {
+      const request = payload as import('@shared/domain').AgentQuestionRequest;
+      if (request && typeof request.id === 'string') {
+        useQuestionStore.getState().push(request);
+        if (typeof request.taskId === 'string') useTaskStore.getState().bumpDetails(request.taskId);
+      }
+    });
+    void window.conductor.question.list().then((pending) => { if (mounted.current) useQuestionStore.getState().setPending(pending); }).catch(() => {});
     const stopApprovals = window.conductor.on('approval.requested', (payload) => {
       const request = payload as ApprovalRequest;
       if (request && typeof request.id === 'string') {
@@ -77,7 +85,7 @@ export function useTaskEvents(): { errors: string[]; retry: () => void } {
       }
       void refreshApprovals();
     });
-    return () => { mounted.current = false; approvalRequest.current += 1; stopTasks(); stopStream(); stopApprovals(); };
+    return () => { mounted.current = false; approvalRequest.current += 1; stopTasks(); stopStream(); stopApprovals(); stopQuestions(); };
   }, [refreshApprovals]);
 
   useEffect(() => {

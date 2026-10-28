@@ -12,6 +12,7 @@ export const EVENT_CHANNELS = [
   'task.updated',
   'task.stream',
   'approval.requested',
+  'question.requested',
   'resume.snapshot',
   'audit.appended',
   'theme.changed',

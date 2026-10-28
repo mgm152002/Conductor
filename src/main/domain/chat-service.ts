@@ -94,6 +94,7 @@ function chatActivity(event: AdapterStreamEvent, source: string): ActivityUpdate
   if (event.kind === 'log') {
     const data = obj(event.data);
     if (data === null || data['usage'] !== undefined || data['quota'] !== undefined) return undefined;
+    if (data['kind'] === 'reply') return undefined; // reply text streams via message content, not activity
     const label = str(data['message']) ?? str(data['text']);
     const detail = str(data['detail']);
     const key = str(data['key']) ?? str(data['toolCallId']);
@@ -285,6 +286,7 @@ export class ChatService {
         const contextData = await this.recall(input.content);
         await this.runWithFallback(threadId, pending, order, {
           objective: input.content, description: INSTRUCTION, guidance: INSTRUCTION,
+          taskId: threadId, stepId: assistantId,
           rootPath: this.sandboxPath, mode: 'read_only', conversationOnly: true,
           conversation,
           ...(materialized.length > 0 ? { attachments: materialized } : {}),
@@ -516,14 +518,27 @@ export class ChatService {
       run.started();
       if (run.cancelled) void this.cancelSession(run).catch(() => {});
       const codex = run.adapter.record.id === 'codex';
+      let lastSnapshotWrite = 0;
       for await (const event of run.adapter.stream(run.handle)) {
         if (run.cancelled) continue;
+        // Streamed reply snapshots (ACP/Codex deltas): replace the content so
+        // the chat streams word-by-word, throttled to avoid a write per token.
+        if (event.kind === 'log') {
+          const data = obj(event.data);
+          if (data?.['kind'] === 'reply' && typeof data['message'] === 'string') {
+            content = data['message'];
+            const now = Date.now();
+            if (now - lastSnapshotWrite >= 120) { lastSnapshotWrite = now; this.write(threadId, run, content, 'streaming'); }
+            continue;
+          }
+        }
         this.recordActivity(threadId, run, event);
         if (event.kind === 'stderr' && typeof event.data === 'string') { errorLines.push(event.data); continue; }
         if (event.kind !== 'stdout' || typeof event.data !== 'string') continue;
         const text = codex ? responseText(event.data) : event.data;
         if (text === '') continue;
-        content += (content ? '\n' : '') + text;
+        // A final full reply after streamed snapshots replaces, not appends.
+        content = content === '' || text === content || text.startsWith(content) ? text : `${content}\n${text}`;
         this.write(threadId, run, content, 'streaming');
       }
       const result: AdapterResult = await run.adapter.await(run.handle);

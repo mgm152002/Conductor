@@ -52,6 +52,27 @@ async function settled(service: ChatService, id: string) {
 }
 
 describe('standalone casual chat', () => {
+  it('switches CLI mid-thread and hands the new agent the conversation history', async () => {
+    const { service, registry, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'first reply' }] } });
+    const second = new FakeAdapter({ script: { events: [{ kind: 'stdout', data: 'second reply' }] }, record: {
+      id: 'other-agent', class: 'local_cli_agent', available: true,
+      capabilities: [{ id: 'objective.fulfill', title: 'Chat', inputSchema: {}, outputSchema: {}, streaming: true, cancellable: true, resumable: false, requiredPermissions: [] }],
+    } });
+    registry.register(second);
+
+    const first = await service.send({ content: 'Hello', agentId: 'chat-agent' });
+    await settled(service, first.thread.id);
+
+    const next = await service.send({ threadId: first.thread.id, content: 'Continue', agentId: 'other-agent' });
+    const done = await settled(service, next.thread.id);
+    expect(done.thread.agentId).toBe('other-agent');
+    expect(done.messages.at(-1)?.content).toBe('second reply');
+    expect(adapter.calls.started).toHaveLength(1);
+    expect(second.calls.started).toHaveLength(1);
+    const input = second.calls.started[0] as ObjectiveInput;
+    expect(input.conversation).toEqual([{ objective: 'Hello', reply: 'first reply', state: 'complete' }]);
+  });
+
   it('persists attachments, materializes only the current turn, and omits prior attachment metadata from agent history', async () => {
     const { service, attachments, adapter, updates, root, path } = await setup({ script: {
       events: [{ kind: 'stdout', data: 'first answer' }],

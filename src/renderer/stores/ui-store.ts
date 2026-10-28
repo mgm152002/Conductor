@@ -28,7 +28,7 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   draft: false,
-  detailsOpen: true,
+  detailsOpen: false,
   detailsTab: 'files',
   collapsedProjects: {},
   addProjectOpen: false,

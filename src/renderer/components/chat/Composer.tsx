@@ -23,7 +23,7 @@ import { AttachmentTray, useAttachmentDraft } from '../attachments';
 const MAX_OBJECTIVE = 10_000;
 const DEFAULT_CRITERIA = 'response: nonempty';
 
-export function Composer({ task, autoFocus = false, variant = 'docked' }: { task: Task | null; autoFocus?: boolean; variant?: 'docked' | 'hero' }): React.JSX.Element {
+export function Composer({ task, autoFocus = false, variant = 'docked', currentAgentId }: { task: Task | null; autoFocus?: boolean; variant?: 'docked' | 'hero'; /** Agent that ran the previous turn, for same-thread model/CLI switching. */ currentAgentId?: string | undefined }): React.JSX.Element {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const { selectProject } = useThreadNavigation();
@@ -48,6 +48,11 @@ export function Composer({ task, autoFocus = false, variant = 'docked' }: { task
   const defaultAgentId = preferredAgent(agents.filter((agent) => agent.available).map((agent) => agent.id));
   const chosenAgent = agents.find((agent) => agent.id === agentId && agent.available)
     ?? (planMode && defaultAgentId !== undefined ? agents.find((agent) => agent.id === defaultAgentId) : undefined);
+  // Mid-thread switching: with no explicit pick the previous turn's agent
+  // continues, but its model/effort can still be changed for the next turn;
+  // picking a different CLI in the agent menu switches provider in-thread.
+  const effectiveAgent = chosenAgent ?? (task !== null && variant === 'docked' && currentAgentId !== undefined
+    ? agents.find((agent) => agent.id === currentAgentId && agent.available) : undefined);
   // Model and effort: for the chosen agent (or the planner), and in plan mode
   // per sub-agent. Empty means Auto: Conductor picks by how demanding the work is.
   const mainChoice = useComposerStore((s) => s.mainChoice);
@@ -61,7 +66,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked' }: { task
   }, [agentId, agents, defaultAgentId, setAgentId]);
   const customSubAgents = Object.values(agentChoices).filter((c) => Object.keys(c).length > 0).length;
   const runOptions: RunOptions = {
-    ...(chosenAgent !== undefined && Object.keys(mainChoice).length > 0 ? { main: mainChoice } : {}),
+    ...(effectiveAgent !== undefined && Object.keys(mainChoice).length > 0 ? { main: mainChoice } : {}),
     ...(planMode && customSubAgents > 0 ? { agents: Object.fromEntries(Object.entries(agentChoices).filter(([, c]) => Object.keys(c).length > 0)) } : {}),
   };
 
@@ -247,8 +252,8 @@ export function Composer({ task, autoFocus = false, variant = 'docked' }: { task
             <select
               id={agentSelectId}
               value={chosenAgent?.id ?? ''}
-              onChange={(event) => { setAgentId(event.target.value); }}
-              title={planMode ? 'The agent that writes the plan' : task !== null && variant === 'docked' ? 'Auto continues with the agent from the previous message' : 'Auto picks an available agent'}
+              onChange={(event) => { setAgentId(event.target.value); setMainChoice({}); }}
+              title={planMode ? 'The agent that writes the plan' : task !== null && variant === 'docked' ? 'Switch CLI for the next message, or keep the same agent and just change its model' : 'Auto picks an available agent'}
               className="h-7 max-w-full sm:max-w-44 cursor-pointer appearance-none truncate rounded-full bg-transparent pr-6 pl-7 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
             >
               {planMode
@@ -258,7 +263,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked' }: { task
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground"><ChevronDownIcon size={11} /></div>
           </div>
-          {chosenAgent !== undefined ? <ModelEffortPicker agentId={chosenAgent.id} value={mainChoice} onChange={setMainChoice} {...(planMode ? { label: 'Planner' } : {})} /> : null}
+          {effectiveAgent !== undefined ? <ModelEffortPicker agentId={effectiveAgent.id} value={mainChoice} onChange={setMainChoice} {...(planMode ? { label: 'Planner' } : {})} /> : null}
           <button
             type="button"
             onClick={() => { setPlanMode(!planMode); }}

@@ -3,8 +3,10 @@ import { ATTACHMENT_SCHEMAS } from './attachments';
 export const APPLICATION_SCHEMAS = {
   ...ATTACHMENT_SCHEMAS,
   'workspace.active': z.void(),
-  'workspace.changes': z.object({workspaceId:z.string().uuid()}),
-  'workspace.fileDiff': z.object({workspaceId:z.string().uuid(),path:z.string().min(1).max(4096)}),
+  'workspace.changes': z.object({workspaceId:z.string().uuid(),taskId:z.string().uuid().optional()}),
+  'workspace.fileDiff': z.object({workspaceId:z.string().uuid(),path:z.string().min(1).max(4096),taskId:z.string().uuid().optional()}),
+  'question.list': z.void(),
+  'question.answer': z.object({id:z.string().uuid(),answers:z.record(z.string(),z.array(z.string().max(2000)).max(20))}),
   'task.list': z.object({workspaceId:z.string().uuid().optional(),limit:z.number().int().min(1).max(500).optional()}).optional(),
   'task.details': z.object({id:z.string().uuid()}),
   'task.readArtifact': z.object({taskId:z.string().uuid(),artifactId:z.string().uuid()}),

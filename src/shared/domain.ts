@@ -207,6 +207,37 @@ export interface ApprovalRequest {
   resolvedAt?: string;
 }
 
+/** One option an agent offers for a question it asks the user mid-run. */
+export interface AgentQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/** A question an agent asks the user before it can continue. */
+export interface AgentQuestion {
+  id: string;
+  header?: string;
+  question: string;
+  options?: AgentQuestionOption[];
+  multiSelect?: boolean;
+}
+
+/** A pending (or settled) agent question, surfaced in the thread for review. */
+export interface AgentQuestionRequest {
+  id: string;
+  /** Task id in Work threads; chat thread id in standalone Chat. */
+  taskId: string;
+  stepId?: string;
+  agent: string;
+  questions: AgentQuestion[];
+  status: 'pending' | 'answered' | 'cancelled';
+  createdAt: string;
+}
+
+/** The user's answers: question id → chosen option ids and/or free text. */
+export type AgentQuestionAnswers = Record<string, string[]>;
+
 export interface AuditEvent {
   id: string;
   actor: string; // adapterId | 'orchestrator' | 'user'

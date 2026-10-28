@@ -4,7 +4,7 @@ import { useApprovalStore, useTaskStore, useUiStore } from '../../stores';
 import { threadStatus, threadTitle } from '../../lib/thread-status';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
-import { FolderIcon, PanelRightIcon, PlayIcon, RotateIcon } from '../ui/icons';
+import { PanelRightIcon, PlayIcon, RotateIcon } from '../ui/icons';
 
 // The 52px thread header: project / thread breadcrumb, a status pill, the
 // recovery actions that apply to the current state, and the details toggle.
@@ -44,11 +44,11 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   }
 
   return (
-    <header className="app-drag flex min-h-(--topbar-height) shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+    <header className="app-drag flex min-h-(--topbar-height) shrink-0 flex-wrap items-center gap-2 px-4 py-2">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
         {project !== undefined ? (
           <span className="flex min-w-0 max-w-[40%] items-center gap-1.5 text-muted-foreground" title={project.rootPath}>
-            <FolderIcon size={14} />
+            <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/20 text-3xs font-bold text-primary">{project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}</span>
             <span className="max-w-40 truncate">{project.name}</span>
           </span>
         ) : null}

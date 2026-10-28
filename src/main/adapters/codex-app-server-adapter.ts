@@ -29,7 +29,7 @@ import { attachmentPromptFields, codexMcpOverrides, effortFor } from './objectiv
 // (model_not_found), the turn is retried once per model the account lists.
 
 export type { ToolApprovalKind, ToolApprovalDecision, ToolApprovalRequest, ToolApprover } from './tool-gate';
-import type { ToolApprovalKind, ToolApprovalDecision, ToolApprover } from './tool-gate';
+import type { QuestionAsker, ToolApprovalKind, ToolApprovalDecision, ToolApprover } from './tool-gate';
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
@@ -114,6 +114,7 @@ export class CodexAppServerAdapter implements AgentAdapter {
     private readonly approver: ToolApprover,
     private readonly env: CliEnvironment = defaultCliEnvironment(),
     private readonly beforeStart?: (id: string) => void,
+    private readonly questioner?: QuestionAsker,
   ) {
     this.record = {
       id: config.id, class: 'local_cli_agent', name: config.name, version: '2.0.0', capabilities: config.capabilities,
@@ -238,6 +239,64 @@ export class CodexAppServerAdapter implements AgentAdapter {
       }
     };
 
+    // Questions Codex asks the user mid-turn. Previously these were answered
+    // with empty answers sight unseen; now they wait for human review in the
+    // thread, and only an explicit answer (or cancellation) replies.
+    const askUser = async (questions: { id: string; header?: string; question: string; options?: { id: string; label: string; description?: string }[]; multiSelect?: boolean }[]): Promise<Record<string, string[]> | null> => {
+      if (this.questioner === undefined || data.taskId === undefined || live.done) return null;
+      const controller = new AbortController();
+      const abort = (): void => { controller.abort(); };
+      live.abortApprovals.add(abort);
+      try {
+        return await this.questioner({ taskId: data.taskId, ...(data.stepId ? { stepId: data.stepId } : {}), agent: this.config.name, questions }, controller.signal);
+      } catch { return null; } finally { live.abortApprovals.delete(abort); }
+    };
+    const answerUserInput = async (id: unknown, params: Json): Promise<void> => {
+      const raw = Array.isArray(params['questions']) ? params['questions'].map(obj).filter((q): q is Json => q !== null) : [];
+      const questions = raw.map((q, index) => {
+        const options = Array.isArray(q['options']) ? q['options'].map(obj).filter((o): o is Json => o !== null)
+          .map((o, optionIndex) => ({ id: str(o['label']) ?? `option-${optionIndex}`, label: str(o['label']) ?? `Option ${optionIndex + 1}`, ...(str(o['description']) ? { description: str(o['description'])! } : {}) })) : [];
+        return {
+          id: str(q['id']) ?? `q${index + 1}`,
+          ...(str(q['header']) ? { header: str(q['header'])! } : {}),
+          question: str(q['question']) ?? 'The agent has a question',
+          ...(options.length > 0 ? { options } : {}),
+          ...(q['isOther'] === true ? {} : {}),
+        };
+      });
+      const answers = questions.length > 0 ? await askUser(questions) : null;
+      const result: Record<string, { answers: string[] }> = {};
+      if (answers !== null) {
+        for (const q of questions) {
+          const chosen = answers[q.id];
+          if (chosen !== undefined && chosen.length > 0) result[q.id] = { answers: chosen };
+        }
+      }
+      this.push(live, 'log', { message: answers !== null ? `Answered ${Object.keys(result).length} question(s) from ${this.config.name}` : `${this.config.name} asked a question; no answer was given`, kind: 'approval', source: this.config.name });
+      send({ id, result: { answers: result } });
+    };
+    const answerElicitation = async (id: unknown, params: Json): Promise<void> => {
+      const message = str(params['message']) ?? 'An MCP server is asking for input';
+      const answers = await askUser([{ id: 'elicitation', question: message }]);
+      const text = answers?.['elicitation']?.[0];
+      send({ id, result: text !== undefined && text !== ''
+        ? { action: 'accept', content: { answer: text }, _meta: null }
+        : { action: 'decline', content: null, _meta: null } });
+    };
+
+    // Incremental text: app-server sends delta notifications between
+    // item/started and item/completed. Accumulate per item and push throttled
+    // snapshots under a stable key so the UI streams instead of waiting.
+    const deltaText = new Map<string, string>();
+    const deltaPushed = new Map<string, number>();
+    const pushDelta = (itemId: string, kind: 'reply' | 'reasoning', force = false): void => {
+      const text = deltaText.get(itemId) ?? '';
+      const pushed = deltaPushed.get(itemId) ?? 0;
+      if (text.trim() === '' || (!force && text.length - pushed < 24)) return;
+      deltaPushed.set(itemId, text.length);
+      this.push(live, 'log', { message: text, kind: kind === 'reply' ? 'reply' : 'reasoning', key: `codex:${kind}:${itemId}`, status: force ? 'neutral' : 'running', source: this.config.name });
+    };
+
     const onMessage = (message: Json): void => {
       const id = message['id'];
       const method = str(message['method']);
@@ -258,9 +317,9 @@ export class CodexAppServerAdapter implements AgentAdapter {
         if (/requestApproval$/.test(method) || method === 'execCommandApproval' || method === 'applyPatchApproval') {
           void answerApproval(id, method, params);
         } else if (method === 'item/tool/requestUserInput') {
-          send({ id, result: { answers: {} } });
+          void answerUserInput(id, params);
         } else if (method === 'mcpServer/elicitation/request') {
-          send({ id, result: { action: 'decline', content: null, _meta: null } });
+          void answerElicitation(id, params);
         } else {
           send({ id, error: { code: -32601, message: `Conductor does not handle ${method}` } });
         }
@@ -277,6 +336,23 @@ export class CodexAppServerAdapter implements AgentAdapter {
           const item = obj(params['item']);
           const mapped = item !== null ? execItem(item) : null;
           if (mapped !== null) this.emit(live, { type: 'item.completed', item: mapped });
+          const itemId = str(item?.['id']);
+          if (itemId !== undefined) { pushDelta(itemId, mapped?.['type'] === 'reasoning' ? 'reasoning' : 'reply', true); deltaText.delete(itemId); deltaPushed.delete(itemId); }
+          break;
+        }
+        case 'item/agentMessage/delta': {
+          const itemId = str(params['itemId']) ?? 'agent-message';
+          const delta = str(params['delta']) ?? '';
+          deltaText.set(itemId, (deltaText.get(itemId) ?? '') + delta);
+          pushDelta(itemId, 'reply');
+          break;
+        }
+        case 'item/reasoning/summaryTextDelta':
+        case 'item/reasoning/textDelta': {
+          const itemId = str(params['itemId']) ?? 'reasoning';
+          const delta = str(params['delta']) ?? '';
+          deltaText.set(itemId, (deltaText.get(itemId) ?? '') + delta);
+          pushDelta(itemId, 'reasoning');
           break;
         }
         case 'error': {
