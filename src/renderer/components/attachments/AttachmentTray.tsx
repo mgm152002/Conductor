@@ -25,12 +25,12 @@ export function AttachmentTray({ attachments, onRemove, onPick, busy = false, di
   // In history there is nothing to edit, so image attachments get a real
   // inline preview instead of the small composer chip.
   const history = onPick === undefined && onRemove === undefined;
-  return <div className="space-y-2" aria-label="Attachments" aria-busy={busy}>
+  return <div className="min-w-0 max-w-full space-y-2" aria-label="Attachments" aria-busy={busy}>
     {onPick && <div className="flex flex-wrap items-center gap-2">
       <Button variant="ghost" disabled={busy || disabled || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE} onClick={onPick}><PaperclipIcon />Attach files</Button>
       <span className="text-2xs text-muted-foreground">Up to {MAX_ATTACHMENTS_PER_MESSAGE} files, {formatAttachmentSize(MAX_ATTACHMENT_BYTES)} each</span>
     </div>}
-    {!!attachments.length && <ul className={history ? 'flex flex-wrap items-start gap-3' : 'flex flex-wrap gap-2'} aria-label="Attached files">
+    {!!attachments.length && <ul className={history ? 'flex max-w-full flex-wrap items-start gap-3' : 'flex flex-wrap gap-2'} aria-label="Attached files">
       {attachments.map(attachment => <li key={attachment.id} className="min-w-0 max-w-full"><AttachmentCard attachment={attachment} display={history ? 'history' : 'compact'} onPreview={setSelected} onRemove={onRemove} disabled={busy || disabled} /></li>)}
     </ul>}
     {busy && <div role="status" className="space-y-1 text-xs text-muted-foreground">

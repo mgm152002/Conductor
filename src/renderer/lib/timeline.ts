@@ -154,6 +154,65 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     items.push({ kind: 'error', id, text, at });
   };
 
+  /**
+   * One log-shaped payload: tool calls, reasoning, plan and reply snapshots.
+   * Direct `log` task events carry these fields at the top level; adapters
+   * also emit them as `stream` events with the same fields under `data`, so
+   * both shapes funnel through here — otherwise Work mode drops every tool
+   * call the CLI reports and the thread only ever shows "Working".
+   */
+  const handleLogPayload = (event: TaskEvent, logPayload: Json): void => {
+    const text = str(logPayload['message']) ?? str(logPayload['text']);
+    if (isAgentFallbackEvent(event)) {
+      if (text !== undefined) addNotice(event.id, text, event.createdAt);
+      return;
+    }
+    const detail = str(logPayload['detail']);
+    const kind = str(logPayload['kind']);
+    if (kind === 'reply' && text !== undefined && text.trim() !== '') {
+      // Streamed reply snapshot: update the one assistant item in place.
+      flushWork();
+      if (replySnapshot === null) {
+        replySnapshot = { kind: 'assistant', id: `reply-live:${event.id}`, text: text.trim(), at: event.createdAt };
+        items.push(replySnapshot);
+      } else {
+        replySnapshot.text = text.trim();
+      }
+      return;
+    }
+    const key = str(logPayload['key']) ?? str(logPayload['toolCallId']);
+    const status = str(logPayload['status']);
+    const source = str(logPayload['source']);
+    const tone = toneForStatus(status);
+    const existing = key !== undefined ? byKey.get(key) : undefined;
+    // A completion update only carries a key and status; enrich the row
+    // that the matching start event already added. The row may live in an
+    // earlier group if assistant prose was flushed in between.
+    if (existing !== undefined) {
+      if (text !== undefined) existing.label = kind === 'reasoning' ? firstLine(text) : text.trim();
+      if (detail !== undefined) existing.detail = detail;
+      if (kind !== undefined) existing.icon = iconForLogKind(kind);
+      if (source !== undefined) existing.source = source;
+      if (status !== undefined) existing.tone = tone;
+      return;
+    }
+    if (text === undefined && detail === undefined) return;
+    const label = kind === 'reasoning' ? firstLine(text ?? detail ?? 'Thinking') : (text ?? detail ?? 'Activity').trim();
+    if (label === '') return;
+    const entry: WorkEntry = {
+      id: key !== undefined ? `log:${key}:${event.id}` : event.id,
+      icon: iconForLogKind(kind),
+      label,
+      ...(detail !== undefined ? { detail } : kind === 'reasoning' && text !== undefined ? { detail: text } : {}),
+      tone,
+      at: event.createdAt,
+      ...(key !== undefined ? { key } : {}),
+      ...(source !== undefined ? { source } : {}),
+    };
+    if (key !== undefined) byKey.set(key, entry);
+    addWork(entry);
+  };
+
   for (const event of details.events) {
     const payload = obj(event.payload);
     if (event.kind === 'stream' && payload !== null) {
@@ -168,6 +227,15 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
         continue;
       }
       if (streamKind === 'artifact') continue; // surfaced via the artifact event
+      if (streamKind === 'log') {
+        // Tool calls, reasoning and reply snapshots from the CLI. Usage and
+        // quota log objects carry no message/detail/key and are ignored by
+        // the handler, matching the standalone Chat activity feed.
+        const dataObj = obj(payload['data']);
+        if (dataObj !== null) handleLogPayload(event, dataObj);
+        else if (data !== '') handleLogPayload(event, { message: data });
+        continue;
+      }
       if (streamKind !== 'stdout') continue;
       handleStdoutLine(event, data);
       continue;
@@ -201,55 +269,8 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
         break;
       }
       case 'log': {
-        const text = str(payload?.['message']) ?? str(payload?.['text']) ?? (typeof event.payload === 'string' ? event.payload : undefined);
-        if (isAgentFallbackEvent(event)) {
-          if (text !== undefined) addNotice(event.id, text, event.createdAt);
-          break;
-        }
-        const detail = str(payload?.['detail']);
-        const kind = str(payload?.['kind']);
-        if (kind === 'reply' && text !== undefined && text.trim() !== '') {
-          // Streamed reply snapshot: update the one assistant item in place.
-          flushWork();
-          if (replySnapshot === null) {
-            replySnapshot = { kind: 'assistant', id: `reply-live:${event.id}`, text: text.trim(), at: event.createdAt };
-            items.push(replySnapshot);
-          } else {
-            replySnapshot.text = text.trim();
-          }
-          break;
-        }
-        const key = str(payload?.['key']) ?? str(payload?.['toolCallId']);
-        const status = str(payload?.['status']);
-        const source = str(payload?.['source']);
-        const tone = toneForStatus(status);
-        const existing = key !== undefined ? byKey.get(key) : undefined;
-        // A completion update only carries a key and status; enrich the row
-        // that the matching start event already added. The row may live in an
-        // earlier group if assistant prose was flushed in between.
-        if (existing !== undefined) {
-          if (text !== undefined) existing.label = kind === 'reasoning' ? firstLine(text) : text.trim();
-          if (detail !== undefined) existing.detail = detail;
-          if (kind !== undefined) existing.icon = iconForLogKind(kind);
-          if (source !== undefined) existing.source = source;
-          if (status !== undefined) existing.tone = tone;
-          break;
-        }
-        if (text === undefined && detail === undefined) break;
-        const label = kind === 'reasoning' ? firstLine(text ?? detail ?? 'Thinking') : (text ?? detail ?? 'Activity').trim();
-        if (label === '') break;
-        const entry: WorkEntry = {
-          id: key !== undefined ? `log:${key}:${event.id}` : event.id,
-          icon: iconForLogKind(kind),
-          label,
-          ...(detail !== undefined ? { detail } : kind === 'reasoning' && text !== undefined ? { detail: text } : {}),
-          tone,
-          at: event.createdAt,
-          ...(key !== undefined ? { key } : {}),
-          ...(source !== undefined ? { source } : {}),
-        };
-        if (key !== undefined) byKey.set(key, entry);
-        addWork(entry);
+        if (payload !== null) handleLogPayload(event, payload);
+        else if (typeof event.payload === 'string') handleLogPayload(event, { message: event.payload });
         break;
       }
       default:

@@ -49,10 +49,10 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
 
   if (display === 'history' && isImage) {
     return (
-      <figure className="group/image max-w-full">
+      <figure className="group/image w-fit min-w-0 max-w-full">
         <Button
           variant="ghost"
-          className={cn('h-auto max-w-full justify-start border border-border bg-card p-1 text-left hover:bg-accent', image === null && 'gap-2 px-2.5 py-2')}
+          className={cn('h-auto w-fit max-w-full min-w-0 justify-start overflow-hidden border border-border bg-card p-1 text-left hover:bg-accent', image === null && 'gap-2 px-2.5 py-2')}
           onClick={() => { onPreview(attachment); }}
           aria-label={`Preview ${attachment.name}`}
         >
@@ -63,7 +63,7 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
                 loading="lazy"
                 decoding="async"
                 draggable={false}
-                className="max-h-48 w-auto max-w-[18rem] rounded-md object-contain"
+                className="block h-auto max-h-48 w-auto min-w-0 max-w-[min(18rem,100%)] rounded-md object-contain"
                 onError={() => { setThumbnail(null); setFailed(true); }}
               />
             : failed
@@ -77,7 +77,7 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
           ) : null}
         </Button>
         {image !== null ? (
-          <figcaption className="mt-1 flex max-w-[18rem] items-center gap-1 px-0.5 text-2xs text-muted-foreground">
+          <figcaption className="mt-1 flex max-w-full items-center gap-1 px-0.5 text-2xs text-muted-foreground">
             <ImageIcon size={10} className="shrink-0" />
             <span className="min-w-0 truncate" title={attachment.name}>{attachment.name}</span>
             <span className="shrink-0 text-muted-foreground/70">· {formatAttachmentSize(attachment.sizeBytes)}</span>

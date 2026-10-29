@@ -7,6 +7,7 @@ const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 
 let n = 0;
 const stdout = (line: unknown): TaskEvent => ({ id: `e${n++}`, taskId: 't', kind: 'stream', payload: { kind: 'stdout', data: typeof line === 'string' ? line : JSON.stringify(line) }, createdAt: `2026-10-24T00:00:${String(n).padStart(2, '0')}Z` });
 const log = (payload: Record<string, unknown>): TaskEvent => ({ id: `l${n++}`, taskId: 't', kind: 'log', payload, createdAt: `2026-10-24T00:00:${String(n).padStart(2, '0')}Z` });
+const streamLog = (data: Record<string, unknown>): TaskEvent => ({ id: `s${n++}`, taskId: 't', kind: 'stream', payload: { kind: 'log', data }, createdAt: `2026-10-24T00:00:${String(n).padStart(2, '0')}Z` });
 const details = (events: TaskEvent[]): TaskDetails => ({ task, steps: [], events, artifacts: [], attachments: [], approvals: [], verification: null });
 
 describe('chat timeline', () => {
@@ -55,6 +56,26 @@ describe('chat timeline', () => {
     const work = items.find((i) => i.kind === 'work') as Extract<typeof items[number], { kind: 'work' }>;
     expect(work.entries).toHaveLength(1);
     expect(work.entries[0]).toMatchObject({ label: 'Inspecting the parser', tone: 'neutral' });
+  });
+
+  it('shows CLI tool calls carried as log stream events, merging start and completion by key', () => {
+    const items = buildTimeline(task, details([
+      streamLog({ message: 'Inspecting the renderer', kind: 'reasoning', key: 'acp:thought', status: 'running', source: 'OpenCode' }),
+      streamLog({ message: 'read', kind: 'read', detail: 'src/renderer/lib/timeline.ts', key: 'call-1', status: 'running', source: 'OpenCode' }),
+      streamLog({ key: 'call-1', status: 'completed', source: 'OpenCode' }),
+      streamLog({ usage: { costUsd: 0.12, model: 'test-model' } }),
+      streamLog({ message: 'Here is what I found', kind: 'reply', key: 'acp:reply', status: 'running', source: 'OpenCode' }),
+      stdout('Here is what I found'),
+    ]));
+    const work = items.find((i) => i.kind === 'work') as Extract<typeof items[number], { kind: 'work' }>;
+    expect(work.entries).toHaveLength(2);
+    expect(work.entries[0]).toMatchObject({ label: 'Inspecting the renderer', icon: 'thinking', tone: 'running', source: 'OpenCode' });
+    expect(work.entries[1]).toMatchObject({ label: 'read', detail: 'src/renderer/lib/timeline.ts', icon: 'read', tone: 'success', source: 'OpenCode' });
+    expect(latestActivity(items)).toMatchObject({ label: 'read', tone: 'success' });
+    expect(recentActivities(items, 5).map((entry) => entry.label)).toEqual(['Inspecting the renderer', 'read']);
+    const replies = items.filter((i) => i.kind === 'assistant');
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({ text: 'Here is what I found' });
   });
 
   it('shows Codex item notices as neutral, not errors', () => {
