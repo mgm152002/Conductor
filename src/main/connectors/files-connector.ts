@@ -51,7 +51,12 @@ const SKIPPED_FILES: ReadonlySet<string> = new Set([
 export interface FilesConnectorOptions {
   /** Max bytes read per file; larger files are skipped. Default 256 KiB. */
   maxFileBytes?: number;
-  /** Max new/changed files returned per sync. Default 400. */
+  /**
+   * Max new/changed files returned per sync. Default 50: the cursor only
+   * advances once a batch is fully ingested, so smaller batches checkpoint
+   * progress (and bound re-reads after a failure or restart) far more often.
+   * The runtime drains successive batches within one sync request.
+   */
   maxItemsPerSync?: number;
   /** Max directory entries visited per sync, bounding huge trees. Default 50k. */
   maxEntriesScanned?: number;
@@ -127,7 +132,7 @@ export class FilesConnectorLifecycle implements ConnectorLifecycle {
 
   constructor(options: FilesConnectorOptions = {}) {
     this.maxFileBytes = options.maxFileBytes ?? 256 * 1024;
-    this.maxItemsPerSync = options.maxItemsPerSync ?? 400;
+    this.maxItemsPerSync = options.maxItemsPerSync ?? 50;
     this.maxEntriesScanned = options.maxEntriesScanned ?? 50_000;
   }
 

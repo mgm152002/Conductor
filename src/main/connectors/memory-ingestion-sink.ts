@@ -47,9 +47,11 @@ export function createMemoryIngestionSink(memory: MemoryEngine): IngestionSink {
         return (await memory.supersede(prior.id, input)).id;
       }
     }
-    // Recover a staged write after a transport failure without duplicating it.
-    const recovered = await memory.search({ sourceId: item.id, limit: 1 });
-    if (recovered[0]) return recovered[0].memory.id;
+    // Recover a staged write after a transport failure without duplicating
+    // it. This is a local lookup only: the previous search-based recovery
+    // synchronized with Mem0 and fetched the remote record for every file.
+    const recoveredId = memory.idForSourceId(item.id);
+    if (recoveredId !== undefined) return recoveredId;
     return (await memory.create(input)).id;
   };
 }

@@ -62,6 +62,13 @@ describe('MemoryEngine.create', () => {
         expect(events[0]?.sourceId).toBe('doc-42');
         expect(events[0]?.createdAt).toBe('2025-01-01T00:00:00.000Z');
     });
+    it('finds a staged memory id by source id without any Mem0 request', async () => {
+        const memory = await engine.create(base());
+        const requestsBefore = mock.requests.length;
+        expect(engine.idForSourceId('doc-42')).toBe(memory.id);
+        expect(engine.idForSourceId('no-such-source')).toBeUndefined();
+        expect(mock.requests).toHaveLength(requestsBefore);
+    });
     it('defaults veracity to unverified_assumption and confidence to 0.0', async () => {
         const memory = await engine.create(base());
         expect(memory.veracity).toBe('unverified_assumption');

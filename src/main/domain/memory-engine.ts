@@ -172,14 +172,18 @@ export class MemoryEngine {
     return remote.metadata?.['conductor_id'] === id && remote.user_id === this.userId && remote.run_id === id;
   }
 
-  private async transfer(id: string): Promise<void> {
+  private async transfer(id: string, opts: { assumeNoRemote?: boolean } = {}): Promise<void> {
     const row = this.row(id);
     if (!row) return;
     let remoteId = row.mem0_id;
     if (remoteId === null) {
       // A previous POST may have succeeded even if its response was lost.
-      const recovered = await this.mem0.list(this.userId, id);
+      // Callers that just inserted the row locally (under the same exclusive
+      // lock, so no synchronization can have run in between) know that is
+      // impossible and skip the recovery lookup.
+      const recovered = opts.assumeNoRemote === true ? [] : await this.mem0.list(this.userId, id);
       if (recovered.length > 1) throw new Mem0Error('Multiple Mem0 records for one memory; reconciliation required');
+      const fresh = recovered[0] === undefined;
       const remote = recovered[0] ?? await this.mem0.add(this.userId, id, row.content, this.metadata(row));
       const confirmed = await this.mem0.get(remote.id);
       if (!this.owned(confirmed, id) || confirmed.memory !== row.content) throw new Mem0Error('Mem0 has not confirmed verbatim memory storage');
@@ -188,6 +192,14 @@ export class MemoryEngine {
       const result = this.store.db.prepare("UPDATE memories SET mem0_id=?, content='', mem0_dirty=1 WHERE id=?").run(remoteId, id);
       if (result.changes === 0) {
         this.store.db.prepare('INSERT OR REPLACE INTO mem0_deletions(memory_id,mem0_id) VALUES(?,?)').run(id, remoteId);
+        return;
+      }
+      if (fresh) {
+        // The POST already carried this row's metadata and the read-back
+        // verified the stored content, so the metadata PUT below would only
+        // repeat the same write. Recovered remotes still take the PUT path:
+        // their metadata may predate local changes.
+        this.store.db.prepare('UPDATE memories SET mem0_dirty=0 WHERE id=?').run(id);
         return;
       }
     }
@@ -335,9 +347,27 @@ export class MemoryEngine {
         this.appendEvent(tx.db, record.id, { kind: 'supersedes', relatedMemoryId: supersededId, createdAt: nowIso });
       }
     });
-    await this.transfer(record.id);
+    await this.transfer(record.id, { assumeNoRemote: true });
     if (supersededId !== undefined) await this.transfer(supersededId);
     return record;
+  }
+
+  /**
+   * Id of the live memory staged for `sourceId`, if any. Local-only: it never
+   * synchronizes or calls Mem0, so hot paths (ingestion recovery) can dedupe
+   * a staged write without paying a network round-trip per item. The row may
+   * not be transferred yet; background synchronization completes that.
+   */
+  idForSourceId(sourceId: string): string | undefined {
+    const row = this.store.db
+      .prepare(
+        `SELECT id FROM memories
+         WHERE source_id = ? AND superseded_by IS NULL
+           AND (expires_at IS NULL OR expires_at > ?)
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(sourceId, new Date(this.now()).toISOString()) as { id: string } | undefined;
+    return row?.id;
   }
 
   /** The memory if it exists, otherwise undefined. */

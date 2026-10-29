@@ -12,6 +12,7 @@ import { IngestionWorker } from '@main/connectors/ingestion-worker';
 import { FilesConnectorLifecycle, isIndexableFile } from '@main/connectors/files-connector';
 import { createMemoryIngestionSink } from '@main/connectors/memory-ingestion-sink';
 import { ConnectorRuntime } from '@main/connectors/connector-runtime';
+import type { Connector } from '@shared/connector';
 import { PersistentContextProvider } from '@main/orchestrator/persistent-context-provider';
 import { WorkspaceService } from '@main/domain/workspace-service';
 let workDir: string;
@@ -137,6 +138,34 @@ describe('folder connector ingestion (end to end)', () => {
         expect(hits[0]!.memory.provenance.method).toBe('ingested');
         expect(hits[0]!.memory.scope).toEqual({ level: 'source', refId: created.id });
         expect(liveIngestedMemories().some((m) => m.content.includes('should-never-be-read'))).toBe(false);
+    });
+    it('ingests each file without a Mem0 search or redundant metadata update per file', async () => {
+        write('a.md', 'alpha document');
+        write('b.md', 'beta document');
+        const created = await runtime.createFolder({ name: 'Notes', rootPath: folder, workspaceId });
+        const outcome = await runtime.sync(created.id, 'event');
+        expect(outcome.succeeded).toBe(true);
+        expect(runtime.view(created.id).itemCount).toBe(2);
+        const calls = mock.requests.map((r) => `${r.method} ${r.path}`);
+        expect(calls.filter((c) => c === 'POST /search')).toHaveLength(0);
+        expect(calls.filter((c) => c === 'GET /memories')).toHaveLength(0);
+        expect(calls.filter((c) => c.startsWith('PUT '))).toHaveLength(0);
+        expect(calls.filter((c) => c === 'POST /memories')).toHaveLength(2);
+    });
+    it('bounds a default retrieve batch to 50 files so the sync cursor checkpoints often', async () => {
+        for (let i = 0; i < 60; i += 1)
+            write(`file-${i}.md`, `document number ${i}`, 1700000000 + i);
+        const connector: Connector = {
+            id: 'batch-test', kind: 'files', name: 'Notes', authState: 'authorized',
+            health: 'unknown', maxRetries: 3, consecutiveFailures: 0,
+            config: { rootPath: folder }, createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
+        };
+        const lifecycle = new FilesConnectorLifecycle();
+        const first = await lifecycle.retrieve(undefined, connector);
+        expect(first.items).toHaveLength(50);
+        expect(first.nextCursor).toBeDefined();
+        const second = await lifecycle.retrieve(first.nextCursor, connector);
+        expect(second.items).toHaveLength(10);
     });
     it('does not follow symlinks out of the configured folder', async () => {
         writeFileSync(join(outside, 'secret-plan.md'), 'outside the folder');
