@@ -169,6 +169,11 @@ const github: GitHubBridge = {
   refreshPrs: (workspaceId) => invoke('github.refreshPrs', { workspaceId }),
   createPr: (input) => invoke('github.createPr', input),
   openPr: (url) => invoke('github.openPr', { url }),
+  getPr: (input) => invoke('github.getPr', input),
+  mergePr: (input) => invoke('github.mergePr', input),
+  commentPr: (input) => invoke('github.commentPr', input),
+  reviewPr: (input) => invoke('github.reviewPr', input),
+  setPrState: (input) => invoke('github.setPrState', input),
 };
 
 const conductor = {

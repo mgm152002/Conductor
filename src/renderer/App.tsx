@@ -3,6 +3,7 @@ import { AppLayout } from './components/AppLayout';
 import { DEFAULT_PATH, NAV_ENTRIES } from './navigation';
 import type { NavEntryId } from './navigation';
 import { WorkScreen } from './screens/WorkScreen';
+import { PullRequestScreen } from './screens/PullRequestScreen';
 import {
   ActiveTasksScreen,
   ConnectedAppsScreen,
@@ -42,6 +43,7 @@ export function App(): React.JSX.Element {
         <Route element={<AppLayout />}>
           <Route index element={<Navigate to={DEFAULT_PATH} replace />} />
           <Route path="work" element={<WorkScreen />} />
+          <Route path="pr/:workspaceId/:number" element={<PullRequestScreen />} />
           {NAV_ENTRIES.map((entry) => {
             const Screen = SCREENS[entry.id];
             // `path` leads with "/"; strip it for the relative child route.

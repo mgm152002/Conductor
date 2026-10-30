@@ -45,6 +45,8 @@ async function seed() {
   const secrets = new Map<string, string>();
   const opened: string[] = [];
   const apiPrs: unknown[] = [];
+  const mergeCalls: { method?: string; body?: string }[] = [];
+  let prMerged = false;
   const service = new GitHubService({
     store: s,
     workspaces,
@@ -65,14 +67,41 @@ async function seed() {
       } as unknown as Task;
     },
     openExternal: async (url) => { opened.push(url); },
-    fetchFn: (async (input: unknown) => {
+    fetchFn: (async (input: unknown, init?: { method?: string; body?: string }) => {
       const url = String(input);
       if (url.endsWith('/user')) return new Response(JSON.stringify({ login: 'octocat' }), { status: 200 });
       if (url.includes('/pulls?state=all')) return new Response(JSON.stringify(apiPrs), { status: 200 });
+      if (url.endsWith('/pulls/7/merge')) {
+        mergeCalls.push({ ...(init?.method !== undefined ? { method: init.method } : {}), ...(init?.body !== undefined ? { body: init.body } : {}) });
+        prMerged = true;
+        return new Response(JSON.stringify({ merged: true, sha: 'abc123', message: 'Merged' }), { status: 200 });
+      }
+      if (url.endsWith('/pulls/7')) return new Response(JSON.stringify({
+        number: 7, html_url: 'https://github.com/acme/widgets/pull/7', title: 'Reader PR',
+        body: '## Summary\nDoes things', state: prMerged ? 'closed' : 'open', merged_at: prMerged ? '2026-01-03T00:00:00Z' : null,
+        draft: false, mergeable: true, mergeable_state: 'clean', additions: 3, deletions: 1, changed_files: 1, commits: 1,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', user: { login: 'octocat' },
+        merged_by: prMerged ? { login: 'octocat' } : null,
+        head: { ref: 'conductor/x', sha: 'abc123' }, base: { ref: 'main' },
+        labels: [{ name: 'bug' }], requested_reviewers: [{ login: 'reviewer1' }], assignees: [],
+      }), { status: 200 });
+      if (url.endsWith('/pulls/7/files?per_page=100')) return new Response(JSON.stringify([
+        { filename: 'a.txt', status: 'modified', additions: 3, deletions: 1, changes: 4, patch: '@@ -1 +1 @@\n+new' },
+      ]), { status: 200 });
+      if (url.endsWith('/pulls/7/commits?per_page=100')) return new Response(JSON.stringify([
+        { sha: 'abc123def', html_url: 'https://github.com/x', commit: { message: 'Do it\n\nbody', author: { name: 'Octo', date: '2026-01-01T00:00:00Z' } } },
+      ]), { status: 200 });
+      if (url.includes('/issues/7/comments')) return new Response(JSON.stringify([
+        { id: 1, html_url: 'https://github.com/x#c1', body: 'Looks good', created_at: '2026-01-01T01:00:00Z', user: { login: 'reviewer1' } },
+      ]), { status: 200 });
+      if (url.endsWith('/pulls/7/reviews?per_page=100')) return new Response(JSON.stringify([]), { status: 200 });
+      if (url.includes('/commits/abc123/check-runs')) return new Response(JSON.stringify({
+        check_runs: [{ name: 'test', status: 'completed', conclusion: 'success', html_url: 'https://github.com/x/checks' }],
+      }), { status: 200 });
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch,
   });
-  return { s, project, taskId, service, opened, secrets, apiPrs };
+  return { s, project, taskId, service, opened, secrets, apiPrs, mergeCalls };
 }
 
 describe('GitHubService connection', () => {
@@ -116,6 +145,45 @@ describe('GitHubService.refreshPrs', () => {
     expect(prs[1]).toMatchObject({ threadKey: '', state: 'merged' });
     const rootRow = s.db.prepare('SELECT pr_number, pr_state FROM tasks WHERE id = ?').get(taskId) as { pr_number: number; pr_state: string };
     expect(rootRow).toEqual({ pr_number: 11, pr_state: 'open' });
+  });
+});
+
+describe('GitHubService PR reader', () => {
+  async function connected() {
+    const ctx = await seed();
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init', '-q', root!]);
+    execFileSync('git', ['-C', root!, 'remote', 'add', 'origin', 'git@github.com:acme/widgets.git']);
+    await ctx.service.connect(ctx.project.id, 'ghp_test_token');
+    return ctx;
+  }
+
+  it('loads the full PR bundle for the reader tab', async () => {
+    const { project, service } = await connected();
+    const bundle = await service.getPr(project.id, 7);
+    expect(bundle.detail).toMatchObject({
+      number: 7, title: 'Reader PR', author: 'octocat', baseBranch: 'main', headBranch: 'conductor/x',
+      mergeable: true, draft: false, labels: ['bug'], reviewers: ['reviewer1'], state: 'open',
+    });
+    expect(bundle.detail.body).toContain('Does things');
+    expect(bundle.files).toEqual([expect.objectContaining({ filename: 'a.txt', patch: expect.stringContaining('+new') })]);
+    expect(bundle.commits[0]).toMatchObject({ message: 'Do it', author: 'Octo' });
+    expect(bundle.comments[0]).toMatchObject({ author: 'reviewer1', body: 'Looks good', kind: 'comment' });
+    expect(bundle.checks).toEqual([expect.objectContaining({ name: 'test', conclusion: 'success' })]);
+  });
+
+  it('merges from Conductor and returns the updated (merged) bundle', async () => {
+    const { s, project, taskId, service, mergeCalls } = await connected();
+    const now = new Date().toISOString();
+    s.db.prepare(`INSERT INTO github_pull_requests (id, workspace_id, thread_key, root_task_id, number, url, title, branch, state, created_at, updated_at)
+                  VALUES (?, ?, ?, ?, 7, 'https://github.com/acme/widgets/pull/7', 'Reader PR', 'conductor/x', 'open', ?, ?)`)
+      .run(randomUUID(), project.id, taskId, taskId, now, now);
+    const bundle = await service.mergePr(project.id, 7, 'squash');
+    expect(mergeCalls).toEqual([{ method: 'PUT', body: JSON.stringify({ merge_method: 'squash' }) }]);
+    expect(bundle.detail.state).toBe('merged');
+    expect(bundle.detail.mergedBy).toBe('octocat');
+    const row = s.db.prepare('SELECT pr_state FROM tasks WHERE id = ?').get(taskId) as { pr_state: string };
+    expect(row.pr_state).toBe('merged');
   });
 });
 

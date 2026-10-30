@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PullRequestRecord, PullRequestState } from '@shared/github-contract';
 import type { Workspace } from '@shared/domain';
+import { useNavigate } from 'react-router-dom';
 import { useTaskStore } from '../../stores';
 import { useThreadNavigation } from '../../hooks/useThreadNavigation';
+import { prPath } from '../../lib/pull-request';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
@@ -24,6 +26,7 @@ type Filter = 'all' | PullRequestState;
 
 export function ProjectPullRequestsDialog({ project, open, onClose }: { project: Workspace; open: boolean; onClose: () => void }): React.JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
+  const navigate = useNavigate();
   const { openThread } = useThreadNavigation();
   const [prs, setPrs] = useState<PullRequestRecord[]>([]);
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -107,10 +110,9 @@ export function ProjectPullRequestsDialog({ project, open, onClose }: { project:
                 <PullRequestIcon size={15} className={cn('shrink-0', STATE_CLASS[pr.state])} />
                 <button
                   type="button"
-                  disabled={root === undefined}
-                  onClick={() => { if (root !== undefined) { onClose(); void openThread(root); } }}
-                  title={root !== undefined ? `Open thread: ${pr.threadTitle}` : 'Not linked to a Conductor thread'}
-                  className="min-w-0 flex-1 text-left focus-visible:outline-2 focus-visible:outline-ring enabled:cursor-pointer"
+                  onClick={() => { onClose(); navigate(prPath(project.id, pr.number)); }}
+                  title={`Read pull request #${pr.number} in Conductor`}
+                  className="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-ring"
                 >
                   <span className="block truncate text-[13px] font-medium text-foreground">
                     #{pr.number} {pr.title}
@@ -121,6 +123,11 @@ export function ProjectPullRequestsDialog({ project, open, onClose }: { project:
                     <span className="font-mono">{pr.branch}</span> · updated {relativeTime(pr.updatedAt)}
                   </span>
                 </button>
+                {root !== undefined ? (
+                  <Button size="xs" variant="ghost" aria-label={`Open thread for pull request #${pr.number}`} onClick={() => { onClose(); void openThread(root); }}>
+                    Thread
+                  </Button>
+                ) : null}
                 <Button
                   size="xs"
                   variant="outline"

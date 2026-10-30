@@ -51,6 +51,76 @@ export type CreatePrResult =
   | { status: 'created' | 'existing'; pr: PullRequestRecord }
   | { status: 'no-changes'; branch: string };
 
+/** Everything the in-app PR reader needs for one pull request. */
+export interface PullRequestDetail extends PullRequestRecord {
+  body: string;
+  author: string;
+  repoFullName: string;
+  baseBranch: string;
+  headBranch: string;
+  headSha: string;
+  draft: boolean;
+  /** Null while GitHub is still computing mergeability. */
+  mergeable: boolean | null;
+  mergeableState?: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  commits: number;
+  labels: string[];
+  reviewers: string[];
+  assignees: string[];
+  mergedBy?: string;
+  mergedAt?: string;
+  closedAt?: string;
+}
+
+export interface PullRequestFile {
+  filename: string;
+  previousFilename?: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+}
+
+export interface PullRequestCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
+export interface PullRequestComment {
+  id: number;
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  kind: 'comment' | 'review';
+  reviewState?: string;
+}
+
+export interface PullRequestCheck {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  url?: string;
+}
+
+export interface PullRequestBundle {
+  detail: PullRequestDetail;
+  files: PullRequestFile[];
+  commits: PullRequestCommit[];
+  comments: PullRequestComment[];
+  checks: PullRequestCheck[];
+}
+
+export type PrMergeMethod = 'merge' | 'squash' | 'rebase';
+export type PrReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
 const WorkspaceId = z.string().trim().min(1).max(200);
 
 export const GITHUB_SCHEMAS = {
@@ -68,6 +138,23 @@ export const GITHUB_SCHEMAS = {
   'github.createPr': z.object({ workspaceId: WorkspaceId, threadId: z.string().trim().min(1).max(200) }).strict(),
   // Only URLs persisted by Conductor itself may be opened (validated in main).
   'github.openPr': z.object({ url: z.string().url().max(2048) }).strict(),
+  'github.getPr': z.object({ workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000) }).strict(),
+  'github.mergePr': z.object({
+    workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000),
+    method: z.enum(['merge', 'squash', 'rebase']), commitTitle: z.string().trim().max(500).optional(),
+  }).strict(),
+  'github.commentPr': z.object({
+    workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000),
+    body: z.string().trim().min(1).max(20_000),
+  }).strict(),
+  'github.reviewPr': z.object({
+    workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000),
+    event: z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']), body: z.string().trim().max(20_000).optional(),
+  }).strict(),
+  'github.setPrState': z.object({
+    workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000),
+    state: z.enum(['open', 'closed']),
+  }).strict(),
 } as const;
 
 export interface GitHubBridge {
@@ -80,4 +167,9 @@ export interface GitHubBridge {
   refreshPrs(workspaceId: string): Promise<PullRequestRecord[]>;
   createPr(input: { workspaceId: string; threadId: string }): Promise<CreatePrResult>;
   openPr(url: string): Promise<void>;
+  getPr(input: { workspaceId: string; number: number }): Promise<PullRequestBundle>;
+  mergePr(input: { workspaceId: string; number: number; method: PrMergeMethod; commitTitle?: string }): Promise<PullRequestBundle>;
+  commentPr(input: { workspaceId: string; number: number; body: string }): Promise<PullRequestBundle>;
+  reviewPr(input: { workspaceId: string; number: number; event: PrReviewEvent; body?: string }): Promise<PullRequestBundle>;
+  setPrState(input: { workspaceId: string; number: number; state: 'open' | 'closed' }): Promise<PullRequestBundle>;
 }

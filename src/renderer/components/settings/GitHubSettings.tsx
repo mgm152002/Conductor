@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GitHubConnectionStatus, PullRequestRecord } from '@shared/github-contract';
 import type { Workspace } from '@shared/domain';
+import { useNavigate } from 'react-router-dom';
 import { useWorkspaceStore } from '../../stores';
+import { prPath } from '../../lib/pull-request';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/primitives';
@@ -14,6 +16,7 @@ import { ExternalLinkIcon, PullRequestIcon } from '../ui/icons';
 // Work thread's branch is pushed and a pull request filed for it.
 
 function ProjectGitHub({ project }: { project: Workspace }): React.JSX.Element {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<GitHubConnectionStatus | null>(null);
   const [prs, setPrs] = useState<PullRequestRecord[]>([]);
   const [token, setToken] = useState('');
@@ -123,6 +126,9 @@ function ProjectGitHub({ project }: { project: Workspace }): React.JSX.Element {
                             <span className="font-mono">{pr.branch}</span> · {pr.state} · updated {relativeTime(pr.updatedAt)}
                           </span>
                         </span>
+                        <Button size="xs" variant="primary" aria-label={`Read pull request #${pr.number} in Conductor`} onClick={() => { navigate(prPath(project.id, pr.number)); }}>
+                          Read PR
+                        </Button>
                         <Button size="xs" variant="outline" aria-label={`Open pull request #${pr.number} on GitHub`} onClick={() => { void window.conductor.github.openPr(pr.url).catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)); }); }}>
                           <ExternalLinkIcon size={11} /> GitHub
                         </Button>

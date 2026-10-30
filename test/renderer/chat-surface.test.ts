@@ -159,7 +159,7 @@ it('groups Work threads into tiers with Needs attention first and settled thread
   expect(html).toContain('Live thread');
   // A thread can be marked settled or snoozed from its row.
   expect(html).toContain('aria-label="Mark thread as settled: Finished thread"');
-  expect(html).toContain('aria-label="Snooze thread until tomorrow: Finished thread"');
+  expect(html).toContain('aria-label="Snooze thread: Finished thread"');
   // Settled threads are hidden behind their collapsible list.
   expect(html).toContain('aria-label="Settled threads in Project"');
   expect(html).toContain('aria-expanded="false"');
@@ -230,7 +230,7 @@ it('lists every project in the GitHub settings, not just the active one', async 
     activeWorkspaceId: 'project-1',
   });
 
-  const html = renderToStaticMarkup(createElement(GitHubSettings));
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(GitHubSettings)));
   expect(html).toContain('Alpha project');
   expect(html).toContain('Beta project');
 });
