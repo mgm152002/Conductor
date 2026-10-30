@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ChatThread } from '@shared/chat-contract';
 import type { Task, Workspace } from '@shared/domain';
 import { NAV_ENTRIES, type NavEntryId } from '../navigation';
@@ -11,10 +11,11 @@ import { threadStatus, threadTitle } from '../lib/thread-status';
 import { relativeTime } from '../lib/time';
 import { groupThreads, threadKey, type ThreadView } from '../lib/threads';
 import {
-  classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
+  classifyThreadTier, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
   tierMembership, tiersWithNewArrivals,
   type ThreadTierId, type ThreadTierInfo, type ThreadTierSignals,
 } from '../lib/thread-tiers';
+import { prNumberFromUrl, prPath } from '../lib/pull-request';
 import { cn } from '../lib/cn';
 import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
@@ -22,6 +23,7 @@ import {
   BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, LayersIcon, ListChecksIcon, PencilIcon, PlugIcon,
   PlusIcon, PullRequestIcon, RotateIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
+import { SnoozePickerDialog } from './threads/SnoozePickerDialog';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
 import { ProjectPullRequestsDialog } from './projects/ProjectPullRequestsDialog';
 import { DeleteChatDialog } from './threads/DeleteChatDialog';
@@ -75,6 +77,8 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
   onClearTier: () => void;
 }): React.JSX.Element {
   const task = thread.latest;
+  const navigate = useNavigate();
+  const prNumber = thread.root.prNumber ?? prNumberFromUrl(thread.root.prUrl);
   const snoozeCountdown = snoozedUntil !== undefined ? formatSnoozeCountdown(snoozedUntil) : null;
   const status = threadStatus(task, pendingApproval);
   const title = threadTitle(thread.root);
@@ -117,9 +121,9 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
       {thread.root.prUrl !== undefined ? (
         <button
           type="button"
-          onClick={() => { void window.conductor.github.openPr(thread.root.prUrl!).catch(() => undefined); }}
-          aria-label={`Open pull request ${thread.root.prNumber !== undefined ? `#${thread.root.prNumber} ` : ''}for thread: ${threadTitle(thread.root)}`}
-          title={`Pull request${thread.root.prNumber !== undefined ? ` #${thread.root.prNumber}` : ''}${thread.root.prState !== undefined ? ` · ${thread.root.prState}` : ''} — open on GitHub`}
+          onClick={() => { if (prNumber !== null) navigate(prPath(thread.root.workspaceId, prNumber)); }}
+          aria-label={`Open pull request ${prNumber !== null ? `#${prNumber} ` : ''}for thread: ${threadTitle(thread.root)}`}
+          title={`Pull request${prNumber !== null ? ` #${prNumber}` : ''}${thread.root.prState !== undefined ? ` · ${thread.root.prState}` : ''} — open in the PR reader`}
           className={cn(
             'absolute right-1 bottom-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring',
             thread.root.prState === 'merged' ? 'text-violet-500' : thread.root.prState === 'closed' ? 'text-destructive' : 'text-success',
@@ -156,8 +160,8 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
           <button
             type="button"
             onClick={onSnooze}
-            aria-label={`Snooze thread until tomorrow: ${title}`}
-            title="Snooze until tomorrow 9:00 AM"
+            aria-label={`Snooze thread: ${title}`}
+            title="Snooze — choose when it wakes up"
             className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
           >
             <ClockIcon size={12} />
@@ -208,6 +212,12 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   const [collapsedTiers, setCollapsedTiers] = useState<Record<ThreadTierId, boolean>>({
     'needs-attention': false, working: false, settled: true, snoozed: true,
   });
+  // Explicit header clicks, keyed by tier. The tier holding the open thread
+  // starts revealed (see `tierCollapsed` below), so without this record a
+  // click on its header had nothing to toggle and the section never
+  // collapsed. An override is dropped when focus moves or a thread lands in
+  // the tier, after which the base rules apply again.
+  const [tierOverrides, setTierOverrides] = useState<Partial<Record<ThreadTierId, boolean>>>({});
   const previousTierByThread = useRef<Map<string, ThreadTierId> | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [deleting, setDeleting] = useState(false);
@@ -215,6 +225,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   const [prCount, setPrCount] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ThreadView | null>(null);
   const [renamingThread, setRenamingThread] = useState<ThreadView | null>(null);
+  const [snoozingThread, setSnoozingThread] = useState<ThreadView | null>(null);
   // Locally recorded PR count for the header badge; the dialog syncs the
   // repository's full list from GitHub when opened.
   useEffect(() => {
@@ -276,7 +287,31 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
       for (const tier of arrivals) next[tier] = true;
       return next;
     });
+    // A fresh arrival re-applies the base (auto-collapsed) state, discarding
+    // any manual override for the tiers it landed in.
+    setTierOverrides((current) => {
+      if (arrivals.every((tier) => current[tier] === undefined)) return current;
+      const next = { ...current };
+      for (const tier of arrivals) delete next[tier];
+      return next;
+    });
   }, [tierGroups, query]);
+  // Moving focus to another thread reveals its tier again, discarding a
+  // manual collapse the user applied to it earlier.
+  const previousFocusedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (focusedKey === null || focusedKey === previousFocusedKey.current) return;
+    previousFocusedKey.current = focusedKey;
+    const group = tierGroups.find((g) => g.threads.some((thread) => thread.key === focusedKey));
+    if (group !== undefined) {
+      setTierOverrides((current) => {
+        if (current[group.id] === undefined) return current;
+        const next = { ...current };
+        delete next[group.id];
+        return next;
+      });
+    }
+  }, [focusedKey, tierGroups]);
   if (query !== '' && threads.length === 0) return <></>;
   const working = tierGroups.find((group) => group.id === 'working')?.threads.length ?? 0;
   const needsAttention = tierGroups.find((group) => group.id === 'needs-attention')?.threads.length ?? 0;
@@ -330,6 +365,13 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
       {prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
       {deletingThread !== null ? <DeleteThreadDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameThreadDialog key={renamingThread.key} threadId={renamingThread.key} currentTitle={threadTitle(renamingThread.root)} open onClose={() => { setRenamingThread(null); }} /> : null}
+      {snoozingThread !== null ? (
+        <SnoozePickerDialog
+          open
+          onClose={() => { setSnoozingThread(null); }}
+          onSnooze={(until) => { useThreadTierStore.getState().snooze(snoozingThread.key, snoozingThread.latest.updatedAt, until); }}
+        />
+      ) : null}
       {!collapsed ? (
         threads.length === 0 ? (
           <p className="py-1 pl-7 text-2xs text-sidebar-muted-foreground/70">No threads yet</p>
@@ -338,12 +380,16 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
             {tierGroups.map((group) => {
               const isAttention = group.id === 'needs-attention';
               const containsFocused = focusedKey !== null && group.threads.some((thread) => thread.key === focusedKey);
-              const tierCollapsed = query === '' && !containsFocused && collapsedTiers[group.id] === true;
+              // Base state: the tier holding the open thread is revealed so it
+              // stays visible. A manual header click overrides that either
+              // way, so every section — focused or not — collapses and expands
+              // when clicked. Search forces sections open so matches show.
+              const tierCollapsed = query === '' && (tierOverrides[group.id] ?? (!containsFocused && collapsedTiers[group.id] === true));
               return (
                 <section key={group.id} aria-label={`${group.label} threads in ${project.name}`} className="flex flex-col">
                   <button
                     type="button"
-                    onClick={() => { setCollapsedTiers((current) => ({ ...current, [group.id]: !current[group.id] })); }}
+                    onClick={() => { setTierOverrides((current) => ({ ...current, [group.id]: !tierCollapsed })); }}
                     aria-expanded={!tierCollapsed}
                     aria-label={`${group.label} threads in ${project.name}`}
                     className={cn(
@@ -379,7 +425,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
                             onRename={() => { setRenamingThread(thread); }}
                             onDelete={() => { setDeletingThread(thread); }}
                             onMarkSettled={() => { useThreadTierStore.getState().markSettled(thread.key, thread.latest.updatedAt); }}
-                            onSnooze={() => { useThreadTierStore.getState().snooze(thread.key, thread.latest.updatedAt, defaultSnoozeUntil()); }}
+                            onSnooze={() => { setSnoozingThread(thread); }}
                             onClearTier={() => { useThreadTierStore.getState().clear(thread.key); }}
                           />
                         );
@@ -570,7 +616,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
         </>}
       </div>
 
-      <p className="shrink-0 px-4 pt-2 text-2xs text-sidebar-muted-foreground/80">Settled · local-first</p>
       <ul className="flex shrink-0 flex-col gap-px p-2">
         {NAV_ENTRIES.filter((entry) => entry.id !== 'home' && (!onHome || entry.id === 'settings' || entry.id === 'connected-apps')).map((entry) => {
           const Icon = NAV_ICONS[entry.id];

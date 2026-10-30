@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Task, Workspace } from '@shared/domain';
 import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore } from '../../stores';
 import { threadStatus, threadTitle } from '../../lib/thread-status';
 import { threadKey, threadTasks } from '../../lib/threads';
-import { classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown } from '../../lib/thread-tiers';
+import { classifyThreadTier, formatSnoozeCountdown } from '../../lib/thread-tiers';
+import { prNumberFromUrl, prPath } from '../../lib/pull-request';
+import { SnoozePickerDialog } from '../threads/SnoozePickerDialog';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
 import { CheckIcon, ClockIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
@@ -33,6 +36,8 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
     const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.min(delay, 2_147_483_647));
     return () => { window.clearTimeout(timer); };
   }, [tierPref]);
+  const navigate = useNavigate();
+  const [snoozing, setSnoozing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,9 +138,12 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         <Button
           size="sm"
           variant="outline"
-          aria-label={`Open pull request ${(title ?? task)!.prNumber !== undefined ? `#${(title ?? task)!.prNumber} ` : ''}on GitHub`}
-          title={`Pull request${(title ?? task)!.prState !== undefined ? ` · ${(title ?? task)!.prState}` : ''} — open on GitHub`}
-          onClick={() => { void window.conductor.github.openPr((title ?? task)!.prUrl!).catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not open pull request'); }); }}
+          aria-label={`Open pull request ${(title ?? task)!.prNumber !== undefined ? `#${(title ?? task)!.prNumber} ` : ''}in the PR reader`}
+          title={`Pull request${(title ?? task)!.prState !== undefined ? ` · ${(title ?? task)!.prState}` : ''} — open in the PR reader`}
+          onClick={() => {
+            const prNumber = (title ?? task)!.prNumber ?? prNumberFromUrl((title ?? task)!.prUrl);
+            if (prNumber !== null && task !== null) navigate(prPath(task.workspaceId, prNumber));
+          }}
           className={cn((title ?? task)!.prState === 'merged' ? 'text-violet-500' : (title ?? task)!.prState === 'closed' ? 'text-destructive' : 'text-success')}
         >
           <PullRequestIcon size={13} />
@@ -154,11 +162,18 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
               <RotateIcon size={14} />
             </Button>
           ) : (
-            <Button size="icon" variant="ghost" aria-label={`Snooze thread until tomorrow: ${threadTitle(title ?? task)}`} title="Snooze until tomorrow 9:00 AM" onClick={() => { useThreadTierStore.getState().snooze(threadKey(title ?? task), task.updatedAt, defaultSnoozeUntil()); }}>
+            <Button size="icon" variant="ghost" aria-label={`Snooze thread: ${threadTitle(title ?? task)}`} title="Snooze — choose when it wakes up" onClick={() => { setSnoozing(true); }}>
               <ClockIcon size={14} />
             </Button>
           )}
         </>
+      ) : null}
+      {task !== null && snoozing ? (
+        <SnoozePickerDialog
+          open
+          onClose={() => { setSnoozing(false); }}
+          onSnooze={(until) => { useThreadTierStore.getState().snooze(threadKey(title ?? task), task.updatedAt, until); }}
+        />
       ) : null}
       {task !== null ? (
         <Button size="icon" variant="ghost" aria-label={`Rename thread: ${threadTitle(title ?? task)}`} title="Rename thread" onClick={() => { setRenaming(true); }}>

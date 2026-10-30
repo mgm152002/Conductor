@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Task, TaskState } from '../../src/shared/domain';
 import {
-  classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
+  classifyThreadTier, customSnoozeUntil, defaultSnoozeUntil, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
+  snoozePresetUntil,
   NO_THREAD_SIGNALS, tierMembership, tiersWithNewArrivals,
   type ThreadTierPref,
 } from '../../src/renderer/lib/thread-tiers';
@@ -171,6 +172,30 @@ describe('snooze timer', () => {
     expect(afterWake.map((group) => group.id)).toEqual(['needs-attention']);
     // Landing in Needs attention is an arrival, so that section auto-collapses too.
     expect(tiersWithNewArrivals(tierMembership(beforeWake), afterWake)).toEqual(['needs-attention']);
+  });
+});
+
+describe('snooze wake-time choices', () => {
+  const at = new Date('2026-10-26T15:30:00'); // Monday 3:30 PM local
+
+  it('resolves each preset the picker offers', () => {
+    expect(snoozePresetUntil('1-hour', at)).toBe(new Date('2026-10-26T16:30:00').toISOString());
+    expect(snoozePresetUntil('later-today', at)).toBe(new Date('2026-10-26T18:00:00').toISOString());
+    expect(snoozePresetUntil('tomorrow', at)).toBe(new Date('2026-10-27T09:00:00').toISOString());
+    expect(snoozePresetUntil('next-week', at)).toBe(new Date('2026-11-02T09:00:00').toISOString());
+    expect(snoozePresetUntil('indefinite', at)).toBeUndefined();
+  });
+
+  it('falls back to tomorrow morning for "later today" after 6 PM', () => {
+    expect(snoozePresetUntil('later-today', new Date('2026-10-26T19:00:00')))
+      .toBe(new Date('2026-10-27T09:00:00').toISOString());
+  });
+
+  it('accepts only future custom wake times', () => {
+    const now = Date.parse('2026-10-26T12:00:00.000Z');
+    expect(customSnoozeUntil('2026-10-26T13:00:00.000Z', now)).toBe('2026-10-26T13:00:00.000Z');
+    expect(customSnoozeUntil('2026-10-26T11:00:00.000Z', now)).toBeNull();
+    expect(customSnoozeUntil('not-a-date', now)).toBeNull();
   });
 });
 

@@ -94,6 +94,58 @@ export function defaultSnoozeUntil(now: Date = new Date()): string {
   return until.toISOString();
 }
 
+export type SnoozePresetId = '1-hour' | 'later-today' | 'tomorrow' | 'next-week' | 'indefinite';
+
+export interface SnoozePreset {
+  id: SnoozePresetId;
+  label: string;
+  /** When this preset wakes the thread, relative to `now`. */
+  hint: string;
+}
+
+/** Wake-time choices offered when the user snoozes a thread. */
+export const SNOOZE_PRESETS: SnoozePreset[] = [
+  { id: '1-hour', label: 'For 1 hour', hint: 'Wakes in 1 hour' },
+  { id: 'later-today', label: 'Later today', hint: 'Wakes at 6:00 PM today' },
+  { id: 'tomorrow', label: 'Tomorrow', hint: 'Wakes tomorrow at 9:00 AM' },
+  { id: 'next-week', label: 'Next week', hint: 'Wakes in 7 days at 9:00 AM' },
+  { id: 'indefinite', label: 'Until I wake it', hint: 'No timer — stays snoozed' },
+];
+
+/**
+ * Resolve a preset to an ISO wake time. `indefinite` (and an unknown id)
+ * returns undefined: a snooze with no timer. `later-today` falls back to
+ * tomorrow 9 AM once 6 PM has passed.
+ */
+export function snoozePresetUntil(id: SnoozePresetId, now: Date = new Date()): string | undefined {
+  const until = new Date(now);
+  switch (id) {
+    case '1-hour':
+      until.setTime(until.getTime() + 60 * 60_000);
+      return until.toISOString();
+    case 'later-today': {
+      until.setHours(18, 0, 0, 0);
+      if (until.getTime() <= now.getTime()) return defaultSnoozeUntil(now);
+      return until.toISOString();
+    }
+    case 'tomorrow':
+      return defaultSnoozeUntil(now);
+    case 'next-week':
+      until.setDate(until.getDate() + 7);
+      until.setHours(9, 0, 0, 0);
+      return until.toISOString();
+    case 'indefinite':
+      return undefined;
+  }
+}
+
+/** Validate a user-picked custom wake time; must parse and be in the future. */
+export function customSnoozeUntil(value: string, now: number = Date.now()): string | null {
+  const until = Date.parse(value);
+  if (Number.isNaN(until) || until <= now) return null;
+  return new Date(until).toISOString();
+}
+
 export function isSnoozeExpired(pref: ThreadTierPref | undefined, now: number = Date.now()): boolean {
   if (pref?.mode !== 'snoozed' || pref.snoozedUntil === undefined) return false;
   const until = Date.parse(pref.snoozedUntil);
