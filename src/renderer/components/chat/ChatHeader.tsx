@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { Task, Workspace } from '@shared/domain';
-import { useApprovalStore, useTaskStore, useUiStore } from '../../stores';
+import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore } from '../../stores';
 import { threadStatus, threadTitle } from '../../lib/thread-status';
-import { threadKey } from '../../lib/threads';
+import { threadKey, threadTasks } from '../../lib/threads';
+import { classifyThreadTier, defaultSnoozeUntil } from '../../lib/thread-tiers';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
-import { PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
+import { CheckIcon, ClockIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
 import { RenameThreadDialog } from '../threads/RenameThreadDialog';
 
 // The 52px thread header: project / thread breadcrumb, a status pill, the
@@ -13,6 +14,9 @@ import { RenameThreadDialog } from '../threads/RenameThreadDialog';
 
 export function ChatHeader({ project, task, title }: { project: Workspace | undefined; task: Task | null; title?: Task }): React.JSX.Element {
   const pending = useApprovalStore((s) => s.pending);
+  const pendingQuestions = useQuestionStore((s) => s.pending);
+  const taskMap = useTaskStore((s) => s.tasks);
+  const tierPref = useThreadTierStore((s) => (task !== null ? s.prefs[threadKey(title ?? task)] : undefined));
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const setDetailsOpen = useUiStore((s) => s.setDetailsOpen);
   const [busy, setBusy] = useState<'retry' | 'resume' | null>(null);
@@ -20,6 +24,23 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   const [confirmResume, setConfirmResume] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = task !== null ? threadStatus(task, pending.some((request) => request.taskId === task.id)) : null;
+  // The thread's T3-style tier, so a finished thread can be marked settled (or
+  // snoozed / woken) from the thread itself, not only from the sidebar.
+  const tierInfo = ((): ReturnType<typeof classifyThreadTier> | null => {
+    if (task === null) return null;
+    const key = threadKey(title ?? task);
+    const tasksInThread = threadTasks(taskMap, key);
+    const latest = tasksInThread[tasksInThread.length - 1] ?? task;
+    const ids = new Set(tasksInThread.map((item) => item.id));
+    return classifyThreadTier(
+      { key, root: title ?? task, latest, tasks: tasksInThread.length > 0 ? tasksInThread : [task] },
+      tierPref,
+      {
+        hasPendingApproval: pending.some((request) => ids.has(request.taskId)),
+        hasPendingQuestion: pendingQuestions.some((request) => ids.has(request.taskId)),
+      },
+    );
+  })();
 
   async function refresh(id: string): Promise<void> {
     useTaskStore.getState().upsert(await window.conductor.task.get(id));
@@ -65,8 +86,8 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         )}
         {status !== null ? (
           <span className={cn('ml-1 flex shrink-0 items-center gap-1 text-2xs font-medium', status.colorClass)}>
-            <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
-            {status.label}
+            <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && tierInfo?.tier !== 'snoozed' && 'animate-status-pulse')} />
+            {tierInfo?.tier === 'needs-attention' ? tierInfo.attentionLabel : tierInfo?.tier === 'snoozed' ? 'Snoozed' : tierInfo?.tier === 'settled' ? 'Settled' : status.label}
           </span>
         ) : null}
       </div>
@@ -103,6 +124,24 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
           <PullRequestIcon size={13} />
           {(title ?? task)!.prNumber !== undefined ? `#${(title ?? task)!.prNumber}` : 'PR'}
         </Button>
+      ) : null}
+      {task !== null && tierInfo !== null ? (
+        <>
+          {tierInfo.tier !== 'settled' ? (
+            <Button size="icon" variant="ghost" aria-label={`Mark thread as settled: ${threadTitle(title ?? task)}`} title="Mark as settled" onClick={() => { useThreadTierStore.getState().markSettled(threadKey(title ?? task), task.updatedAt); }}>
+              <CheckIcon size={14} />
+            </Button>
+          ) : null}
+          {tierInfo.tier === 'snoozed' || tierInfo.tier === 'settled' ? (
+            <Button size="icon" variant="ghost" aria-label={tierInfo.tier === 'snoozed' ? `Wake thread: ${threadTitle(title ?? task)}` : `Move thread back to Needs attention: ${threadTitle(title ?? task)}`} title={tierInfo.tier === 'snoozed' ? 'Wake now' : 'Move back to Needs attention'} onClick={() => { useThreadTierStore.getState().clear(threadKey(title ?? task)); }}>
+              <RotateIcon size={14} />
+            </Button>
+          ) : (
+            <Button size="icon" variant="ghost" aria-label={`Snooze thread until tomorrow: ${threadTitle(title ?? task)}`} title="Snooze until tomorrow 9:00 AM" onClick={() => { useThreadTierStore.getState().snooze(threadKey(title ?? task), task.updatedAt, defaultSnoozeUntil()); }}>
+              <ClockIcon size={14} />
+            </Button>
+          )}
+        </>
       ) : null}
       {task !== null ? (
         <Button size="icon" variant="ghost" aria-label={`Rename thread: ${threadTitle(title ?? task)}`} title="Rename thread" onClick={() => { setRenaming(true); }}>
