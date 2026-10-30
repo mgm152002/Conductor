@@ -142,11 +142,20 @@ function chatActivity(event: AdapterStreamEvent, source: string): ActivityUpdate
   if (itemType === 'file_change') {
     const changes = Array.isArray(item['changes']) ? item['changes'].map(obj).filter((change): change is Json => change !== null) : [];
     const paths = changes.map((change) => `${str(change['kind']) ?? 'update'} ${str(change['path']) ?? ''}`.trim());
-    return { ...base, label: changes.length === 1 ? `Edited ${str(changes[0]!['path']) ?? 'a file'}` : `Edited ${changes.length} files`, kind: 'edit', ...(paths.length > 0 ? { detail: paths.join('\n') } : {}), status: str(item['status']) === 'failed' ? 'failed' : completed ? 'completed' : 'running' };
+    const fileName = (path: string): string => path.split('/').filter(Boolean).pop() ?? path;
+    const diffs = changes.map((change) => str(change['diff'])).filter((d): d is string => d !== undefined && d !== '');
+    const detail = [...(paths.length > 0 ? [paths.join('\n')] : []), ...diffs].join('\n\n');
+    return { ...base, label: changes.length === 1 ? `Edited ${fileName(str(changes[0]!['path']) ?? 'a file')}` : `Edited ${changes.length} files`, kind: 'edit', ...(detail !== '' ? { detail } : {}), status: str(item['status']) === 'failed' ? 'failed' : completed ? 'completed' : 'running' };
   }
   if (itemType === 'mcp_tool_call') {
     const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
-    return { ...base, label: `Called ${name || 'tool'}`, kind: 'tool', status: completed ? (str(item['status']) === 'failed' ? 'failed' : 'completed') : 'running' };
+    const output = str(item['output']);
+    return { ...base, label: `Called ${name || 'tool'}`, kind: 'tool', ...(output !== undefined && output !== '' ? { detail: output } : {}), status: completed ? (str(item['status']) === 'failed' ? 'failed' : 'completed') : 'running' };
+  }
+  if (itemType === 'image_view') {
+    const path = str(item['path']) ?? '';
+    const name = path.split('/').filter(Boolean).pop() ?? 'image';
+    return { ...base, label: `Viewed ${name}`, kind: 'read', ...(path !== '' ? { detail: path } : {}), status: completed ? 'completed' : 'running' };
   }
   if (itemType === 'web_search') return { ...base, label: `Searched “${str(item['query']) ?? ''}”`, kind: 'search', status: completed ? 'completed' : 'running' };
   if (itemType === 'todo_list') {
@@ -323,6 +332,32 @@ export class ChatService {
       }
     })(); });
     return snapshot;
+  }
+
+  /**
+   * Name recent chats that still carry the first-message placeholder title
+   * (created before title generation, or whose generation failed). A title
+   * counts as a placeholder only when it exactly equals the truncated first
+   * user message; anything else is treated as a user's rename and left alone.
+   * Runs sequentially so it never spawns parallel agent sessions.
+   */
+  async backfillTitles(limit = 10): Promise<void> {
+    if (this.generateTitle === undefined) return;
+    const rows = this.store.db.prepare(
+      `SELECT t.id AS id, t.title AS title,
+              (SELECT content FROM chat_messages WHERE thread_id = t.id AND role = 'user' ORDER BY rowid LIMIT 1) AS first
+       FROM chat_threads t ORDER BY t.updated_at DESC, t.rowid DESC LIMIT ?`,
+    ).all(limit) as { id: string; title: string; first: string | null }[];
+    for (const row of rows) {
+      if (row.first === null || this.runs.has(row.id)) continue;
+      const placeholder = row.first.replace(/\s+/g, ' ').slice(0, 80);
+      if (row.title !== placeholder) continue;
+      const title = await this.generateTitle(row.first).catch(() => undefined);
+      if (title === undefined) continue;
+      const changed = this.store.db.prepare('UPDATE chat_threads SET title=? WHERE id=? AND title=?')
+        .run(title, row.id, placeholder);
+      if (changed.changes > 0) this.emit(row.id);
+    }
   }
 
   /** Rename a chat thread. The original first message is never touched. */

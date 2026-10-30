@@ -90,6 +90,26 @@ describe('standalone casual chat', () => {
     expect(service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
   });
 
+  it('backfills titles for chats still carrying the first-message placeholder', async () => {
+    const { root, store, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
+    const service = new ChatService(store, registry, join(root, 'chat-sandbox'), () => {}, {
+      generateTitle: async (first) => (first.startsWith('help me') ? 'Weekend plan ideas' : 'Generated title'),
+    });
+    const sent = await service.send({ content: 'help me plan a weekend trip to the coast' });
+    await settled(service, sent.thread.id);
+    // Simulate a chat created before auto-titles: reset to the placeholder.
+    store.db.prepare('UPDATE chat_threads SET title=? WHERE id=?')
+      .run('help me plan a weekend trip to the coast', sent.thread.id);
+    const renamed = await service.send({ content: 'a renamed chat first message' });
+    await settled(service, renamed.thread.id);
+    store.db.prepare('UPDATE chat_threads SET title=? WHERE id=?').run('My own name', renamed.thread.id);
+
+    await service.backfillTitles(10);
+    expect(service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
+    // A user-chosen title is never treated as a placeholder.
+    expect(service.get(renamed.thread.id).thread.title).toBe('My own name');
+  });
+
   it('persists attachments, materializes only the current turn, and omits prior attachment metadata from agent history', async () => {
     const { service, attachments, adapter, updates, root, path } = await setup({ script: {
       events: [{ kind: 'stdout', data: 'first answer' }],

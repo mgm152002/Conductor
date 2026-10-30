@@ -77,7 +77,8 @@ import { QuotaPollingService } from './usage/quota-polling';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
-import { AgentTitleGenerator, ThreadTitleService } from './domain/thread-title-service';
+import { AgentTitleGenerator, ThreadTitleService, TITLE_TIMEOUT_MS } from './domain/thread-title-service';
+import { defaultModelKey } from '@shared/model-defaults';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
 import { AgentLearningAnalyzer } from './domain/learning-analyzer';
 import { LearningCronService } from './domain/learning-cron';
@@ -250,7 +251,23 @@ export async function bootstrap(): Promise<AppServices> {
   // Auto thread titles: a fast economy-model call names each new thread from
   // its first message, replacing the first-characters placeholder in the
   // background. Shared by Work threads, casual chats, and PR creation.
-  const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs);
+  const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs, TITLE_TIMEOUT_MS, {
+    // Pin the same Settings default model the user's chats run on; a bare
+    // session would otherwise start on the CLI's own (possibly broken) default.
+    settingsRunChoice: (agentId) => {
+      const read = (key: string): string | undefined => {
+        const value = settings.resolve(key);
+        return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+      };
+      const model = read(defaultModelKey(agentId));
+      const effort = read(`agents.${agentId}.effort`);
+      return model === undefined && effort === undefined ? undefined : {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      };
+    },
+    onError: (message) => { console.warn(message); },
+  });
   const threadTitles = new ThreadTitleService({
     store,
     getTask: (taskId) => stateMachine.getTask(taskId),
@@ -267,6 +284,9 @@ export async function bootstrap(): Promise<AppServices> {
     },
   );
   registerChatHandlers(router, chat);
+  // Personal chats created before auto-titles (or whose title call failed)
+  // still show the first-message placeholder; name the recent ones now.
+  void chat.backfillTitles(10).catch(() => undefined);
 
   // One worktree per thread, created before the agent's first step runs.
   // Follow-ups in the thread reuse it; non-Git projects run in place.

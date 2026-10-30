@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Task } from '@shared/domain';
+import type { RunChoice } from '@shared/agent-models';
 import type { Store } from '../db/types';
 import type { Registry } from '../registry/registry';
 import type { ModelCatalogService } from '../agents/model-catalog';
@@ -137,30 +138,75 @@ export class ThreadTitleService {
   }
 }
 
+export interface AgentTitleGeneratorOptions {
+  /**
+   * The model/effort the user configured for an agent in Settings, if any.
+   * A bare agent session otherwise starts on the CLI's own default model —
+   * which may be a broken free tier even though the user's chats (which pin
+   * their model) work fine — so titles resolve models exactly like chats do:
+   * Settings default first, then the catalog's economy pick.
+   */
+  settingsRunChoice?: (agentId: string) => RunChoice | undefined;
+  /** Failure reporting; title generation used to fail silently everywhere. */
+  onError?: (message: string) => void;
+}
+
 /**
- * The model call behind title generation: the first available chat-capable
- * local CLI agent, read-only in a sandbox, pinned to its economy model at low
- * effort when the (already cached) catalog offers one, under a hard timeout
- * with cancellation — a title must be fast and must never stall real work.
+ * The model call behind title generation: available chat-capable local CLI
+ * agents in preference order (the next is tried when one fails), read-only in
+ * a sandbox, pinned to the user's Settings model or the catalog's economy
+ * model at low effort, under a hard timeout with cancellation — a title must
+ * be fast and must never stall real work.
  */
 export class AgentTitleGenerator {
+  private readonly settingsRunChoice: AgentTitleGeneratorOptions['settingsRunChoice'];
+  private readonly onError: AgentTitleGeneratorOptions['onError'];
+
   constructor(
     private readonly registry: Registry,
     private readonly sandboxPath: string,
     private readonly catalogs?: ModelCatalogService,
     private readonly timeoutMs: number = TITLE_TIMEOUT_MS,
+    options: AgentTitleGeneratorOptions = {},
   ) {
+    this.settingsRunChoice = options.settingsRunChoice;
+    this.onError = options.onError;
     mkdirSync(sandboxPath, { recursive: true, mode: 0o700 });
     try { chmodSync(sandboxPath, 0o700); } catch { /* best effort */ }
   }
 
   async generate(objective: string): Promise<string | undefined> {
-    const selected = this.registry.listAdapters()
+    const candidates = this.registry.listAdapters()
       .filter((a) => a.available && a.class === 'local_cli_agent' && a.capabilities.some((c) => c.id === 'objective.fulfill'))
-      .sort((a, b) => compareAgentPreference(a.id, b.id))[0];
-    if (selected === undefined) return undefined;
-    const adapter = this.registry.resolve(selected.id);
-    const run = chooseRun({ catalog: this.catalogs?.cached(selected.id), difficulty: 'simple' });
+      .sort((a, b) => compareAgentPreference(a.id, b.id));
+    for (const candidate of candidates) {
+      try {
+        const text = await this.runWith(candidate.id, objective);
+        const title = text === undefined ? undefined : cleanGeneratedTitle(text);
+        if (title !== undefined) return text;
+        this.onError?.(`Thread title generation: ${candidate.id} returned no usable title`);
+      } catch (error) {
+        this.onError?.(`Thread title generation via ${candidate.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return undefined;
+  }
+
+  private async runWith(agentId: string, objective: string): Promise<string | undefined> {
+    const adapter = this.registry.resolve(agentId);
+    // Warm the catalog (bounded) so Auto can pick a working economy model
+    // instead of leaving the CLI on its own default.
+    let catalog = this.catalogs?.cached(agentId);
+    if (catalog === undefined && this.catalogs !== undefined) {
+      catalog = await Promise.race([
+        this.catalogs.get(agentId).catch(() => undefined),
+        new Promise<undefined>((resolve) => { setTimeout(() => { resolve(undefined); }, 6_000); }),
+      ]) ?? this.catalogs.cached(agentId);
+    }
+    const settingsChoice = this.settingsRunChoice?.(agentId);
+    const run = settingsChoice?.model !== undefined || settingsChoice?.effort !== undefined
+      ? settingsChoice
+      : chooseRun({ catalog, difficulty: 'simple', ...(settingsChoice !== undefined ? { settings: settingsChoice } : {}) });
     const handle = await adapter.start({
       objective: buildTitlePrompt(objective),
       description: 'Name a work thread from its first message.',
@@ -170,8 +216,8 @@ export class AgentTitleGenerator {
       rootPath: this.sandboxPath,
       mode: 'read_only',
       conversationOnly: true,
-      ...(run.model !== undefined ? { models: { [selected.id]: run.model } } : {}),
-      ...(run.effort !== undefined ? { efforts: { [selected.id]: run.effort } } : {}),
+      ...(run.model !== undefined ? { models: { [agentId]: run.model } } : {}),
+      ...(run.effort !== undefined ? { efforts: { [agentId]: run.effort } } : {}),
     });
     let timedOut = false;
     const timeout = new Promise<never>((_resolve, reject) => {
@@ -198,9 +244,9 @@ export class AgentTitleGenerator {
         return text;
       })();
       return await Promise.race([collect, timeout]);
-    } catch {
+    } catch (error) {
       if (timedOut) await adapter.cancel(handle).catch(() => undefined);
-      return undefined;
+      throw error;
     }
   }
 }

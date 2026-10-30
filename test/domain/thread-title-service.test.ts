@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqliteStore } from '@main/db/store';
 import { WorkspaceService } from '@main/domain/workspace-service';
-import { ThreadTitleService, cleanGeneratedTitle } from '@main/domain/thread-title-service';
+import { AgentTitleGenerator, ThreadTitleService, cleanGeneratedTitle } from '@main/domain/thread-title-service';
+import type { Registry } from '@main/registry/registry';
+import { FakeAdapter, type FakeAdapterScript } from '../fakes/fake-adapter';
 import type { Task } from '@shared/domain';
 
 let store: SqliteStore | undefined;
@@ -54,6 +56,39 @@ describe('cleanGeneratedTitle', () => {
     const long = cleanGeneratedTitle('word '.repeat(30).trim());
     expect(long!.length).toBeLessThanOrEqual(60);
     expect(long!.endsWith(' ')).toBe(false);
+  });
+});
+
+describe('AgentTitleGenerator', () => {
+  const capability = { id: 'objective.fulfill', title: 'Chat', inputSchema: {}, outputSchema: {}, streaming: true, cancellable: true, resumable: false, requiredPermissions: [] };
+  const fake = (id: string, script: FakeAdapterScript): FakeAdapter =>
+    new FakeAdapter({ script, record: { id, class: 'local_cli_agent', available: true, capabilities: [capability] } });
+  const registryFor = (adapters: FakeAdapter[]): Registry => ({
+    listAdapters: () => adapters.map((a) => a.record),
+    resolve: (id: string) => adapters.find((a) => a.record.id === id)!,
+  }) as unknown as Registry;
+  const sandbox = (): string => mkdtempSync(join(tmpdir(), 'conductor-title-gen-'));
+
+  it('pins the Settings model instead of leaving the CLI on its own default', async () => {
+    const adapter = fake('opencode', { events: [{ kind: 'stdout', data: 'Fix the login loop' }] });
+    const generator = new AgentTitleGenerator(registryFor([adapter]), sandbox(), undefined, 5_000, {
+      settingsRunChoice: () => ({ model: 'opencode/deepseek-v4.1-flash-free' }),
+    });
+    await expect(generator.generate('fix the login loop please')).resolves.toBe('Fix the login loop');
+    const input = adapter.calls.started[0] as { models?: Record<string, string> };
+    expect(input.models).toEqual({ opencode: 'opencode/deepseek-v4.1-flash-free' });
+  });
+
+  it('falls back to the next agent when the first fails, and reports it', async () => {
+    const broken = fake('opencode', { crashAt: 'start', crashMessage: 'default model unavailable' });
+    const working = fake('codex', { events: [{ kind: 'stdout', data: '{"type":"item.completed","item":{"type":"agent_message","text":"Plan the weekend trip"}}' }] });
+    const errors: string[] = [];
+    const generator = new AgentTitleGenerator(registryFor([broken, working]), sandbox(), undefined, 5_000, {
+      onError: (message) => { errors.push(message); },
+    });
+    await expect(generator.generate('plan a weekend trip')).resolves.toBe('Plan the weekend trip');
+    expect(errors[0]).toContain('opencode');
+    expect(errors[0]).toContain('default model unavailable');
   });
 });
 
