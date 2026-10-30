@@ -38,6 +38,8 @@ interface TaskRunnerDeps {
   runOptions?: { save(taskId: string, options: RunOptions, mainAgentId?: string): void };
   /** Loads agents' model lists so Auto routing can pick a model (bounded wait). */
   warmModels?: (agentIds: string[]) => Promise<void>;
+  /** Names a new thread from its first message (fire-and-forget, background). */
+  onThreadCreated?: (task: Task) => void;
 }
 
 const WARM_WAIT_MS = 4_000;
@@ -64,6 +66,11 @@ export class TaskRunner {
       ...rest,
       acceptanceCriteria: rest.acceptanceCriteria?.length ? rest.acceptanceCriteria : ['response: nonempty'],
     });
+    // Name the thread from its first message in the background; creation and
+    // execution never wait on the (fast, economy-model) title call.
+    if (task.parentTaskId === undefined) {
+      try { this.deps.onThreadCreated?.(task); } catch { /* titles never block work */ }
+    }
     if (attachmentIds.length > 0) {
       const destination = this.attachmentDirectory(task);
       try {
@@ -158,6 +165,7 @@ export class TaskRunner {
       acceptanceCriteria: workflow.validationCriteria.length
         ? workflow.validationCriteria.map((c) => c.description) : ['response: nonempty'],
     });
+    try { this.deps.onThreadCreated?.(task); } catch { /* titles never block work */ }
     const plan: PlanDecomposition = {steps: workflow.steps.map((step) => ({
       id: step.id, description: step.description, requiredCapability: step.requiredCapability,
       dependsOn: step.dependsOn,

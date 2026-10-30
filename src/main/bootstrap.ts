@@ -77,6 +77,7 @@ import { QuotaPollingService } from './usage/quota-polling';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
+import { AgentTitleGenerator, ThreadTitleService } from './domain/thread-title-service';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
 import { AgentLearningAnalyzer } from './domain/learning-analyzer';
 import { LearningCronService } from './domain/learning-cron';
@@ -246,10 +247,24 @@ export async function bootstrap(): Promise<AppServices> {
   // for context and resolves its model/effort from the composer, Settings or
   // Auto. It shares the one memory engine and model-catalog instances so a
   // Mem0 health check and the chat picker reflect the same services.
+  // Auto thread titles: a fast economy-model call names each new thread from
+  // its first message, replacing the first-characters placeholder in the
+  // background. Shared by Work threads, casual chats, and PR creation.
+  const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs);
+  const threadTitles = new ThreadTitleService({
+    store,
+    getTask: (taskId) => stateMachine.getTask(taskId),
+    onTaskUpdated: (task) => { taskEvents.emit('task.updated', task); },
+    generate: (objective) => titleGenerator.generate(objective),
+  });
+
   const chat = new ChatService(
     store, registry, join(app.getPath('userData'), 'chat-sandbox'),
     (snapshot) => chatEvents.emit(snapshot),
-    { memory, catalogs: modelCatalogs, settings, attachments },
+    {
+      memory, catalogs: modelCatalogs, settings, attachments,
+      generateTitle: (firstMessage) => threadTitles.generateTitle(firstMessage),
+    },
   );
   registerChatHandlers(router, chat);
 
@@ -373,6 +388,7 @@ export async function bootstrap(): Promise<AppServices> {
     resolveSecret: (secretId) => new KeychainSecretResolver().resolve(secretId),
     getTask: (taskId) => stateMachine.getTask(taskId),
     onTaskUpdated: (task) => { taskEvents.emit('task.updated', task); },
+    ensureThreadTitle: (task) => threadTitles.ensure(task),
     openExternal: (url) => shell.openExternal(url),
   });
 
@@ -438,6 +454,7 @@ export async function bootstrap(): Promise<AppServices> {
 
   const runner = new TaskRunner({attachments,store,orchestrator,stateMachine,permissions,registry,audit,emitter:taskEvents,toolApprovals,planMode:planner,
     runOptions: runResolver, warmModels: (ids) => modelCatalogs.warm(ids),
+    onThreadCreated: (task) => { threadTitles.schedule(task); },
     onFinished: (task) => {
       // Finalize skill usage with the real outcome before learning, then let
       // authoring capture a validated first-time draft from the final response.
@@ -450,6 +467,9 @@ export async function bootstrap(): Promise<AppServices> {
     onStuck: (task) => { void signals.onTaskStuck(task); },
   });
   runnerRef = runner;
+  // Threads created before auto-titles (or whose generation failed) get named
+  // too: backfill the most recent untitled roots, queued one at a time.
+  threadTitles.scheduleRecent(10);
 
   // Remote hosts: Codex over SSH. Each run checks consent for the host and for
   // the Codex provider.

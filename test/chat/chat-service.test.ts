@@ -73,6 +73,23 @@ describe('standalone casual chat', () => {
     expect(input.conversation).toEqual([{ objective: 'Hello', reply: 'first reply', state: 'complete' }]);
   });
 
+  it('replaces the first-message placeholder title with the generated title', async () => {
+    const { root, store, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
+    const updates: ChatConversation[] = [];
+    const service = new ChatService(store, registry, join(root, 'chat-sandbox'), (snapshot) => updates.push(snapshot), {
+      generateTitle: async () => 'Weekend plan ideas',
+    });
+    const sent = await service.send({ content: 'help me plan a weekend trip to the coast with good food' });
+    expect(sent.thread.title).toBe('help me plan a weekend trip to the coast with good food');
+    await expect.poll(() => service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
+    expect(updates.some((u) => u.thread.title === 'Weekend plan ideas')).toBe(true);
+    await settled(service, sent.thread.id);
+    // Follow-ups never retitle the thread.
+    const next = await service.send({ threadId: sent.thread.id, content: 'make it cheaper' });
+    await settled(service, next.thread.id);
+    expect(service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
+  });
+
   it('persists attachments, materializes only the current turn, and omits prior attachment metadata from agent history', async () => {
     const { service, attachments, adapter, updates, root, path } = await setup({ script: {
       events: [{ kind: 'stdout', data: 'first answer' }],

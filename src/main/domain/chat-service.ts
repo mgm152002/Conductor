@@ -53,6 +53,11 @@ export interface ChatServiceOptions {
   settings?: SettingsService;
   /** How many remembered facts to include as context per reply. */
   recallLimit?: number;
+  /**
+   * Model-generated title for a new chat thread, from its first message.
+   * Runs in the background and only replaces the first-message placeholder.
+   */
+  generateTitle?: (firstMessage: string) => Promise<string | undefined>;
 }
 
 /** The personal-layer memories recalled for a message, as untrusted context. */
@@ -165,6 +170,7 @@ export class ChatService {
   private readonly catalogs: ModelCatalogService | undefined;
   private readonly settings: SettingsService | undefined;
   private readonly recallLimit: number;
+  private readonly generateTitle: ChatServiceOptions['generateTitle'];
   readonly attachments: AttachmentService | undefined;
 
   constructor(
@@ -179,6 +185,7 @@ export class ChatService {
     this.catalogs = options.catalogs;
     this.settings = options.settings;
     this.recallLimit = options.recallLimit ?? 6;
+    this.generateTitle = options.generateTitle;
     mkdirSync(sandboxPath, { recursive: true, mode: 0o700 });
     chmodSync(sandboxPath, 0o700);
     store.transaction(({ db }) => {
@@ -231,9 +238,11 @@ export class ChatService {
     const threadId = previous?.thread.id ?? randomUUID();
     const userId = randomUUID();
     const assistantId = randomUUID();
+    // Placeholder until the model names the thread (background, below).
+    const placeholderTitle = input.content.replace(/\s+/g, ' ').slice(0, 80);
     this.store.transaction(({ db }) => {
       if (!previous) db.prepare('INSERT INTO chat_threads(id,title,agent_id,created_at,updated_at) VALUES(?,?,?,?,?)')
-        .run(threadId, input.content.replace(/\s+/g, ' ').slice(0, 80), selected.id, now, now);
+        .run(threadId, placeholderTitle, selected.id, now, now);
       else db.prepare('UPDATE chat_threads SET agent_id=?,updated_at=? WHERE id=?').run(selected.id, now, threadId);
       const insert = db.prepare('INSERT INTO chat_messages(id,thread_id,role,content,status,created_at) VALUES(?,?,?,?,?,?)');
       insert.run(userId, threadId, 'user', input.content, 'complete', now);
@@ -248,6 +257,16 @@ export class ChatService {
     this.runs.set(threadId, pending);
     const snapshot = this.get(threadId);
     this.emit(threadId);
+    if (previous === undefined && this.generateTitle !== undefined) {
+      // Name the new chat in the background; replace only the placeholder, so
+      // a rename typed while the model works always wins.
+      void this.generateTitle(input.content).then((title) => {
+        if (title === undefined) return;
+        const changed = this.store.db.prepare('UPDATE chat_threads SET title=? WHERE id=? AND title=?')
+          .run(title, threadId, placeholderTitle);
+        if (changed.changes > 0) this.emit(threadId);
+      }).catch(() => undefined);
+    }
     const conversation: NonNullable<ObjectiveInput['conversation']> = [];
     const history = previous?.messages ?? [];
     for (let i = 0; i < history.length; i += 1) {
