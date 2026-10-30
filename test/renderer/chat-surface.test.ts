@@ -166,6 +166,34 @@ it('groups Work threads into tiers with Needs attention first and settled thread
   expect(html).not.toContain('Old finished thread');
 });
 
+it('makes every tier section collapsible and shows the snooze timer countdown on a snoozed thread', () => {
+  const project = { id: 'project-1', name: 'Project', rootPath: '/project', createdAt: '2026-10-25', updatedAt: '2026-10-25' };
+  useWorkspaceStore.setState({ workspaces: [project], activeWorkspaceId: project.id });
+  useTaskStore.setState({
+    tasks: {
+      'task-1': {
+        id: 'task-1', workspaceId: project.id, objective: 'Snoozed thread',
+        acceptanceCriteria: [], state: 'COMPLETED', contextRefs: [], createdAt: '2026-10-25', updatedAt: '2026-10-25',
+      },
+      'task-2': {
+        id: 'task-2', workspaceId: project.id, objective: 'Finished thread',
+        acceptanceCriteria: [], state: 'COMPLETED', contextRefs: [], createdAt: '2026-10-25', updatedAt: '2026-10-25',
+      },
+    },
+    focusedTaskId: 'task-1',
+  });
+  useThreadTierStore.getState().snooze('task-1', '2026-10-25', '2099-01-01T09:00:00.000Z');
+
+  const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/work'] }, createElement(Sidebar)));
+
+  // Needs attention is a collapsible section like the other tiers.
+  expect(html).toContain('aria-label="Needs attention threads in Project"');
+  expect(html).toContain('aria-label="Snoozed threads in Project"');
+  // The snoozed (focused, so visible) thread shows its wake timer counting down.
+  expect(html).toContain('Snoozed thread');
+  expect(html).toContain('wakes in');
+});
+
 it('surfaces a thread with a question requiring an answer in Needs attention', () => {
   const project = { id: 'project-1', name: 'Project', rootPath: '/project', createdAt: '2026-10-25', updatedAt: '2026-10-25' };
   useWorkspaceStore.setState({ workspaces: [project], activeWorkspaceId: project.id });

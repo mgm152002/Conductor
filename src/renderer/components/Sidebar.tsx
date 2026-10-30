@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import type { ChatThread } from '@shared/chat-contract';
 import type { Task, Workspace } from '@shared/domain';
@@ -11,7 +11,8 @@ import { threadStatus, threadTitle } from '../lib/thread-status';
 import { relativeTime } from '../lib/time';
 import { groupThreads, threadKey, type ThreadView } from '../lib/threads';
 import {
-  classifyThreadTier, defaultSnoozeUntil, groupThreadsByTier,
+  classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
+  tierMembership, tiersWithNewArrivals,
   type ThreadTierId, type ThreadTierInfo, type ThreadTierSignals,
 } from '../lib/thread-tiers';
 import { cn } from '../lib/cn';
@@ -74,6 +75,7 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
   onClearTier: () => void;
 }): React.JSX.Element {
   const task = thread.latest;
+  const snoozeCountdown = snoozedUntil !== undefined ? formatSnoozeCountdown(snoozedUntil) : null;
   const status = threadStatus(task, pendingApproval);
   const title = threadTitle(thread.root);
   const attentionPill = tierInfo.tier === 'needs-attention' && tierInfo.attentionReason !== undefined
@@ -109,7 +111,7 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
         <span className={cn('flex w-full min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground/80', thread.root.prUrl !== undefined && 'pr-7')}>
           <span className="truncate font-mono">{`conductor/${thread.key.slice(0, 8)}`}</span>
           {thread.tasks.length > 1 ? <span className="shrink-0 tabular-nums" title={`${thread.tasks.length} messages`}>· {thread.tasks.length} messages</span> : null}
-          {tierInfo.tier === 'snoozed' && snoozedUntil !== undefined ? <span className="shrink-0 truncate">· wakes {new Date(snoozedUntil).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span> : null}
+          {tierInfo.tier === 'snoozed' && snoozedUntil !== undefined ? <span className="shrink-0 truncate">· wakes{snoozeCountdown !== null ? ` ${snoozeCountdown}` : ''} ({new Date(snoozedUntil).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })})</span> : null}
         </span>
       </button>
       {thread.root.prUrl !== undefined ? (
@@ -198,10 +200,15 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   const toggle = useUiStore((s) => s.toggleProject);
   const tierPrefs = useThreadTierStore((s) => s.prefs);
   const { openThread, newThread } = useThreadNavigation();
-  // Working starts open; Settled and Snoozed start hidden behind their
-  // collapsible headers. Needs attention has no header toggle — it is first
-  // and always shown. Searching or opening a thread forces its tier open.
-  const [collapsedTiers, setCollapsedTiers] = useState<Partial<Record<ThreadTierId, boolean>>>({ settled: true, snoozed: true });
+  // Every tier — Needs attention included — is a collapsible section.
+  // Working and Needs attention start open; Settled and Snoozed start
+  // hidden. After that, a section auto-collapses whenever a thread lands
+  // in it (see the arrival effect below), so arrivals never pop a section
+  // open. Searching or opening a thread forces its tier open regardless.
+  const [collapsedTiers, setCollapsedTiers] = useState<Record<ThreadTierId, boolean>>({
+    'needs-attention': false, working: false, settled: true, snoozed: true,
+  });
+  const previousTierByThread = useRef<Map<string, ThreadTierId> | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [deleting, setDeleting] = useState(false);
   const [prsOpen, setPrsOpen] = useState(false);
@@ -217,8 +224,8 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
       .catch(() => undefined);
     return () => { active = false; };
   }, [project.id]);
-  // Re-evaluate tiers once a minute so an expiring snooze wakes up on its
-  // own instead of waiting for the next task event.
+  // Keep the snooze countdowns fresh once a minute; the exact wake itself
+  // is driven by the dedicated snooze timer below, not by this poll.
   useEffect(() => {
     const timer = window.setInterval(() => { setNow(Date.now()); }, 60_000);
     return () => { window.clearInterval(timer); };
@@ -235,6 +242,41 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [threads, tierPrefs, pendingTaskIds, pendingQuestionTaskIds, now],
   );
+  // Snooze timer: arm a timeout for the earliest pending wake in this
+  // project. When it fires, `now` passes `snoozedUntil`, so the thread
+  // leaves Snoozed and lands in Needs attention ("Snooze ended") on time
+  // instead of up to a minute late on the poll above. Capped so a far-
+  // future wake cannot overflow the browser timer; firing re-arms it.
+  const nextWakeAt = useMemo(
+    () => nextSnoozeWakeAt(allThreads.map((thread) => tierPrefs[thread.key]), now),
+    [allThreads, tierPrefs, now],
+  );
+  useEffect(() => {
+    if (nextWakeAt === null) return;
+    const delay = Math.min(Math.max(nextWakeAt - Date.now(), 0), 2_147_483_647);
+    const timer = window.setTimeout(() => { setNow(Date.now()); }, delay);
+    return () => { window.clearTimeout(timer); };
+  }, [nextWakeAt]);
+  // Auto-collapse: whenever a thread lands in a tier — newly created,
+  // finished, settled, snoozed, or woken by its snooze timer — collapse
+  // that tier's section. The first render only records the baseline, so
+  // sections keep their initial open/collapsed defaults on load. While
+  // searching the baseline is left untouched, so clearing the search does
+  // not collapse sections for threads that were merely filtered out.
+  useEffect(() => {
+    if (query !== '') return;
+    const previous = previousTierByThread.current;
+    previousTierByThread.current = tierMembership(tierGroups);
+    if (previous === null) return;
+    const arrivals = tiersWithNewArrivals(previous, tierGroups);
+    if (arrivals.length === 0) return;
+    setCollapsedTiers((current) => {
+      if (arrivals.every((tier) => current[tier])) return current;
+      const next = { ...current };
+      for (const tier of arrivals) next[tier] = true;
+      return next;
+    });
+  }, [tierGroups, query]);
   if (query !== '' && threads.length === 0) return <></>;
   const working = tierGroups.find((group) => group.id === 'working')?.threads.length ?? 0;
   const needsAttention = tierGroups.find((group) => group.id === 'needs-attention')?.threads.length ?? 0;
@@ -296,28 +338,24 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
             {tierGroups.map((group) => {
               const isAttention = group.id === 'needs-attention';
               const containsFocused = focusedKey !== null && group.threads.some((thread) => thread.key === focusedKey);
-              const tierCollapsed = !isAttention && query === '' && !containsFocused && collapsedTiers[group.id] === true;
+              const tierCollapsed = query === '' && !containsFocused && collapsedTiers[group.id] === true;
               return (
                 <section key={group.id} aria-label={`${group.label} threads in ${project.name}`} className="flex flex-col">
-                  {isAttention ? (
-                    <h3 className="flex h-6 items-center gap-1.5 pr-1 pl-7 text-2xs font-medium tracking-wide text-amber-600 uppercase dark:text-amber-300/90">
-                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90" />
-                      <span className="flex-1">{group.label}</span>
-                      <span className="tabular-nums">{group.threads.length}</span>
-                    </h3>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => { setCollapsedTiers((current) => ({ ...current, [group.id]: !(current[group.id] ?? group.id !== 'working') })); }}
-                      aria-expanded={!tierCollapsed}
-                      aria-label={`${group.label} threads in ${project.name}`}
-                      className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-6 text-left text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-                    >
-                      <ChevronRightIcon size={11} className={cn('shrink-0 transition-transform duration-150', !tierCollapsed && 'rotate-90')} />
-                      <span className="flex-1">{group.label}</span>
-                      <span className="tabular-nums">{group.threads.length}</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setCollapsedTiers((current) => ({ ...current, [group.id]: !current[group.id] })); }}
+                    aria-expanded={!tierCollapsed}
+                    aria-label={`${group.label} threads in ${project.name}`}
+                    className={cn(
+                      'flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-6 text-left text-2xs font-medium tracking-wide uppercase focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                      isAttention ? 'text-amber-600 hover:text-amber-500 dark:text-amber-300/90' : 'text-sidebar-muted-foreground hover:text-sidebar-foreground',
+                    )}
+                  >
+                    <ChevronRightIcon size={11} className={cn('shrink-0 transition-transform duration-150', !tierCollapsed && 'rotate-90')} />
+                    {isAttention ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90" /> : null}
+                    <span className="flex-1">{group.label}</span>
+                    <span className="tabular-nums">{group.threads.length}</span>
+                  </button>
                   {!tierCollapsed ? (
                     <ul className="flex flex-col gap-px pl-6">
                       {group.threads.map((thread) => {
