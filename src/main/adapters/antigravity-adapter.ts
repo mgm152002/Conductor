@@ -51,6 +51,63 @@ export function agyToolKind(name: string): string {
   return 'tool';
 }
 
+function shorten(text: string, limit = 90): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean;
+}
+
+const AGY_VERBS: [RegExp, string][] = [
+  [/run|command|execute/, 'Run'],
+  [/view|read|outline|code_item/, 'View'],
+  [/grep|search|find/, 'Search'],
+  [/list/, 'List'],
+  [/write|create/, 'Write'],
+  [/edit|replace|sed/, 'Edit'],
+  [/delete|remove/, 'Delete'],
+];
+
+/**
+ * What the tool actually did, as the activity row's label — e.g. "View
+ * a.ts", "Run npm test" — not the raw snake_case tool name.
+ */
+export function agyToolLabel(name: string, info: Json): string {
+  const args = obj(info['args']) ?? obj(info['tool_args']) ?? obj(info['input']) ?? info;
+  const command = str(args['CommandLine']) ?? str(args['command']);
+  const query = str(args['Query']) ?? str(args['pattern']) ?? str(args['SearchTerm']);
+  const path = str(args['AbsolutePath']) ?? str(args['TargetFile']) ?? str(args['Path']) ?? str(args['DirectoryPath']);
+  const target = path !== undefined ? basename(path) : undefined;
+  const verb = AGY_VERBS.find(([pattern]) => pattern.test(name))?.[1];
+  if (verb === 'Run' && command !== undefined) return `Run ${shorten(command)}`;
+  if (verb === 'Search' && query !== undefined) return `Search ${shorten(query, 60)}`;
+  if (verb !== undefined && target !== undefined) return `${verb} ${target}`;
+  if (verb !== undefined && command !== undefined) return `${verb} ${shorten(command)}`;
+  const humanized = name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+  return target !== undefined ? `${humanized} ${target}` : humanized;
+}
+
+/**
+ * A finished step's output, from whichever field the step info carries it
+ * in, capped. Non-text payloads are JSON-summarized, never dumped raw.
+ */
+export function agyToolOutput(info: Json): string | undefined {
+  const args = obj(info['args']) ?? obj(info['tool_args']) ?? obj(info['input']) ?? info;
+  for (const source of [info, args]) {
+    for (const key of ['response', 'output', 'result', 'stdout', 'observation', 'content']) {
+      const value = source[key];
+      if (typeof value === 'string' && value.trim() !== '') {
+        const clean = value.trim();
+        return clean.length > 4_000 ? `${clean.slice(0, 4_000)}\n… (output truncated)` : clean;
+      }
+      if (value !== null && typeof value === 'object') {
+        const inner = obj(value);
+        const text = str(inner?.['text']) ?? str(inner?.['response']) ?? str(inner?.['output']);
+        if (text !== undefined && text.trim() !== '') return text.trim();
+      }
+    }
+  }
+  return undefined;
+}
+
 /** A concise command/path summary for an Antigravity tool step. */
 export function agyToolDetail(info: Json): string | undefined {
   const args = obj(info['args']) ?? obj(info['tool_args']) ?? obj(info['input']) ?? info;
@@ -209,6 +266,9 @@ export class AntigravityAdapter extends GatedAgentAdapter {
   protected attach(live: GatedLive, child: ChildProcessWithoutNullStreams): void {
     let reply = '';
     let result: Json | null = null;
+    // Label/arguments per step key, so the completion update (which may
+    // carry only the output or error) still shows what ran above its result.
+    const stepArgs = new Map<string, { label: string; detail?: string }>();
     createInterface({ input: child.stdout }).on('line', (line) => {
       let event: Json | null = null;
       try { event = obj(JSON.parse(line)); } catch { /* not stream-json */ }
@@ -223,9 +283,11 @@ export class AntigravityAdapter extends GatedAgentAdapter {
           const state = str(step['state']);
           const key = `${str(step['conversation_id']) ?? 'agy'}:${typeof step['step_index'] === 'number' ? step['step_index'] : name}`;
           const detail = agyToolDetail(info);
+          const label = agyToolLabel(name, info);
           if (state === 'ACTIVE') {
+            stepArgs.set(key, { label, ...(detail !== undefined ? { detail } : {}) });
             live.events.push('log', {
-              message: name,
+              message: label,
               kind: agyToolKind(name),
               ...(detail !== undefined ? { detail } : {}),
               key,
@@ -233,13 +295,19 @@ export class AntigravityAdapter extends GatedAgentAdapter {
               source: 'Antigravity',
             });
           } else if (state === 'DONE' || state === 'ERROR' || state === 'CANCELED') {
+            const started = stepArgs.get(key);
+            const output = agyToolOutput(info);
+            const merged = [started?.detail ?? detail, output, error]
+              .filter((part): part is string => part !== undefined && part !== '')
+              .filter((part, index, all) => all.indexOf(part) === index)
+              .join('\n\n');
             live.events.push('log', {
-              message: name,
+              message: started?.label ?? label,
+              kind: agyToolKind(name),
               key,
-              ...(detail !== undefined ? { detail } : {}),
+              ...(merged !== '' ? { detail: merged } : {}),
               status: error !== undefined || state === 'ERROR' ? 'failed' : 'completed',
               source: 'Antigravity',
-              ...(error !== undefined ? { detail: `${detail ? `${detail}\n` : ''}${error}` } : {}),
             });
           }
         }

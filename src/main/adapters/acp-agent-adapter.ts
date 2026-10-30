@@ -187,9 +187,89 @@ export function acpToolDetail(update: Json): string | undefined {
     }
   }
   for (const path of acpPaths(update)) if (!lines.includes(path)) lines.push(path);
-  if (lines.length > 0) return lines.join('\n');
-  if (raw !== null && Object.keys(raw).length > 0) return JSON.stringify(raw).slice(0, 2000);
-  return undefined;
+  if (lines.length === 0 && raw !== null && Object.keys(raw).length > 0) lines.push(JSON.stringify(raw).slice(0, 2000));
+  // The result of the tool call, when the completion update carries it, goes
+  // under its arguments so expanding the row shows what the tool produced.
+  const output = acpToolOutput(update);
+  if (output !== undefined && !lines.includes(output)) {
+    if (lines.length > 0) lines.push('');
+    lines.push(output);
+  }
+  return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter((part) => part !== '');
+  return parts[parts.length - 1] ?? path;
+}
+
+function shorten(text: string, limit = 90): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean;
+}
+
+const TOOL_VERBS: Record<string, string> = {
+  read: 'Read', search: 'Search', execute: 'Run', edit: 'Edit', write: 'Write',
+  delete: 'Delete', move: 'Move', fetch: 'Fetch', think: 'Think', switch_mode: 'Switch mode',
+};
+
+/**
+ * What the tool actually did, as the activity row's label — e.g. "Read
+ * image.png", "Run git status", "Search “needle”". ACP titles alone are
+ * often just a bare file path (the row then shows only a long folder path),
+ * so the label is built from the tool kind plus its target instead.
+ */
+export function acpToolLabel(update: Json): string | undefined {
+  const kind = str(update['kind']);
+  const title = str(update['title']);
+  const raw = obj(update['rawInput']);
+  const command = raw?.['command'];
+  const commandLine = Array.isArray(command) ? command.filter((part): part is string => typeof part === 'string').join(' ') : str(command);
+  const query = str(raw?.['query']) ?? str(raw?.['pattern']);
+  const url = str(raw?.['url']);
+  const target = acpPaths(update)[0];
+  const verb = kind !== undefined ? TOOL_VERBS[kind] : undefined;
+  if (kind === 'execute' && commandLine !== undefined && commandLine !== '') return `Run ${shorten(commandLine)}`;
+  if (kind === 'search' && query !== undefined) return `Search ${shorten(query, 60)}`;
+  if (kind === 'fetch' && url !== undefined) return `Fetch ${shorten(url, 60)}`;
+  if (verb !== undefined && target !== undefined) return `${verb} ${baseName(target)}`;
+  if (verb !== undefined && title !== undefined && !title.includes('/')) return title === verb ? title : `${verb}: ${shorten(title, 60)}`;
+  if (title !== undefined) {
+    // A path-like title shows the file it names, not its folder path.
+    if (title.includes('/') && !title.includes(' ')) return verb !== undefined ? `${verb} ${baseName(title)}` : baseName(title);
+    return shorten(title);
+  }
+  return verb;
+}
+
+/**
+ * The tool's output from a completion update: text content blocks and
+ * `rawOutput`, capped so a huge file read cannot flood the timeline. Image
+ * and other non-text blocks are summarized by type, never dumped as data.
+ */
+export function acpToolOutput(update: Json): string | undefined {
+  const parts: string[] = [];
+  const content = Array.isArray(update['content']) ? update['content'].map(obj).filter((b): b is Json => b !== null) : [];
+  for (const block of content) {
+    if (block['type'] === 'content') {
+      const inner = obj(block['content']);
+      if (inner?.['type'] === 'text' && typeof inner['text'] === 'string' && inner['text'].trim() !== '') parts.push(inner['text'].trim());
+      else if (typeof inner?.['type'] === 'string') parts.push(`[${inner['type']} output]`);
+    } else if (block['type'] === 'diff') {
+      const path = str(block['path']);
+      parts.push(path !== undefined ? `Edited ${baseName(path)}` : 'Edited a file');
+    }
+  }
+  const rawOutput = update['rawOutput'];
+  if (typeof rawOutput === 'string' && rawOutput.trim() !== '') parts.push(rawOutput.trim());
+  else if (rawOutput !== null && typeof rawOutput === 'object') {
+    const out = obj(rawOutput);
+    const text = str(out?.['text']) ?? str(out?.['output']) ?? str(out?.['stdout']);
+    parts.push(text !== undefined && text.trim() !== '' ? text.trim() : JSON.stringify(rawOutput).slice(0, 2_000));
+  }
+  const joined = parts.join('\n').trim();
+  if (joined === '') return undefined;
+  return joined.length > 4_000 ? `${joined.slice(0, 4_000)}\n… (output truncated)` : joined;
 }
 
 /** "Plan · 2/5 done" for an ACP plan update, or "Plan updated". */
@@ -291,12 +371,12 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       messagePushed = 0;
     };
     const activity = (update: Json, status: string): void => {
-      const title = str(update['title']);
+      const label = acpToolLabel(update);
       const kind = str(update['kind']);
       const key = str(update['toolCallId']);
       const detail = acpToolDetail(update);
       live.events.push('log', {
-        ...(title !== undefined ? { message: title } : {}),
+        ...(label !== undefined ? { message: label } : {}),
         ...(kind !== undefined ? { kind } : {}),
         ...(detail !== undefined ? { detail } : {}),
         ...(key !== undefined ? { key } : {}),

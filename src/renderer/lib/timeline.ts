@@ -479,12 +479,21 @@ function workEntryFor(itemType: string | undefined, item: Json, completed: boole
     case 'file_change': {
       const changes = Array.isArray(item['changes']) ? item['changes'].map(obj).filter((c): c is Json => c !== null) : [];
       const paths = changes.map((c) => `${str(c['kind']) ?? 'update'} ${str(c['path']) ?? ''}`.trim());
-      const label = changes.length === 1 ? `Edited ${str(changes[0]!['path']) ?? 'a file'}` : `Edited ${changes.length} files`;
-      return { ...base, icon: 'file', label, ...(paths.length > 0 ? { detail: paths.join('\n') } : {}), tone: str(item['status']) === 'failed' ? 'error' : 'success' };
+      const fileName = (path: string): string => path.split('/').filter(Boolean).pop() ?? path;
+      const label = changes.length === 1 ? `Edited ${fileName(str(changes[0]!['path']) ?? 'a file')}` : `Edited ${changes.length} files`;
+      const diffs = changes.map((c) => str(c['diff'])).filter((d): d is string => d !== undefined && d !== '');
+      const detail = [...(paths.length > 0 ? [paths.join('\n')] : []), ...diffs].join('\n\n');
+      return { ...base, icon: 'file', label, ...(detail !== '' ? { detail } : {}), tone: str(item['status']) === 'failed' ? 'error' : 'success' };
     }
     case 'mcp_tool_call': {
       const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
-      return { ...base, icon: 'tool', label: `Called ${name || 'tool'}`, tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
+      const output = str(item['output']);
+      return { ...base, icon: 'tool', label: `Called ${name || 'tool'}`, ...(output !== undefined && output !== '' ? { detail: output } : {}), tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
+    }
+    case 'image_view': {
+      const path = str(item['path']) ?? '';
+      const name = path.split('/').filter(Boolean).pop() ?? 'image';
+      return { ...base, icon: 'read', label: `Viewed ${name}`, ...(path !== '' ? { detail: path } : {}), tone: 'neutral' };
     }
     case 'web_search':
       return { ...base, icon: 'search', label: `Searched “${str(item['query']) ?? ''}”`, tone: 'neutral' };

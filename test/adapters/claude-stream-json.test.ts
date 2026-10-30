@@ -22,7 +22,7 @@ out({ type: 'system', subtype: 'init' });
 out({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Inspecting the workspace.' }] } });
 out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'npm test' } }] } });
 out({ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }] } });
-out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', is_error: false }] } });
+out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', is_error: false, content: [{ type: 'text', text: '3 passed' }] }] } });
 out({ type: 'result', subtype: 'success', is_error: false, result: 'All done.',
   usage: { input_tokens: 30, cache_creation_input_tokens: 10, cache_read_input_tokens: 60, output_tokens: 12 },
   modelUsage: { 'claude-test-model': {} } });
@@ -74,8 +74,8 @@ describe('Claude Code stream-json activity', () => {
     });
     expect(logs).toEqual(expect.arrayContaining([
       expect.objectContaining({ message: 'Inspecting the workspace.', kind: 'reasoning', source: 'Claude Code' }),
-      expect.objectContaining({ message: 'Bash', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'Claude Code' }),
-      expect.objectContaining({ key: 'tool-1', status: 'completed', source: 'Claude Code' }),
+      expect.objectContaining({ message: 'Run npm test', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'Claude Code' }),
+      expect.objectContaining({ key: 'tool-1', detail: 'npm test\n\n3 passed', status: 'completed', source: 'Claude Code' }),
     ]));
     const stdout = events.filter((event) => event.kind === 'stdout').map((event) => String(event.data));
     expect(stdout).toEqual(['All done.']);

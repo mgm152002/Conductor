@@ -107,6 +107,9 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
     const lines: string[] = [];
     let envelope: Json | null = null;
     let assistantText = '';
+    // Arguments per tool_use id, so the matching tool_result can show what
+    // ran above what it produced.
+    const toolArgs = new Map<string, string>();
     createInterface({ input: child.stdout }).on('line', (line) => {
       lines.push(line);
       let event: Json | null = null;
@@ -130,10 +133,12 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
           } else if (type === 'tool_use') {
             const tool = str(block['name']) ?? 'tool';
             const id = str(block['id']);
+            const detail = claudeToolDetail(tool, obj(block['input']) ?? {});
+            if (id !== undefined && detail !== undefined) toolArgs.set(id, detail);
             live.events.push('log', {
-              message: `${tool}`,
+              message: claudeToolLabel(tool, obj(block['input']) ?? {}),
               kind: claudeToolKind(tool),
-              detail: claudeToolDetail(tool, obj(block['input']) ?? {}),
+              ...(detail !== undefined ? { detail } : {}),
               ...(id !== undefined ? { key: id } : {}),
               status: 'running',
               source: 'Claude Code',
@@ -148,7 +153,15 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
           const block = obj(raw);
           const id = str(block?.['tool_use_id']);
           if (block?.['type'] !== 'tool_result' || id === undefined) continue;
-          live.events.push('log', { key: id, status: block['is_error'] === true ? 'failed' : 'completed', source: 'Claude Code' });
+          const output = claudeToolOutput(block);
+          const args = toolArgs.get(id);
+          const detail = [args, output].filter((part): part is string => part !== undefined && part !== '').join('\n\n');
+          live.events.push('log', {
+            key: id,
+            ...(detail !== '' ? { detail } : {}),
+            status: block['is_error'] === true ? 'failed' : 'completed',
+            source: 'Claude Code',
+          });
         }
         return;
       }
@@ -195,6 +208,67 @@ export function claudeToolKind(tool: string): string {
   if (tool === 'Read' || tool === 'NotebookRead') return 'read';
   if (tool === 'WebFetch' || tool === 'WebSearch') return 'fetch';
   return 'tool';
+}
+
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter((part) => part !== '');
+  return parts[parts.length - 1] ?? path;
+}
+
+function shorten(text: string, limit = 90): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean;
+}
+
+/**
+ * What the tool actually did, as the activity row's label — e.g. "Read
+ * a.ts", "Run npm test", "Search needle" — not just the bare tool name.
+ */
+export function claudeToolLabel(tool: string, input: Json): string {
+  const path = str(input['file_path']) ?? str(input['notebook_path']) ?? str(input['path']);
+  const target = path !== undefined ? baseName(path) : undefined;
+  switch (tool) {
+    case 'Bash': case 'BashOutput': {
+      const command = str(input['command']);
+      return command !== undefined ? `Run ${shorten(command)}` : 'Run command';
+    }
+    case 'Read': case 'NotebookRead': return target !== undefined ? `Read ${target}` : 'Read file';
+    case 'Edit': return target !== undefined ? `Edit ${target}` : 'Edit file';
+    case 'Write': return target !== undefined ? `Write ${target}` : 'Write file';
+    case 'MultiEdit': case 'NotebookEdit': return target !== undefined ? `Edit ${target}` : 'Edit file';
+    case 'Glob': return `Search ${shorten(str(input['pattern']) ?? 'files', 60)}`;
+    case 'Grep': return `Search ${shorten(str(input['pattern']) ?? 'files', 60)}`;
+    case 'LS': return target !== undefined ? `List ${target}` : 'List files';
+    case 'WebFetch': return `Fetch ${shorten(str(input['url']) ?? 'page', 60)}`;
+    case 'WebSearch': return `Search ${shorten(str(input['query']) ?? 'the web', 60)}`;
+    case 'Task': return `Delegate ${shorten(str(input['description']) ?? 'subtask', 60)}`;
+    default: {
+      const description = str(input['description']);
+      if (target !== undefined) return `${tool} ${target}`;
+      return description !== undefined ? `${tool}: ${shorten(description, 60)}` : tool;
+    }
+  }
+}
+
+/**
+ * A tool_result's output: its text blocks (or plain string content), capped.
+ * Non-text blocks are summarized by type, never dumped as data.
+ */
+export function claudeToolOutput(block: Json): string | undefined {
+  const parts: string[] = [];
+  const content = block['content'];
+  if (typeof content === 'string' && content.trim() !== '') parts.push(content.trim());
+  if (Array.isArray(content)) {
+    for (const raw of content) {
+      const item = obj(raw);
+      if (item === null) continue;
+      if (item['type'] === 'text' && typeof item['text'] === 'string' && item['text'].trim() !== '') parts.push(item['text'].trim());
+      else if (typeof item['type'] === 'string') parts.push(`[${item['type']} output]`);
+    }
+  }
+  const joined = parts.join('\n').trim();
+  if (joined === '') return undefined;
+  return joined.length > 4_000 ? `${joined.slice(0, 4_000)}\n… (output truncated)` : joined;
 }
 
 /** A short command/path/query summary for one Claude Code tool call. */

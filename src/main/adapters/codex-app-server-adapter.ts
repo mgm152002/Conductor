@@ -89,11 +89,34 @@ export function execItem(item: Json): Json | null {
       const changes = Array.isArray(item['changes']) ? item['changes'].map(obj).filter((c): c is Json => c !== null) : [];
       return {
         id, type: 'file_change', status: str(item['status']) === 'inProgress' ? 'in_progress' : (str(item['status']) ?? 'completed'),
-        changes: changes.map((c) => ({ path: str(c['path']) ?? '', kind: str(obj(c['kind'])?.['type']) ?? 'update' })),
+        changes: changes.map((c) => ({
+          path: str(c['path']) ?? '', kind: str(obj(c['kind'])?.['type']) ?? 'update',
+          ...(typeof c['diff'] === 'string' && c['diff'] !== '' ? { diff: c['diff'] } : {}),
+        })),
       };
     }
-    case 'mcpToolCall':
-      return { id, type: 'mcp_tool_call', server: str(item['server']) ?? '', tool: str(item['tool']) ?? '', status: str(item['status']) ?? 'completed' };
+    case 'mcpToolCall': {
+      // Carry the call's result so the timeline can show what it produced,
+      // not only that it ran.
+      const result = obj(item['result']);
+      const blocks = Array.isArray(result?.['content']) ? result!['content'].map(obj).filter((b): b is Json => b !== null) : [];
+      const output = blocks
+        .map((b) => (b['type'] === 'text' && typeof b['text'] === 'string' ? b['text'] : `[${str(b['type']) ?? 'content'} output]`))
+        .join('\n').trim();
+      const error = str(obj(item['error'])?.['message']);
+      return {
+        id, type: 'mcp_tool_call', server: str(item['server']) ?? '', tool: str(item['tool']) ?? '', status: str(item['status']) ?? 'completed',
+        ...(output !== '' ? { output: output.slice(0, 4_000) } : {}),
+        ...(error !== undefined ? { output: error } : {}),
+      };
+    }
+    case 'webSearch': {
+      const action = obj(item['action']);
+      const query = str(item['query']) ?? str(action?.['query']) ?? (Array.isArray(action?.['queries']) ? (action!['queries'] as unknown[]).filter((q): q is string => typeof q === 'string').join(', ') : '');
+      return { id, type: 'web_search', query };
+    }
+    case 'imageView':
+      return { id, type: 'image_view', path: str(item['path']) ?? '' };
     default:
       return null;
   }

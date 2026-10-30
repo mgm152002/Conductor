@@ -38,6 +38,20 @@ describe('chat timeline', () => {
     expect(items[2]).toMatchObject({ text: 'Done.' });
   });
 
+  it('shows what each Codex tool ran and produced, with file names not folder paths', () => {
+    const items = buildTimeline(task, details([
+      stdout({ type: 'item.completed', item: { id: 'f1', type: 'file_change', changes: [{ path: '/w/src/deep/a.ts', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new' }] } }),
+      stdout({ type: 'item.completed', item: { id: 'm1', type: 'mcp_tool_call', server: 'github', tool: 'get_issue', status: 'completed', output: 'Issue #4: Bug' } }),
+      stdout({ type: 'item.completed', item: { id: 'i1', type: 'image_view', path: '/w/photos/image.png' } }),
+    ]));
+    const work = items.find((i) => i.kind === 'work') as Extract<typeof items[number], { kind: 'work' }>;
+    expect(work.entries[0]).toMatchObject({ label: 'Edited a.ts' });
+    expect(work.entries[0]?.detail).toContain('update /w/src/deep/a.ts');
+    expect(work.entries[0]?.detail).toContain('+new');
+    expect(work.entries[1]).toMatchObject({ label: 'Called github.get_issue', detail: 'Issue #4: Bug' });
+    expect(work.entries[2]).toMatchObject({ icon: 'read', label: 'Viewed image.png', detail: '/w/photos/image.png' });
+  });
+
   it('streams reply snapshots into one assistant item and dedupes the final reply', () => {
     const items = buildTimeline(task, details([
       log({ message: 'Hello', kind: 'reply', key: 'codex:reply:m1', status: 'running', source: 'Codex' }),

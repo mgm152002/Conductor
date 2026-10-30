@@ -197,7 +197,7 @@ describe('ACP adapter decline handling', () => {
     });
     expect(logs).toEqual(expect.arrayContaining([
       expect.objectContaining({ message: 'Inspecting the workspace.', kind: 'reasoning', source: 'OpenCode' }),
-      expect.objectContaining({ message: 'Bash', kind: 'execute', detail: 'npm test', key: 'call-1', status: 'running', source: 'OpenCode' }),
+      expect.objectContaining({ message: 'Run npm test', kind: 'execute', detail: 'npm test', key: 'call-1', status: 'running', source: 'OpenCode' }),
       expect.objectContaining({ key: 'call-1', status: 'completed', source: 'OpenCode' }),
     ]));
     expect(events.filter((e) => e.kind === 'stdout').map((e) => String(e.data))).toContain('Done.');
