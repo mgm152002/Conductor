@@ -95,7 +95,19 @@ npm run build
 
 The [Quality workflow](.github/workflows/quality.yml) runs dependency
 installation, linting, type checking, and the test suite for pushes and pull
-requests targeting `main`.
+requests targeting `main`. Once those pass, it also builds an arm64 macOS
+DMG on a macOS runner and uploads it as the `conductor-macos-dmg` artifact.
+
+To build the same DMG locally (Apple Silicon Mac):
+
+```sh
+npm ci
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
+```
+
+The DMG lands in `release/`. It is unsigned and not notarized (no Developer
+ID certificate is provisioned in CI), so Gatekeeper will warn on first
+launch; it is intended for local evaluation, not distribution.
 
 ## Attachments
 
