@@ -2,8 +2,9 @@ import type { ThreadView } from './threads';
 import { isWorkingState } from './thread-status';
 
 // T3 Code-style thread management for a project: every thread sits in exactly
-// one of four tiers. "Needs attention" is always first (and shown), the rest
-// live behind collapsible lists in the sidebar.
+// one of four tiers. "Needs attention" is always first; every tier is a
+// collapsible section in the sidebar, and a section auto-collapses whenever
+// a thread lands in it (see `tiersWithNewArrivals`).
 //
 //   needs-attention — something is waiting on the user: a question that needs
 //     an answer, a pending approval, a thread that just completed / failed /
@@ -97,6 +98,72 @@ export function isSnoozeExpired(pref: ThreadTierPref | undefined, now: number = 
   if (pref?.mode !== 'snoozed' || pref.snoozedUntil === undefined) return false;
   const until = Date.parse(pref.snoozedUntil);
   return !Number.isNaN(until) && until <= now;
+}
+
+/**
+ * Earliest future wake time (epoch ms) among snoozed threads, or null when
+ * nothing is counting down. Sidebar / header arm a timer for exactly this
+ * instant so a snoozed thread leaves Snoozed for Needs attention on time
+ * instead of at the next poll. Expired, indefinite, and invalid snoozes are
+ * ignored — expired ones already classify as Needs attention.
+ */
+export function nextSnoozeWakeAt(
+  prefs: Iterable<ThreadTierPref | undefined>,
+  now: number = Date.now(),
+): number | null {
+  let earliest: number | null = null;
+  for (const pref of prefs) {
+    if (pref?.mode !== 'snoozed' || pref.snoozedUntil === undefined) continue;
+    const until = Date.parse(pref.snoozedUntil);
+    if (Number.isNaN(until) || until <= now) continue;
+    if (earliest === null || until < earliest) earliest = until;
+  }
+  return earliest;
+}
+
+/** Human countdown for a snooze timer, e.g. "in 10m", "in 1h 30m", "in 1d 2h". */
+export function formatSnoozeCountdown(snoozedUntil: string, now: number = Date.now()): string | null {
+  const until = Date.parse(snoozedUntil);
+  if (Number.isNaN(until)) return null;
+  const remainingMs = until - now;
+  if (remainingMs <= 0) return 'now';
+  const minutes = Math.ceil(remainingMs / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes > 0 ? `in ${hours}h ${restMinutes}m` : `in ${hours}h`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours > 0 ? `in ${days}d ${restHours}h` : `in ${days}d`;
+}
+
+/** Snapshot of which tier each thread currently sits in, keyed by thread key. */
+export function tierMembership(groups: readonly ThreadTierGroup[]): Map<string, ThreadTierId> {
+  const membership = new Map<string, ThreadTierId>();
+  for (const group of groups) {
+    for (const thread of group.threads) membership.set(thread.key, group.id);
+  }
+  return membership;
+}
+
+/**
+ * Tiers that gained a thread since `previous` was taken: a thread counts as
+ * landing in a tier when it is new there or moved there from another tier.
+ * The sidebar auto-collapses every tier returned here, so a thread arriving
+ * in Working / Settled / Snoozed / Needs attention never pops its section
+ * open — the section stays (or becomes) a collapsed header with its count.
+ */
+export function tiersWithNewArrivals(
+  previous: ReadonlyMap<string, ThreadTierId>,
+  groups: readonly ThreadTierGroup[],
+): ThreadTierId[] {
+  const arrivals = new Set<ThreadTierId>();
+  for (const group of groups) {
+    for (const thread of group.threads) {
+      if (previous.get(thread.key) !== group.id) arrivals.add(group.id);
+    }
+  }
+  return TIER_ORDER.filter((id) => arrivals.has(id));
 }
 
 export function classifyThreadTier(

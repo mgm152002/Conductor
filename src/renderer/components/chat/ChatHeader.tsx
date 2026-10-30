@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Task, Workspace } from '@shared/domain';
 import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore } from '../../stores';
 import { threadStatus, threadTitle } from '../../lib/thread-status';
 import { threadKey, threadTasks } from '../../lib/threads';
-import { classifyThreadTier, defaultSnoozeUntil } from '../../lib/thread-tiers';
+import { classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown } from '../../lib/thread-tiers';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
 import { CheckIcon, ClockIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
@@ -20,6 +20,19 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const setDetailsOpen = useUiStore((s) => s.setDetailsOpen);
   const [busy, setBusy] = useState<'retry' | 'resume' | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  // Snooze timer for the open thread: fire exactly at `snoozedUntil` so the
+  // header flips from Snoozed to Needs attention ("Snooze ended") when the
+  // snooze ends, without waiting for some other state change to re-render.
+  useEffect(() => {
+    if (tierPref?.mode !== 'snoozed' || tierPref.snoozedUntil === undefined) return;
+    const until = Date.parse(tierPref.snoozedUntil);
+    if (Number.isNaN(until)) return;
+    const delay = until - Date.now();
+    if (delay <= 0) { setNow(Date.now()); return; }
+    const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.min(delay, 2_147_483_647));
+    return () => { window.clearTimeout(timer); };
+  }, [tierPref]);
   const [renaming, setRenaming] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,8 +52,12 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         hasPendingApproval: pending.some((request) => ids.has(request.taskId)),
         hasPendingQuestion: pendingQuestions.some((request) => ids.has(request.taskId)),
       },
+      now,
     );
   })();
+  const snoozeCountdown = tierPref?.mode === 'snoozed' && tierPref.snoozedUntil !== undefined
+    ? formatSnoozeCountdown(tierPref.snoozedUntil, now)
+    : null;
 
   async function refresh(id: string): Promise<void> {
     useTaskStore.getState().upsert(await window.conductor.task.get(id));
@@ -87,7 +104,7 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         {status !== null ? (
           <span className={cn('ml-1 flex shrink-0 items-center gap-1 text-2xs font-medium', status.colorClass)}>
             <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && tierInfo?.tier !== 'snoozed' && 'animate-status-pulse')} />
-            {tierInfo?.tier === 'needs-attention' ? tierInfo.attentionLabel : tierInfo?.tier === 'snoozed' ? 'Snoozed' : tierInfo?.tier === 'settled' ? 'Settled' : status.label}
+            {tierInfo?.tier === 'needs-attention' ? tierInfo.attentionLabel : tierInfo?.tier === 'snoozed' ? (snoozeCountdown !== null ? `Snoozed · wakes ${snoozeCountdown}` : 'Snoozed') : tierInfo?.tier === 'settled' ? 'Settled' : status.label}
           </span>
         ) : null}
       </div>

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Task, TaskState } from '../../src/shared/domain';
 import {
-  classifyThreadTier, defaultSnoozeUntil, groupThreadsByTier, NO_THREAD_SIGNALS,
+  classifyThreadTier, defaultSnoozeUntil, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
+  NO_THREAD_SIGNALS, tierMembership, tiersWithNewArrivals,
   type ThreadTierPref,
 } from '../../src/renderer/lib/thread-tiers';
 import type { ThreadView } from '../../src/renderer/lib/threads';
@@ -107,6 +108,69 @@ describe('groupThreadsByTier', () => {
   it('omits empty tiers', () => {
     expect(groupThreadsByTier([thread('RUNNING')], {}, () => NO_THREAD_SIGNALS, NOW).map((group) => group.id)).toEqual(['working']);
     expect(groupThreadsByTier([], {}, () => NO_THREAD_SIGNALS, NOW)).toEqual([]);
+  });
+});
+
+describe('tiersWithNewArrivals (sidebar auto-collapse)', () => {
+  function named(key: string, state: TaskState, updatedAt = '2026-10-26T10:00:00.000Z'): ThreadView {
+    const base = task(state, updatedAt);
+    const item = { ...base, id: key };
+    return { key, root: item, latest: item, tasks: [item] };
+  }
+
+  it('reports the tier a thread lands in when it moves, and none when nothing moves', () => {
+    const before = groupThreadsByTier([named('a', 'RUNNING')], {}, () => NO_THREAD_SIGNALS, NOW);
+    const previous = tierMembership(before);
+    expect(tiersWithNewArrivals(previous, before)).toEqual([]);
+
+    // The thread finishes: it lands in Needs attention, which auto-collapses.
+    const after = groupThreadsByTier([named('a', 'COMPLETED')], {}, () => NO_THREAD_SIGNALS, NOW);
+    expect(tiersWithNewArrivals(previous, after)).toEqual(['needs-attention']);
+  });
+
+  it('reports every tier a thread lands in, including a newly created and a snoozed thread', () => {
+    const previous = tierMembership(groupThreadsByTier([named('a', 'RUNNING')], {}, () => NO_THREAD_SIGNALS, NOW));
+    const groups = groupThreadsByTier(
+      [named('a', 'RUNNING'), named('b', 'COMPLETED'), named('c', 'RUNNING')],
+      { c: snoozed('2026-10-27T09:00:00.000Z') },
+      () => NO_THREAD_SIGNALS,
+      NOW,
+    );
+    // 'a' stayed in Working; 'b' is new in Needs attention, 'c' is new in Snoozed.
+    expect(tiersWithNewArrivals(previous, groups)).toEqual(['needs-attention', 'snoozed']);
+  });
+});
+
+describe('snooze timer', () => {
+  it('finds the earliest future wake and ignores expired, indefinite and non-snoozed prefs', () => {
+    const wake = nextSnoozeWakeAt([
+      snoozed('2026-10-27T09:00:00.000Z'),
+      snoozed('2026-10-26T13:00:00.000Z'),
+      snoozed('2026-10-26T11:00:00.000Z'), // already expired at NOW
+      snoozed(), // indefinite
+      settled('2026-10-26T10:00:00.000Z'),
+      undefined,
+    ], NOW);
+    expect(wake).toBe(Date.parse('2026-10-26T13:00:00.000Z'));
+    expect(nextSnoozeWakeAt([snoozed(), settled('2026-10-26T10:00:00.000Z')], NOW)).toBeNull();
+  });
+
+  it('formats the countdown a snoozed thread shows while its timer runs', () => {
+    expect(formatSnoozeCountdown('2026-10-26T12:10:00.000Z', NOW)).toBe('in 10m');
+    expect(formatSnoozeCountdown('2026-10-26T13:30:00.000Z', NOW)).toBe('in 1h 30m');
+    expect(formatSnoozeCountdown('2026-10-27T14:00:00.000Z', NOW)).toBe('in 1d 2h');
+    expect(formatSnoozeCountdown('2026-10-26T11:00:00.000Z', NOW)).toBe('now');
+    expect(formatSnoozeCountdown('not-a-date', NOW)).toBeNull();
+  });
+
+  it('moves a snoozed thread out of Snoozed into Needs attention once the timer fires', () => {
+    const pref = snoozed('2026-10-26T13:00:00.000Z');
+    const beforeWake = groupThreadsByTier([thread('RUNNING')], { 'task-1': pref }, () => NO_THREAD_SIGNALS, NOW);
+    expect(beforeWake.map((group) => group.id)).toEqual(['snoozed']);
+    const afterWake = groupThreadsByTier([thread('RUNNING')], { 'task-1': pref }, () => NO_THREAD_SIGNALS, Date.parse('2026-10-26T13:00:00.000Z'));
+    expect(afterWake.map((group) => group.id)).toEqual(['needs-attention']);
+    // Landing in Needs attention is an arrival, so that section auto-collapses too.
+    expect(tiersWithNewArrivals(tierMembership(beforeWake), afterWake)).toEqual(['needs-attention']);
   });
 });
 
