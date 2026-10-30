@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { PdfPreview, boundedPdfPage, boundedPdfZoom } from '../../src/renderer/components/attachments/AttachmentPreviewDialog';
-import { imageThumbnailSrc } from '../../src/renderer/components/attachments/AttachmentCard';
+import { AttachmentCard, imageThumbnailSrc } from '../../src/renderer/components/attachments/AttachmentCard';
 
 const preview = {
   format: 'pdf' as const,
@@ -34,6 +34,14 @@ describe('attachment preview', () => {
     expect(boundedPdfPage(2, 2, 1)).toBe(2);
     expect(boundedPdfZoom(0.6, -0.2)).toBe(0.6);
     expect(boundedPdfZoom(2, 0.2)).toBe(2);
+  });
+
+  it('frames a history image in rounded corners, not a pill', () => {
+    const attachment = { id: 'img-1', name: 'photo.png', kind: 'image' as const, mimeType: 'image/png', sizeBytes: 1234 };
+    const html = renderToStaticMarkup(createElement(AttachmentCard, { attachment, display: 'history', onPreview: () => undefined }));
+    expect(html).toContain('aria-label="Preview photo.png"');
+    expect(html).toContain('rounded-xl');
+    expect(html).not.toContain('rounded-full');
   });
 
   it('uses only an image data URL for a pasted-image thumbnail', () => {

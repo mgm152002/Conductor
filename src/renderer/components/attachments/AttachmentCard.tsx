@@ -50,9 +50,11 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
   if (display === 'history' && isImage) {
     return (
       <figure className="group/image w-fit min-w-0 max-w-full">
-        <Button
-          variant="ghost"
-          className={cn('h-auto w-fit max-w-full min-w-0 justify-start overflow-hidden border border-border bg-card p-1 text-left hover:bg-accent', image === null && 'gap-2 px-2.5 py-2')}
+        {/* A plain button, not the shared Button: its size classes carry
+            rounded-full, which wrapped the image in a pill-shaped frame. */}
+        <button
+          type="button"
+          className={cn('flex h-auto w-fit max-w-full min-w-0 cursor-pointer items-start justify-start overflow-hidden rounded-xl border border-border bg-card p-1 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', image === null && 'gap-2 px-2.5 py-2')}
           onClick={() => { onPreview(attachment); }}
           aria-label={`Preview ${attachment.name}`}
         >
@@ -75,7 +77,7 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
               <span className="block text-2xs text-muted-foreground">{failed ? 'Preview unavailable' : 'Loading preview…'}</span>
             </span>
           ) : null}
-        </Button>
+        </button>
         {image !== null ? (
           <figcaption className="mt-1 flex max-w-full items-center gap-1 px-0.5 text-2xs text-muted-foreground">
             <ImageIcon size={10} className="shrink-0" />
