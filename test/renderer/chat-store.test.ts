@@ -6,7 +6,7 @@ const snapshot = (content = 'Hello', status: 'streaming' | 'complete' = 'streami
   thread: { id, title: content, agentId: 'codex', createdAt: '2026-10-25', updatedAt: '2026-10-25' },
   messages: [{ id: `reply-${id}`, threadId: id, role: 'assistant', content, status, createdAt: '2026-10-25', attachments: [] }],
 });
-beforeEach(() => { useChatStore.setState({ threads: [], conversations: {}, selectedId: null, drafts: {} }); });
+beforeEach(() => { useChatStore.setState({ threads: [], spaces: [], conversations: {}, selectedId: null, drafts: {} }); });
 
 it('keeps casual history and independent drafts when starting a new chat', () => {
   const store = useChatStore.getState();
@@ -38,6 +38,24 @@ it('applies a rename to the history entry and the loaded conversation', () => {
   expect(useChatStore.getState().threads.find((t) => t.id === 'chat-2')?.title).toBe('Second chat');
   expect(useChatStore.getState().conversations['chat-1']?.thread.title).toBe('Renamed chat');
   expect(useChatStore.getState().conversations['chat-1']?.messages[0]?.content).toBe('First chat');
+});
+
+it('groups threads into spaces and ungroups them when the space is removed', () => {
+  const store = useChatStore.getState();
+  store.receive(snapshot('First chat'));
+  store.receive(snapshot('Second chat', 'complete', 'chat-2'));
+  const space = { id: 'space-1', name: 'Trip', createdAt: '2026-10-25', updatedAt: '2026-10-25', threadCount: 0 };
+  store.upsertSpace(space);
+  store.setThreadSpace({ id: 'chat-1', title: 'First chat', agentId: 'codex', createdAt: '2026-10-25', updatedAt: '2026-10-25', spaceId: 'space-1' });
+
+  expect(useChatStore.getState().threads.find((t) => t.id === 'chat-1')?.spaceId).toBe('space-1');
+  expect(useChatStore.getState().conversations['chat-1']?.thread.spaceId).toBe('space-1');
+  expect(useChatStore.getState().spaces[0]?.threadCount).toBe(1);
+
+  store.removeSpace('space-1');
+  expect(useChatStore.getState().spaces).toEqual([]);
+  expect(useChatStore.getState().threads.find((t) => t.id === 'chat-1')?.spaceId).toBeNull();
+  expect(useChatStore.getState().threads).toHaveLength(2);
 });
 
 it('removes cached chat state and clears the selection only for the selected thread', () => {

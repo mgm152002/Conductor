@@ -11,6 +11,11 @@ export function registerChatHandlers(router: IpcRouter, chat: ChatService): void
   router.handle('chat.cancel', CHAT_SCHEMAS['chat.cancel'], (_event, { threadId }) => chat.cancel(threadId));
   router.handle('chat.delete', CHAT_SCHEMAS['chat.delete'], (_event, { threadId }) => chat.delete(threadId));
   router.handle('chat.rename', CHAT_SCHEMAS['chat.rename'], (_event, { threadId, title }) => chat.rename(threadId, title));
+  router.handle('chat.listSpaces', CHAT_SCHEMAS['chat.listSpaces'], () => chat.listSpaces());
+  router.handle('chat.createSpace', CHAT_SCHEMAS['chat.createSpace'], (_event, { name }) => chat.createSpace(name));
+  router.handle('chat.renameSpace', CHAT_SCHEMAS['chat.renameSpace'], (_event, { spaceId, name }) => chat.renameSpace(spaceId, name));
+  router.handle('chat.deleteSpace', CHAT_SCHEMAS['chat.deleteSpace'], (_event, { spaceId }) => chat.deleteSpace(spaceId));
+  router.handle('chat.setThreadSpace', CHAT_SCHEMAS['chat.setThreadSpace'], (_event, { threadId, spaceId }) => chat.setThreadSpace(threadId, spaceId));
   router.handle('chat.mem0Health', CHAT_SCHEMAS['chat.mem0Health'], () => chat.mem0Health());
 }
 

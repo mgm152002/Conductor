@@ -208,6 +208,53 @@ describe('standalone casual chat', () => {
     ]);
   });
 
+  it('groups chats into spaces and shares context only within a space', async () => {
+    const { service, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
+    const space = service.createSpace('  Trip planning  ');
+    expect(space).toMatchObject({ name: 'Trip planning', threadCount: 0 });
+    expect(() => service.createSpace('   ')).toThrow(/cannot be empty/);
+    expect(() => service.renameSpace(randomUUID(), 'Nope')).toThrow(/not found/);
+
+    const first = await service.send({ content: 'We are going to Lisbon in May', spaceId: space.id });
+    await settled(service, first.thread.id);
+    expect(first.thread.spaceId).toBe(space.id);
+    expect(service.listSpaces()).toEqual([expect.objectContaining({ id: space.id, threadCount: 1 })]);
+
+    // A second chat in the same space receives the first chat's turns as context.
+    const second = await service.send({ content: 'Which city did we pick?', spaceId: space.id });
+    await settled(service, second.thread.id);
+    const shared = (adapter.calls.started[1] as ObjectiveInput).contextData as { kind: string; content: string }[];
+    expect(shared).toEqual([expect.objectContaining({ kind: 'space', spaceId: space.id })]);
+    expect(shared[0]?.content).toContain('Lisbon in May');
+    expect(shared[0]?.content).toContain('reply');
+
+    // An ungrouped chat never receives space context.
+    const solo = await service.send({ content: 'Which city did we pick?' });
+    await settled(service, solo.thread.id);
+    expect(solo.thread.spaceId).toBeNull();
+    expect((adapter.calls.started[2] as ObjectiveInput).contextData ?? []).toEqual([]);
+
+    // Moving the ungrouped chat into the space opts it into the shared context.
+    expect(service.setThreadSpace(solo.thread.id, space.id).spaceId).toBe(space.id);
+    expect(() => service.setThreadSpace(solo.thread.id, randomUUID())).toThrow(/not found/);
+    const followUp = await service.send({ threadId: solo.thread.id, content: 'And which city was it?' });
+    await settled(service, followUp.thread.id);
+    const moved = (adapter.calls.started[3] as ObjectiveInput).contextData as { kind: string; content: string }[];
+    expect(moved.some((entry) => entry.kind === 'space' && entry.content.includes('Lisbon'))).toBe(true);
+
+    // A chat in a different space does not see this space's turns.
+    const other = service.createSpace('Other');
+    const outsider = await service.send({ content: 'Which city?', spaceId: other.id });
+    await settled(service, outsider.thread.id);
+    expect((adapter.calls.started[4] as ObjectiveInput).contextData ?? []).toEqual([]);
+
+    // Deleting a space keeps its chats, ungrouped.
+    service.deleteSpace(space.id);
+    expect(service.listSpaces().map((s) => s.id)).toEqual([other.id]);
+    expect(service.get(first.thread.id).thread.spaceId).toBeNull();
+    expect(service.list()).toHaveLength(4);
+  });
+
   it('passes locally recognized pasted-image text only with the current turn attachment', async () => {
     const { store, registry, root, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'answer' }] } });
     const image = {

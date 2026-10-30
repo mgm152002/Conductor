@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import type { ChatThread } from '@shared/chat-contract';
+import type { ChatSpace, ChatThread } from '@shared/chat-contract';
 import type { Task, Workspace } from '@shared/domain';
 import { NAV_ENTRIES, type NavEntryId } from '../navigation';
 import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore, useWorkspaceStore } from '../stores';
@@ -29,6 +29,7 @@ import { ProjectPullRequestsDialog } from './projects/ProjectPullRequestsDialog'
 import { DeleteChatDialog } from './threads/DeleteChatDialog';
 import { DeleteThreadDialog } from './threads/DeleteThreadDialog';
 import { RenameChatDialog } from './threads/RenameChatDialog';
+import { DeleteSpaceDialog, SpaceNameDialog } from './threads/SpaceDialogs';
 import { RenameThreadDialog } from './threads/RenameThreadDialog';
 import { SurfaceTabs } from './SurfaceTabs';
 import { useChatStore } from '../stores/chat-store';
@@ -444,15 +445,21 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
 
 function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: (() => void) | undefined }): React.JSX.Element {
   const allThreads = useChatStore((state) => state.threads);
+  const spaces = useChatStore((state) => state.spaces);
   const threads = query === '' ? allThreads : allThreads.filter((t) => t.title.toLowerCase().includes(query));
   const selectedId = useChatStore((state) => state.selectedId);
   const [error, setError] = useState<string | null>(null);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
   const [renamingThread, setRenamingThread] = useState<ChatThread | null>(null);
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [renamingSpace, setRenamingSpace] = useState<ChatSpace | null>(null);
+  const [deletingSpace, setDeletingSpace] = useState<ChatSpace | null>(null);
   const load = (): void => {
     setError(null);
     void window.conductor.chat.list().then((list) => { useChatStore.getState().setThreads(list); })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not load chats'); });
+    void window.conductor.chat.listSpaces().then((list) => { useChatStore.getState().setSpaces(list); })
+      .catch(() => { /* Spaces are additive; chat loading errors surface above. */ });
   };
   useEffect(load, []);
   // The dialog closes both after a successful delete and after a cancel. Reload
@@ -462,10 +469,8 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
     setDeletingThread(null);
     if (thread !== null && !useChatStore.getState().threads.some((item) => item.id === thread.id)) load();
   };
-  return <>
-    <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
-    {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
-    {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : <ul className="flex flex-col gap-1">{threads.map((thread) => <li key={thread.id} className={cn('group/chat relative flex h-8 items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
+  const renderThread = (thread: ChatThread): React.JSX.Element => (
+    <li key={thread.id} className={cn('group/chat relative flex h-8 items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
       <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       </button>
@@ -489,9 +494,49 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
           <TrashIcon size={12} />
         </button>
       </span>
-    </li>)}</ul>}
+    </li>
+  );
+  const spaceIds = new Set(spaces.map((space) => space.id));
+  const ungrouped = threads.filter((thread) => !thread.spaceId || !spaceIds.has(thread.spaceId));
+  return <>
+    <div className="flex items-center justify-between px-1.5 py-2">
+      <h2 className="text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Spaces</h2>
+      <button type="button" onClick={() => { setCreatingSpace(true); }} aria-label="New space" title="New space — group chats that share context" className="flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring">
+        <PlusIcon size={14} />
+      </button>
+    </div>
+    {spaces.length === 0
+      ? <p className="px-2 pb-2 text-xs text-sidebar-muted-foreground">Group chats in a space so they share context with each other.</p>
+      : spaces.map((space) => {
+        const members = threads.filter((thread) => thread.spaceId === space.id);
+        if (query !== '' && members.length === 0) return null;
+        return (
+          <section key={space.id} aria-label={`Space: ${space.name}`} className="pb-1">
+            <div className="group/space flex h-7 items-center gap-1 px-1.5">
+              <LayersIcon size={12} className="shrink-0 text-sidebar-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={space.name}>{space.name}</span>
+              <span className="shrink-0 text-2xs text-sidebar-muted-foreground">{members.length}</span>
+              <button type="button" onClick={() => { setRenamingSpace(space); }} aria-label={`Rename space: ${space.name}`} title="Rename space" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
+                <PencilIcon size={12} />
+              </button>
+              <button type="button" onClick={() => { setDeletingSpace(space); }} aria-label={`Delete space: ${space.name}`} title="Delete space (chats are kept)" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-destructive-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
+                <TrashIcon size={12} />
+              </button>
+            </div>
+            {members.length === 0
+              ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Open a chat and put it in this space to share context.</p>
+              : <ul className="flex flex-col gap-1 pl-3">{members.map(renderThread)}</ul>}
+          </section>
+        );
+      })}
+    <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
+    {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
+    {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : ungrouped.length === 0 && spaces.length > 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">All your chats are in spaces.</p> : <ul className="flex flex-col gap-1">{ungrouped.map(renderThread)}</ul>}
     {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={closeDelete} /> : null}
     {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
+    {creatingSpace ? <SpaceNameDialog space={null} open onClose={() => { setCreatingSpace(false); }} /> : null}
+    {renamingSpace !== null ? <SpaceNameDialog key={renamingSpace.id} space={renamingSpace} open onClose={() => { setRenamingSpace(null); }} /> : null}
+    {deletingSpace !== null ? <DeleteSpaceDialog space={deletingSpace} open onClose={() => { setDeletingSpace(null); }} /> : null}
   </>;
 }
 
