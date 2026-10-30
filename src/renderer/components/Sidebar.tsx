@@ -319,7 +319,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
                     </button>
                   )}
                   {!tierCollapsed ? (
-                    <ul className="flex flex-col gap-px">
+                    <ul className="flex flex-col gap-px pl-6">
                       {group.threads.map((thread) => {
                         const tierInfo = classifyThreadTier(thread, tierPrefs[thread.key], signalsFor(thread), now);
                         const pref = tierPrefs[thread.key];
