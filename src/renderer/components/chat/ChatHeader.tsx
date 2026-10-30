@@ -2,9 +2,11 @@ import { useState } from 'react';
 import type { Task, Workspace } from '@shared/domain';
 import { useApprovalStore, useTaskStore, useUiStore } from '../../stores';
 import { threadStatus, threadTitle } from '../../lib/thread-status';
+import { threadKey } from '../../lib/threads';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
-import { PanelRightIcon, PlayIcon, RotateIcon } from '../ui/icons';
+import { PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
+import { RenameThreadDialog } from '../threads/RenameThreadDialog';
 
 // The 52px thread header: project / thread breadcrumb, a status pill, the
 // recovery actions that apply to the current state, and the details toggle.
@@ -14,6 +16,7 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const setDetailsOpen = useUiStore((s) => s.setDetailsOpen);
   const [busy, setBusy] = useState<'retry' | 'resume' | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = task !== null ? threadStatus(task, pending.some((request) => request.taskId === task.id)) : null;
@@ -68,6 +71,53 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         ) : null}
       </div>
       {error !== null ? <span role="alert" className="max-w-64 truncate text-2xs text-destructive-foreground" title={error}>{error}</span> : null}
+      {task !== null && task.state === 'COMPLETED' && (title ?? task)?.prUrl === undefined ? (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          title="Commit this thread's worktree, push its branch, and open a pull request"
+          onClick={() => {
+            setBusy('retry'); setError(null);
+            void window.conductor.github.createPr({ workspaceId: task.workspaceId, threadId: threadKey(title ?? task) })
+              .then(async (result) => {
+                if (result.status === 'no-changes') setError('No changes to file a PR for');
+                await refresh((title ?? task).id);
+              })
+              .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not file pull request'); })
+              .finally(() => { setBusy(null); });
+          }}
+        >
+          <PullRequestIcon size={13} /> File PR
+        </Button>
+      ) : null}
+      {(title ?? task)?.prUrl !== undefined ? (
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label={`Open pull request ${(title ?? task)!.prNumber !== undefined ? `#${(title ?? task)!.prNumber} ` : ''}on GitHub`}
+          title={`Pull request${(title ?? task)!.prState !== undefined ? ` · ${(title ?? task)!.prState}` : ''} — open on GitHub`}
+          onClick={() => { void window.conductor.github.openPr((title ?? task)!.prUrl!).catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not open pull request'); }); }}
+          className={cn((title ?? task)!.prState === 'merged' ? 'text-violet-500' : (title ?? task)!.prState === 'closed' ? 'text-destructive' : 'text-success')}
+        >
+          <PullRequestIcon size={13} />
+          {(title ?? task)!.prNumber !== undefined ? `#${(title ?? task)!.prNumber}` : 'PR'}
+        </Button>
+      ) : null}
+      {task !== null ? (
+        <Button size="icon" variant="ghost" aria-label={`Rename thread: ${threadTitle(title ?? task)}`} title="Rename thread" onClick={() => { setRenaming(true); }}>
+          <PencilIcon size={14} />
+        </Button>
+      ) : null}
+      {task !== null && renaming ? (
+        <RenameThreadDialog
+          key={threadKey(title ?? task)}
+          threadId={threadKey(title ?? task)}
+          currentTitle={threadTitle(title ?? task)}
+          open
+          onClose={() => { setRenaming(false); }}
+        />
+      ) : null}
       {task?.state === 'BLOCKED' ? (
         <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void retry(); }}><RotateIcon size={13} />{busy === 'retry' ? 'Retrying…' : 'Retry'}</Button>
       ) : null}

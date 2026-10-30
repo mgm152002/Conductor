@@ -109,6 +109,10 @@ interface TaskRow {
   last_verified_checkpoint_id: string | null;
   thread_id?: string | null;
   parent_task_id?: string | null;
+  title?: string | null;
+  pr_number?: number | null;
+  pr_url?: string | null;
+  pr_state?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -129,6 +133,10 @@ function rowToTask(row: TaskRow): Task {
       : {}),
     ...(row.thread_id ? { threadId: row.thread_id } : {}),
     ...(row.parent_task_id ? { parentTaskId: row.parent_task_id } : {}),
+    ...(row.title ? { title: row.title } : {}),
+    ...(row.pr_number ? { prNumber: row.pr_number } : {}),
+    ...(row.pr_url ? { prUrl: row.pr_url } : {}),
+    ...(row.pr_state === 'open' || row.pr_state === 'closed' || row.pr_state === 'merged' ? { prState: row.pr_state } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -544,7 +552,7 @@ export class ResumeCenter {
       .prepare(
         `SELECT id, workspace_id, objective, acceptance_criteria, state,
                 context_refs, recommended_next_action,
-                last_verified_checkpoint_id, thread_id, parent_task_id, created_at, updated_at
+                last_verified_checkpoint_id, thread_id, parent_task_id, title, pr_number, pr_url, pr_state, created_at, updated_at
            FROM tasks
           WHERE state NOT IN (${placeholders})
           ORDER BY created_at ASC, rowid ASC`,

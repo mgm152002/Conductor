@@ -26,6 +26,7 @@ import {
   TaskGetRequest,
   TaskListActiveRequest,
   ThreadDeleteRequest,
+  ThreadRenameRequest,
   WorkspaceCreateRequest,
   WorkspaceListRequest,
   WorkspaceSelectRequest,
@@ -51,6 +52,7 @@ import type { CliCatalog } from '../catalog/cli-catalog';
 import type { DataControlService } from '../domain/data-control-service';
 import type { ProjectDeletionResult } from '../domain/project-deletion';
 import type { ThreadDeletionResult } from '../domain/thread-deletion';
+import { renameThread } from '../domain/thread-rename';
 import { Mem0Error } from '../domain/mem0-client';
 import { parseRunOptions } from '../agents/run-resolver';
 import type { UsageRange, UsageSummary } from '@shared/usage';
@@ -204,6 +206,13 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
   router.handle('task.deleteThread', ThreadDeleteRequest, async (_event, input): Promise<ThreadDeletionResult> => {
     if (deps.deleteThread === undefined) throw new Error('Deleting threads is not available.');
     return deps.deleteThread(input.threadId);
+  });
+
+  router.handle('task.renameThread', ThreadRenameRequest, (_event, input): Task => {
+    const { rootTaskId } = renameThread(deps.store, input.threadId, input.title);
+    const task = orchestrator.getTask(rootTaskId);
+    if (task === undefined) throw new Error('That thread no longer exists.');
+    return task;
   });
 
   router.handle('usage.summary', UsageSummaryRequest, async (_event, input): Promise<UsageSummary> => {

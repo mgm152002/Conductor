@@ -1277,6 +1277,47 @@ const migration026: Migration = {
   },
 };
 
+// Migration 27 — user-chosen Work thread titles. The title lives on the
+// thread's root task (the task whose id is the thread id); NULL means the
+// title is still derived from that task's objective.
+const migration027: Migration = {
+  version: 27,
+  name: 'task_thread_title',
+  up({ db }: Tx): void {
+    db.exec('ALTER TABLE tasks ADD COLUMN title TEXT;');
+  },
+};
+
+// Migration 28 — GitHub pull requests filed for Work threads. The latest PR
+// for a thread is mirrored onto its root task (pr_number/pr_url/pr_state) so
+// lists render without a join; this table keeps the full per-project history.
+const migration028: Migration = {
+  version: 28,
+  name: 'github_pull_requests',
+  up({ db }: Tx): void {
+    db.exec(`
+      ALTER TABLE tasks ADD COLUMN pr_number INTEGER;
+      ALTER TABLE tasks ADD COLUMN pr_url TEXT;
+      ALTER TABLE tasks ADD COLUMN pr_state TEXT;
+      CREATE TABLE github_pull_requests (
+        id TEXT PRIMARY KEY NOT NULL,
+        workspace_id TEXT NOT NULL,
+        thread_key TEXT NOT NULL,
+        root_task_id TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        url TEXT NOT NULL,
+        title TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('open', 'closed', 'merged')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_github_prs_workspace ON github_pull_requests (workspace_id, updated_at);
+      CREATE INDEX idx_github_prs_thread ON github_pull_requests (thread_key);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1305,4 +1346,6 @@ export const MIGRATIONS: readonly Migration[] = [
   migration024,
   migration025,
   migration026,
+  migration027,
+  migration028,
 ];

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskEvent } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
-import { buildTimeline, latestActivity, recentActivities } from '../../src/renderer/lib/timeline';
+import { buildChatMessageTimeline, buildTimeline, latestActivity, recentActivities } from '../../src/renderer/lib/timeline';
+import type { ChatMessage } from '../../src/shared/chat-contract';
 
 const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 'COMPLETED', acceptanceCriteria: ['response: nonempty'], contextRefs: [], createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z' };
 let n = 0;
@@ -76,6 +77,44 @@ describe('chat timeline', () => {
     const replies = items.filter((i) => i.kind === 'assistant');
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatchObject({ text: 'Here is what I found' });
+  });
+
+  it('keeps ACP prose segments in place around tool calls instead of collapsing them into one reply', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'First I will inspect the code.', kind: 'reply', key: 'acp:reply', status: 'running', source: 'OpenCode' }),
+      stdout('First I will inspect the code.'),
+      log({ message: 'read', kind: 'read', detail: 'src/a.ts', key: 'call-1', status: 'running', source: 'OpenCode' }),
+      log({ key: 'call-1', status: 'completed', source: 'OpenCode' }),
+      log({ message: 'Found the bug. Fixing it now.', kind: 'reply', key: 'acp:reply', status: 'running', source: 'OpenCode' }),
+      stdout('Found the bug. Fixing it now.'),
+      log({ message: 'edit', kind: 'edit', detail: 'src/a.ts', key: 'call-2', status: 'completed', source: 'OpenCode' }),
+      log({ message: 'All fixed.', kind: 'reply', key: 'acp:reply', status: 'neutral', source: 'OpenCode' }),
+    ]));
+    expect(items.map((i) => i.kind)).toEqual(['user', 'assistant', 'work', 'assistant', 'work', 'assistant']);
+    const replies = items.filter((i) => i.kind === 'assistant').map((i) => (i as { text: string }).text);
+    expect(replies).toEqual(['First I will inspect the code.', 'Found the bug. Fixing it now.', 'All fixed.']);
+  });
+
+  it('starts a new reasoning row for a later thought segment instead of rewriting the earlier one', () => {
+    const items = buildTimeline(task, details([
+      log({ message: 'Inspecting the parser', kind: 'reasoning', key: 'acp:thought', status: 'neutral', source: 'OpenCode' }),
+      log({ message: 'read', kind: 'read', key: 'call-1', status: 'completed', source: 'OpenCode' }),
+      log({ message: 'Planning the edit', kind: 'reasoning', key: 'acp:thought', status: 'neutral', source: 'OpenCode' }),
+    ]));
+    const labels = items.flatMap((i) => (i.kind === 'work' ? i.entries.map((e) => e.label) : []));
+    expect(labels).toEqual(['Inspecting the parser', 'read', 'Planning the edit']);
+  });
+
+  it('interleaves chat prose and activity by recorded content offset', () => {
+    const message: ChatMessage = {
+      id: 'm1', threadId: 'c1', role: 'assistant', status: 'complete', createdAt: '2026-10-24T00:00:00Z', attachments: [],
+      content: 'Checking first. All finished.',
+      activity: [{ id: 'a1', key: 'call-1', label: 'read', kind: 'read', status: 'completed', createdAt: '2026-10-24T00:00:01Z', contentOffset: 'Checking first.'.length }],
+    };
+    const items = buildChatMessageTimeline(message);
+    expect(items.map((i) => i.kind)).toEqual(['assistant', 'work', 'assistant']);
+    expect(items[0]).toMatchObject({ text: 'Checking first.' });
+    expect(items[2]).toMatchObject({ text: 'All finished.' });
   });
 
   it('shows Codex item notices as neutral, not errors', () => {

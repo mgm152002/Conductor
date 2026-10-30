@@ -34,6 +34,12 @@ export interface ChatActivity {
   status: ChatActivityStatus;
   source?: string;
   createdAt: string;
+  /**
+   * Characters of the reply that preceded this activity, so the renderer
+   * can interleave prose and work chronologically instead of grouping all
+   * activity above the reply. Absent on messages recorded before this field.
+   */
+  contentOffset?: number;
 }
 
 export interface ChatConversation {
@@ -67,12 +73,16 @@ export interface Mem0Health {
   checkedAt: string;
 }
 
+/** A user-chosen thread title: non-blank and short enough for the sidebar. */
+export const ThreadTitle = z.string().trim().min(1).max(120);
+
 export const CHAT_SCHEMAS = {
   'chat.list': z.void(),
   'chat.get': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.send': ChatSendRequest,
   'chat.cancel': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.delete': z.object({ threadId: z.string().uuid() }).strict(),
+  'chat.rename': z.object({ threadId: z.string().uuid(), title: ThreadTitle }).strict(),
   'chat.mem0Health': z.void(),
 } as const;
 
@@ -82,6 +92,8 @@ export interface ChatBridge {
   send(input: ChatSendInput): Promise<ChatConversation>;
   cancel(threadId: string): Promise<void>;
   delete(threadId: string): Promise<void>;
+  /** Rename a chat thread; resolves to the updated thread. */
+  rename(threadId: string, title: string): Promise<ChatThread>;
   /** Check whether the Mem0 context service is reachable right now. */
   mem0Health(): Promise<Mem0Health>;
 }

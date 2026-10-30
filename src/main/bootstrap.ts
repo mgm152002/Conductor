@@ -1,7 +1,7 @@
 import { AttachmentService } from './attachments/attachment-service';
 import { registerAttachmentHandlers } from './ipc/register-attachments';
 import { join } from 'node:path';
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, shell } from 'electron';
 import { SqliteStore } from './db/store';
 import { WorkspaceService } from './domain/workspace-service';
 import { SettingsService } from './domain/settings-service';
@@ -44,6 +44,8 @@ import { TaskRunner } from './orchestrator/task-runner';
 import { TaskQueries } from './orchestrator/task-queries';
 import { evidenceEvaluator } from './orchestrator/evidence-evaluator';
 import { registerKnowledgeHandlers } from './ipc/register-knowledge';
+import { GitHubService } from './domain/github-service';
+import { registerGitHubHandlers } from './ipc/register-github';
 import { registerAutomationHandlers } from './ipc/register-automation';
 import { SelfLearningEngine } from './domain/self-learning-service';
 import { LearningLoop } from './domain/learning-loop';
@@ -365,6 +367,15 @@ export async function bootstrap(): Promise<AppServices> {
     },
   );
 
+  // GitHub integration: per-project token (Keychain), auto-PR on completion.
+  const github = new GitHubService({
+    store, workspaces, secrets: secretStore,
+    resolveSecret: (secretId) => new KeychainSecretResolver().resolve(secretId),
+    getTask: (taskId) => stateMachine.getTask(taskId),
+    onTaskUpdated: (task) => { taskEvents.emit('task.updated', task); },
+    openExternal: (url) => shell.openExternal(url),
+  });
+
   // Task continuity / Resume Center: boot reconciliation (task 11.1). It shares
   // the store, state machine, registry, and audit log so every state change
   // still goes through the write-ahead transition primitive. onBoot reconciles
@@ -433,6 +444,8 @@ export async function bootstrap(): Promise<AppServices> {
       skillOrchestration.onTaskFinished(task);
       learningLoop.onTaskFinished(task);
       void signals.onTaskFinished(task);
+      // File a PR for the finished thread when the project opted in.
+      void github.autoPrForCompletedTask(task);
     },
     onStuck: (task) => { void signals.onTaskStuck(task); },
   });
@@ -516,6 +529,7 @@ export async function bootstrap(): Promise<AppServices> {
     usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters() }),
   });
 
+  registerGitHubHandlers(router, github);
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
   registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});

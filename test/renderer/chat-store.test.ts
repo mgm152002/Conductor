@@ -27,6 +27,19 @@ it('does not roll a completed streaming reply back when the send snapshot arrive
   expect(useChatStore.getState().conversations['chat-1']?.messages[0]?.status).toBe('complete');
 });
 
+it('applies a rename to the history entry and the loaded conversation', () => {
+  const store = useChatStore.getState();
+  store.receive(snapshot('First chat'));
+  store.receive(snapshot('Second chat', 'complete', 'chat-2'));
+
+  store.rename({ id: 'chat-1', title: 'Renamed chat', agentId: 'codex', createdAt: '2026-10-25', updatedAt: '2026-10-25' });
+
+  expect(useChatStore.getState().threads.find((t) => t.id === 'chat-1')?.title).toBe('Renamed chat');
+  expect(useChatStore.getState().threads.find((t) => t.id === 'chat-2')?.title).toBe('Second chat');
+  expect(useChatStore.getState().conversations['chat-1']?.thread.title).toBe('Renamed chat');
+  expect(useChatStore.getState().conversations['chat-1']?.messages[0]?.content).toBe('First chat');
+});
+
 it('removes cached chat state and clears the selection only for the selected thread', () => {
   const store = useChatStore.getState();
   store.receive(snapshot('First chat'));

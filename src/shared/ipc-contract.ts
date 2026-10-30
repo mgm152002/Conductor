@@ -5,6 +5,7 @@ import { APPLICATION_SCHEMAS } from './application-contract';
 import { CONNECTOR_SCHEMAS } from './connector-contract';
 import { INTEGRATION_SCHEMAS } from './integrations-contract';
 import { CHAT_SCHEMAS } from './chat-contract';
+import { GITHUB_SCHEMAS } from './github-contract';
 import { AttachmentIdsSchema } from './attachments';
 
 // The single source of truth for the IPC surface. Every invoke channel has a
@@ -94,6 +95,10 @@ export const ThreadDeleteRequest = z.object({
   // Required confirmation; the renderer sends it only after the user confirms.
   confirmed: z.literal(true),
 });
+export const ThreadRenameRequest = z.object({
+  threadId: z.string().uuid(),
+  title: z.string().trim().min(1).max(120),
+});
 
 export const ResumeSnapshotRequest = z.void();
 export const ResumeActRequest = z.object({
@@ -173,6 +178,7 @@ export type Appearance = z.infer<typeof AppearanceSchema>;
 // audited by the router.
 
 export const INVOKE_SCHEMAS = {
+  ...GITHUB_SCHEMAS,
   ...CHAT_SCHEMAS,
   ...KNOWLEDGE_SCHEMAS,
   ...AUTOMATION_SCHEMAS,
@@ -191,6 +197,7 @@ export const INVOKE_SCHEMAS = {
   'task.get': TaskGetRequest,
   'task.listActive': TaskListActiveRequest,
   'task.deleteThread': ThreadDeleteRequest,
+  'task.renameThread': ThreadRenameRequest,
   'resume.snapshot': ResumeSnapshotRequest,
   'resume.act': ResumeActRequest,
   'approval.resolve': ApprovalResolveRequest,

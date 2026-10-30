@@ -9,7 +9,8 @@ import { ModelEffortPicker } from './ModelEffortPicker';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PendingQuestionPanel } from './PendingQuestionPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
-import { ArrowUpIcon, StopIcon, TrashIcon } from '../ui/icons';
+import { RenameChatDialog } from '../threads/RenameChatDialog';
+import { ArrowUpIcon, PencilIcon, StopIcon, TrashIcon } from '../ui/icons';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline } from '../../lib/timeline';
@@ -29,6 +30,7 @@ export function CasualChat(): React.JSX.Element {
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
+  const [renamingThread, setRenamingThread] = useState<ChatThread | null>(null);
   const attachmentDraft = useAttachmentDraft();
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -107,20 +109,32 @@ export function CasualChat(): React.JSX.Element {
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <h1 className="min-w-0 truncate text-sm font-medium">{conversation?.thread.title ?? 'Chat'}</h1>
           {conversation !== undefined ? (
-            <button
-              type="button"
-              onClick={() => { setDeletingThread(conversation.thread); }}
-              aria-label={`Delete chat: ${conversation.thread.title}`}
-              title="Delete chat"
-              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              <TrashIcon size={13} />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => { setRenamingThread(conversation.thread); }}
+                aria-label={`Rename chat: ${conversation.thread.title}`}
+                title="Rename chat"
+                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <PencilIcon size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDeletingThread(conversation.thread); }}
+                aria-label={`Delete chat: ${conversation.thread.title}`}
+                title="Delete chat"
+                className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <TrashIcon size={13} />
+              </button>
+            </>
           ) : null}
         </div>
         <span className="shrink-0 text-2xs text-muted-foreground">Personal conversation</span>
       </header>
       {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
+      {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
       <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
         {hasMessages ? (
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">

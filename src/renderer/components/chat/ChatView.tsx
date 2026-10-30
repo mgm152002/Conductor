@@ -22,7 +22,6 @@ import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanResults, runLabel } from './PlanCard';
 import { PlanDock } from './PlanDock';
-import { LiveActivityFeed } from './LiveActivityFeed';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
 // The main surface, in the T3 Code shape: a thread header, a centred message
@@ -213,7 +212,6 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
           <PendingApprovalPanel task={latest} />
           <PendingQuestionPanel scopeId={latest.id} />
           <PlanDock task={latest} details={latestDetails} />
-          <LiveActivityFeed task={latest} details={latestDetails} />
           <Composer task={latest} currentAgentId={[...(latestDetails?.steps ?? [])].reverse().find((s) => s.assignedAdapterId !== undefined)?.assignedAdapterId} />
         </div>
       </div>

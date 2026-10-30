@@ -20,6 +20,7 @@ const project: Workspace = { id: 'ui-project', name: 'Conductor project with a v
 const task: Task = {
   id: 'ui-task', workspaceId: project.id, objective: 'Build the memory and workflow experience', state: running ? 'RUNNING' : 'COMPLETED',
   acceptanceCriteria: ['Memory is searchable by meaning', 'Plan controls fit in a narrow window'], contextRefs: [], createdAt, updatedAt: createdAt,
+  prNumber: 42, prUrl: 'https://github.com/example/conductor/pull/42', prState: 'open',
 };
 const events: TaskEvent[] = running ? [
   { id: 'event-1', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Read src/renderer/components/chat/PlanDock.tsx', kind: 'read', status: 'completed', source: 'Codex' } },
@@ -78,7 +79,24 @@ window.conductor = {
     },
     cancel: async () => {},
     delete: async () => ({ deleted: true, messages: 0 }),
+    rename: async (id: string, title: string) => {
+      const chat = chats[id]!;
+      chat.thread.title = title;
+      publish(chat);
+      return structuredClone(chat.thread);
+    },
     mem0Health: async () => ({ reachable: true, detail: 'Fixture memory service', checkedAt: new Date().toISOString() }),
+  },
+  github: {
+    status: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: true, login: 'fixture-user', autoPr: true }),
+    connect: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: true, login: 'fixture-user', autoPr: true }),
+    disconnect: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: false, autoPr: false }),
+    setAutoPr: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: true, login: 'fixture-user', autoPr: true }),
+    setBaseBranch: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: true, login: 'fixture-user', autoPr: true }),
+    listPrs: async () => [{ id: 'pr-1', workspaceId: project.id, threadKey: task.id, number: 42, url: task.prUrl!, title: task.objective, branch: 'conductor/ui-task', state: 'open' as const, threadTitle: task.objective, createdAt, updatedAt: createdAt }],
+    refreshPrs: async () => [{ id: 'pr-1', workspaceId: project.id, threadKey: task.id, number: 42, url: task.prUrl!, title: task.objective, branch: 'conductor/ui-task', state: 'open' as const, threadTitle: task.objective, createdAt, updatedAt: createdAt }],
+    createPr: async () => ({ status: 'no-changes' as const, branch: 'conductor/ui-task' }),
+    openPr: async () => {},
   },
   settings: { get: async () => undefined, set: async () => {} },
   theme: { get: async () => 'light' },
@@ -100,7 +118,10 @@ window.conductor = {
       patch: `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,3 +1,4 @@\n import { createRoot } from 'react-dom/client';\n-import { App } from '../../src/renderer/App';\n+import { App } from '../../src/renderer/App';\n+import { FilesRegion } from '../../src/renderer/components/workspace/FilesRegion';\n`,
     }),
   },
-  task: { list: async () => [task], listActive: async () => [], get: async () => task, details: async () => details, thread: async () => [task] },
+  task: {
+    list: async () => [task], listActive: async () => [], get: async () => task, details: async () => details, thread: async () => [task],
+    renameThread: async (_threadId: string, title: string) => ({ ...task, title }),
+  },
   approval: { list: async () => [], resolve: async () => {} },
   agents: {
     list: async () => agents,

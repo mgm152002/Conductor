@@ -25,6 +25,9 @@ Check the following interactions:
 6. Switch back to Chat. Its original conversation should remain selected and show
    the follow-up, with no project tasks mixed in. New chat opens a blank conversation.
 7. Reload with `no-projects=1`. Chat still works; Work prompts to add a project.
+8. Rename a thread from its sidebar row (pencil icon) in both Chat and Work, and
+   from the open thread's header in Work / the chat header in Chat. The new title
+   should appear in the sidebar and header, and the first message should be unchanged.
 
 For geometry checks, the composer form, Task options container and selected
 inspector panel should have `scrollWidth <= clientWidth`. The inspector's right

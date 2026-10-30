@@ -1,10 +1,9 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { Task, TaskEvent, TaskStep } from '../../src/shared/domain';
+import type { Task, TaskStep } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
 import type { TaskPlanView } from '../../src/shared/plan';
-import { LiveActivityFeed } from '../../src/renderer/components/chat/LiveActivityFeed';
 import { PlanDock } from '../../src/renderer/components/chat/PlanDock';
 
 const task: Task = {
@@ -22,8 +21,6 @@ const step = (id: string, ordinal: number, status: TaskStep['status'], descripti
   id, taskId: task.id, ordinal, description, dependsOn: [], status, assignedAdapterId: 'opencode',
 });
 
-const event = (id: string, kind: TaskEvent['kind'], payload: unknown, createdAt: string): TaskEvent => ({ id, taskId: task.id, kind, payload, createdAt });
-
 function details(overrides: Partial<TaskDetails> = {}): TaskDetails {
   return {
     task,
@@ -36,37 +33,6 @@ function details(overrides: Partial<TaskDetails> = {}): TaskDetails {
     ...overrides,
   };
 }
-
-describe('live activity feed', () => {
-  it('streams several recent CLI steps instead of only the latest line', () => {
-    const html = renderToStaticMarkup(createElement(LiveActivityFeed, {
-      task,
-      details: details({
-        steps: [step('s1', 0, 'running', 'Run the tests')],
-        events: [
-          event('e1', 'log', { message: 'Read src/a.ts', kind: 'read', status: 'completed', source: 'OpenCode' }, '2026-10-26T00:00:01Z'),
-          event('e2', 'log', { message: 'Bash', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'OpenCode' }, '2026-10-26T00:00:02Z'),
-          event('e3', 'log', { message: 'Edited src/b.ts', kind: 'edit', status: 'completed', source: 'OpenCode' }, '2026-10-26T00:00:03Z'),
-        ],
-      }),
-    }));
-
-    expect(html).toContain('Live CLI activity');
-    expect(html).toContain('1 agent working');
-    expect(html).toContain('Read src/a.ts');
-    expect(html).toContain('Bash');
-    expect(html).toContain('Edited src/b.ts');
-    expect(html).toContain('OpenCode');
-  });
-
-  it('disappears when the task is no longer working', () => {
-    const html = renderToStaticMarkup(createElement(LiveActivityFeed, {
-      task: { ...task, state: 'COMPLETED' },
-      details: details(),
-    }));
-    expect(html).toBe('');
-  });
-});
 
 describe('pinned plan dock', () => {
   it('shows a collapsed plan summary and keeps the task list behind the toggle', () => {

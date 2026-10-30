@@ -40,8 +40,10 @@ export function threadStatus(task: Task, hasPendingApproval: boolean): ThreadSta
   }
 }
 
-/** First line of the objective, used as the thread title. */
-export function threadTitle(task: Pick<Task, 'objective'>): string {
+/** The user-renamed title when set, otherwise the objective's first line. */
+export function threadTitle(task: Pick<Task, 'objective' | 'title'>): string {
+  const renamed = task.title?.trim();
+  if (renamed) return renamed.length > 120 ? `${renamed.slice(0, 117)}…` : renamed;
   const first = task.objective.split('\n').find((line) => line.trim() !== '')?.trim() ?? 'Untitled task';
   return first.length > 120 ? `${first.slice(0, 117)}…` : first;
 }

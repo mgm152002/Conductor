@@ -110,7 +110,17 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   let prose: { lines: string[]; at: string; id: string } | null = null;
   // Live reply snapshots (ACP/Codex deltas) update one assistant item in
   // place; the final full reply dedupes against it instead of repeating.
-  let replySnapshot: { kind: 'assistant'; id: string; text: string; at: string } | null = null;
+  // Agents speak in segments — prose, then tools, then more prose — so each
+  // segment gets its own item at its chronological position. A segment is
+  // sealed when work intervenes; the next snapshot then opens a new item
+  // instead of rewriting (and relocating) the earlier segment's text.
+  type ReplySnapshot = { kind: 'assistant'; id: string; text: string; at: string };
+  const replySnapshots: ReplySnapshot[] = [];
+  let liveReply: { key: string; snapshot: ReplySnapshot } | null = null;
+  // Work entries (reasoning/tool rows) whose segment ended when other work
+  // intervened. ACP reuses one key across segments, so a sealed entry must
+  // not absorb the next segment's text.
+  const sealedEntries = new Set<WorkEntry>();
   const diagnostics = new Map<string, { lines: string[]; at: string }>();
   // Codex reports an item twice (started, completed); later reports update the same entry.
   const byItemId = new Map<string, WorkEntry>();
@@ -122,12 +132,14 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     items.push({ kind: 'work', id: `work:${workIndex++}:${work[0]!.id}`, entries: work });
     work = [];
   };
-  /** Fold a completed reply into the streamed snapshot when they overlap. */
+  /** Fold a completed reply into a streamed snapshot when they overlap. */
   const absorbReply = (text: string): boolean => {
-    if (replySnapshot === null || text === '') return false;
-    if (text === replySnapshot.text || text.startsWith(replySnapshot.text) || replySnapshot.text.startsWith(text)) {
-      if (text.length > replySnapshot.text.length) replySnapshot.text = text;
-      return true;
+    if (text === '') return false;
+    for (const snapshot of replySnapshots) {
+      if (text === snapshot.text || text.startsWith(snapshot.text) || snapshot.text.startsWith(text)) {
+        if (text.length > snapshot.text.length) snapshot.text = text;
+        return true;
+      }
     }
     return false;
   };
@@ -137,7 +149,15 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     if (text !== '' && !absorbReply(text)) items.push({ kind: 'assistant', id: prose.id, text, at: prose.at });
     prose = null;
   };
-  const addWork = (entry: WorkEntry): void => { flushProse(); work.push(entry); };
+  const addWork = (entry: WorkEntry): void => {
+    flushProse();
+    // Work intervening ends the current prose/reasoning segment: later text
+    // opens a fresh item below this work instead of rewriting an item above.
+    liveReply = null;
+    for (const prior of byKey.values()) if (prior !== entry) sealedEntries.add(prior);
+    for (const prior of byItemId.values()) if (prior !== entry) sealedEntries.add(prior);
+    work.push(entry);
+  };
   const addNotice = (id: string, text: string, at: string): void => {
     flushProse();
     flushWork();
@@ -146,6 +166,7 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
   const addReply = (id: string, text: string, at: string): void => {
     flushProse();
     flushWork();
+    liveReply = null; // a completed reply seals its streamed segment
     if (text.trim() !== '' && !absorbReply(text.trim())) items.push({ kind: 'assistant', id, text: text.trim(), at });
   };
   const addError = (id: string, text: string, at: string): void => {
@@ -170,13 +191,22 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     const detail = str(logPayload['detail']);
     const kind = str(logPayload['kind']);
     if (kind === 'reply' && text !== undefined && text.trim() !== '') {
-      // Streamed reply snapshot: update the one assistant item in place.
+      // Streamed reply snapshot: update the current segment's assistant
+      // item in place. A snapshot that does not continue the live segment
+      // (new item key, work intervened, or the agent restarted its text)
+      // opens a new segment at the current position.
       flushWork();
-      if (replySnapshot === null) {
-        replySnapshot = { kind: 'assistant', id: `reply-live:${event.id}`, text: text.trim(), at: event.createdAt };
-        items.push(replySnapshot);
+      const trimmed = text.trim();
+      const key = str(logPayload['key']) ?? str(logPayload['toolCallId']) ?? 'reply';
+      const continues = liveReply !== null && liveReply.key === key
+        && (trimmed.startsWith(liveReply.snapshot.text) || liveReply.snapshot.text.startsWith(trimmed));
+      if (liveReply !== null && continues) {
+        liveReply.snapshot.text = trimmed;
       } else {
-        replySnapshot.text = text.trim();
+        const snapshot: ReplySnapshot = { kind: 'assistant', id: `reply-live:${event.id}`, text: trimmed, at: event.createdAt };
+        items.push(snapshot);
+        replySnapshots.push(snapshot);
+        liveReply = { key, snapshot };
       }
       return;
     }
@@ -184,7 +214,20 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     const status = str(logPayload['status']);
     const source = str(logPayload['source']);
     const tone = toneForStatus(status);
-    const existing = key !== undefined ? byKey.get(key) : undefined;
+    let existing = key !== undefined ? byKey.get(key) : undefined;
+    // A sealed entry belongs to an earlier segment. Fresh text that does not
+    // continue it (ACP reuses `acp:thought` after resetting its buffer) is a
+    // new segment: start a new row here rather than rewriting the old one.
+    // Completion-only updates (no text) still merge into the sealed entry.
+    if (existing !== undefined && text !== undefined && sealedEntries.has(existing)) {
+      const prior = existing.detail ?? existing.label;
+      const trimmed = text.trim();
+      if (!trimmed.startsWith(prior) && !prior.startsWith(trimmed)) {
+        sealedEntries.delete(existing);
+        byKey.delete(key!);
+        existing = undefined;
+      }
+    }
     // A completion update only carries a key and status; enrich the row
     // that the matching start event already added. The row may live in an
     // earlier group if assistant prose was flushed in between.
@@ -373,23 +416,46 @@ export function recentActivities(items: TimelineItem[], limit = 5): WorkEntry[] 
 export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
   const items: TimelineItem[] = [];
   const activity = message.activity ?? [];
-  if (activity.length > 0) {
-    items.push({
-      kind: 'work',
-      id: `chat-work:${message.id}`,
-      entries: activity.map((entry: ChatActivity): WorkEntry => ({
-        id: entry.id,
-        icon: iconForLogKind(entry.kind),
-        label: entry.label,
-        ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
-        tone: entry.status === 'completed' ? 'success' : entry.status === 'failed' ? 'error' : entry.status === 'running' ? 'running' : 'neutral',
-        at: entry.createdAt,
-        ...(entry.key !== undefined ? { key: entry.key } : {}),
-        ...(entry.source !== undefined ? { source: entry.source } : {}),
-      })),
-    });
+  const toEntry = (entry: ChatActivity): WorkEntry => ({
+    id: entry.id,
+    icon: iconForLogKind(entry.kind),
+    label: entry.label,
+    ...(entry.detail !== undefined ? { detail: entry.detail } : {}),
+    tone: entry.status === 'completed' ? 'success' : entry.status === 'failed' ? 'error' : entry.status === 'running' ? 'running' : 'neutral',
+    at: entry.createdAt,
+    ...(entry.key !== undefined ? { key: entry.key } : {}),
+    ...(entry.source !== undefined ? { source: entry.source } : {}),
+  });
+  const content = message.content;
+  if (activity.some((entry) => entry.contentOffset !== undefined) && content.trim() !== '') {
+    // Interleave: prose up to each activity's offset, then that work, in
+    // the order the agent actually produced them. Consecutive activities
+    // (no prose between) stay in one work group.
+    let cursor = 0;
+    let work: WorkEntry[] = [];
+    let group = 0;
+    const flushWork = (): void => {
+      if (work.length === 0) return;
+      items.push({ kind: 'work', id: `chat-work:${message.id}:${group++}`, entries: work });
+      work = [];
+    };
+    for (const entry of activity) {
+      const offset = Math.min(Math.max(entry.contentOffset ?? cursor, cursor), content.length);
+      const prose = content.slice(cursor, offset).trim();
+      if (prose !== '') {
+        flushWork();
+        items.push({ kind: 'assistant', id: `${message.id}:seg:${items.length}`, text: prose, at: entry.createdAt });
+        cursor = offset;
+      }
+      work.push(toEntry(entry));
+    }
+    flushWork();
+    const tail = content.slice(cursor).trim();
+    if (tail !== '') items.push({ kind: 'assistant', id: message.id, text: tail, at: message.createdAt });
+  } else {
+    if (activity.length > 0) items.push({ kind: 'work', id: `chat-work:${message.id}`, entries: activity.map(toEntry) });
+    if (content.trim() !== '') items.push({ kind: 'assistant', id: message.id, text: content, at: message.createdAt });
   }
-  if (message.content.trim() !== '') items.push({ kind: 'assistant', id: message.id, text: message.content, at: message.createdAt });
   if (message.error !== undefined && message.error.trim() !== '') items.push({ kind: 'error', id: `chat-error:${message.id}`, text: message.error, at: message.createdAt });
   return items;
 }

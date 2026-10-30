@@ -67,6 +67,8 @@ export const LayersIcon = (p: IconProps) => <Icon {...p}><path d="m12 3 9 5-9 5-
 export const MoreIcon = (p: IconProps) => <Icon {...p}><circle cx="5" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="19" cy="12" r="1" fill="currentColor" /></Icon>;
 export const TrashIcon = (p: IconProps) => <Icon {...p}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></Icon>;
 export const LinkOffIcon = (p: IconProps) => <Icon {...p}><path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 0 1 4 8M3 3l18 18" /></Icon>;
+export const PullRequestIcon = (p: IconProps) => <Icon {...p}><circle cx="5" cy="6" r="2.5" /><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="8" r="2.5" /><path d="M5 8.5v7M19 10.5c0 4.5-4.5 3.8-8 5.5" /></Icon>;
+export const ExternalLinkIcon = (p: IconProps) => <Icon {...p}><path d="M14 4h6v6M20 4l-9 9M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></Icon>;
 
 export function Spinner({ size = 14, className }: { size?: number; className?: string }): React.JSX.Element {
   return (

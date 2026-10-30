@@ -67,6 +67,18 @@ export interface Task {
   threadId?: string;
   /** The previous task in the thread this task follows up on. */
   parentTaskId?: string;
+  /**
+   * User-chosen title for the thread, stored on the thread's root task only.
+   * Absent means the title is derived from the root task's objective.
+   */
+  title?: string;
+  /**
+   * The GitHub pull request opened for this thread, stored on the thread's
+   * root task only. Absent means no PR has been filed for the thread.
+   */
+  prNumber?: number;
+  prUrl?: string;
+  prState?: 'open' | 'closed' | 'merged';
   createdAt: string;
   updatedAt: string;
 }

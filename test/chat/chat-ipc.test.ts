@@ -40,6 +40,12 @@ describe('chat IPC boundary', () => {
     await expect.poll(() => events.at(-1)?.payload.messages.at(-1)?.status).toBe('complete');
     expect(await invoke('chat.get', { threadId: sent.value.thread.id })).toEqual({ ok: true, value: events.at(-1)?.payload });
     expect(events.every((e) => e.channel === 'chat.updated')).toBe(true);
+    const renamed = await invoke('chat.rename', { threadId: sent.value.thread.id, title: '  Renamed chat  ' }) as IpcResult<{ title: string }>;
+    expect(renamed).toEqual({ ok: true, value: expect.objectContaining({ title: 'Renamed chat' }) });
+    expect(chat.list()).toEqual([expect.objectContaining({ title: 'Renamed chat' })]);
+    expect(chat.get(sent.value.thread.id).messages[0]?.content).toBe('hi');
+    expect(await invoke('chat.rename', { threadId: sent.value.thread.id, title: ' ' })).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
+    expect(await invoke('chat.rename', { threadId: '00000000-0000-4000-8000-000000000000', title: 'Nope' })).toMatchObject({ ok: false, error: { code: 'handler_error', message: expect.stringMatching(/not found/i) } });
     expect(await invoke('chat.cancel', { threadId: sent.value.thread.id })).toEqual({ ok: true, value: undefined });
     expect(await invoke('chat.delete', { threadId: sent.value.thread.id })).toEqual({ ok: true, value: undefined });
     expect(await invoke('chat.list')).toEqual({ ok: true, value: [] });
@@ -68,10 +74,11 @@ describe('chat IPC boundary', () => {
     await bridge.chat.send({ content: 'hello', agentId: 'codex' });
     await bridge.chat.cancel('thread');
     await bridge.chat.delete('thread');
+    await bridge.chat.rename('thread', 'Renamed');
     expect(invokes).toEqual([
       ['chat.list', undefined], ['chat.get', { threadId: 'thread' }],
       ['chat.send', { content: 'hello', agentId: 'codex' }], ['chat.cancel', { threadId: 'thread' }],
-      ['chat.delete', { threadId: 'thread' }],
+      ['chat.delete', { threadId: 'thread' }], ['chat.rename', { threadId: 'thread', title: 'Renamed' }],
     ]);
     let snapshot: unknown;
     const off = bridge.on('chat.updated', (value) => { snapshot = value; });

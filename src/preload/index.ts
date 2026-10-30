@@ -34,6 +34,7 @@ import type { ArtifactPreview, ChangedFileDiff, TaskDetails, WorkspaceChanges } 
 import type { AgentQuestionAnswers, AgentQuestionRequest, ApprovalRequest, AuditEvent, PermissionProfile } from '@shared/domain';
 import type { CatalogEntryView, InstallOutcome } from '@shared/catalog';
 import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
+import type { GitHubBridge } from '@shared/github-contract';
 
 // The preload bridge exposes exactly one namespaced object, `window.conductor`.
 // It is the only surface the sandboxed renderer can reach: typed `invoke`
@@ -133,6 +134,7 @@ const chat: ChatBridge = {
   send: (input) => invoke('chat.send', input),
   cancel: (threadId) => invoke('chat.cancel', { threadId }),
   delete: (threadId) => invoke('chat.delete', { threadId }),
+  rename: (threadId, title) => invoke('chat.rename', { threadId, title }),
   mem0Health: () => invoke('chat.mem0Health'),
 };
 
@@ -157,7 +159,20 @@ export interface UsageSummaryQuery {
   refreshLimits?: boolean;
 }
 
+const github: GitHubBridge = {
+  status: (workspaceId) => invoke('github.status', { workspaceId }),
+  connect: (input) => invoke('github.connect', input),
+  disconnect: (workspaceId) => invoke('github.disconnect', { workspaceId }),
+  setAutoPr: (input) => invoke('github.setAutoPr', input),
+  setBaseBranch: (input) => invoke('github.setBaseBranch', input),
+  listPrs: (workspaceId) => invoke('github.listPrs', { workspaceId }),
+  refreshPrs: (workspaceId) => invoke('github.refreshPrs', { workspaceId }),
+  createPr: (input) => invoke('github.createPr', input),
+  openPr: (url) => invoke('github.openPr', { url }),
+};
+
 const conductor = {
+  github,
   chat,
   attachment,
   memory, context, workflows, skills, connectors, system, ...integrations,
@@ -204,6 +219,8 @@ const conductor = {
     thread: (threadId:string):Promise<Task[]> => invoke('task.thread',{threadId}),
     /** Delete a thread and everything stored for its messages (not project files). */
     deleteThread: (threadId:string):Promise<ThreadDeletionResult> => invoke('task.deleteThread',{threadId,confirmed:true}),
+    /** Rename a thread; resolves to its root task carrying the new title. */
+    renameThread: (threadId:string,title:string):Promise<Task> => invoke('task.renameThread',{threadId,title}),
     create: (input: {
       workspaceId: string;
       objective: string;

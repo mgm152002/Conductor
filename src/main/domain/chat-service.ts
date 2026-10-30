@@ -31,6 +31,8 @@ interface Run {
   finish(): void;
   cancellation?: Promise<void> | undefined;
   activity: ChatActivity[];
+  /** Length of the reply text assembled so far, for activity offsets. */
+  contentLength: number;
 }
 
 /** The terminal outcome of one agent attempt in the fallback loop. */
@@ -242,7 +244,7 @@ export class ChatService {
     let finish!: () => void;
     const ready = new Promise<void>((resolve) => { started = resolve; });
     const done = new Promise<void>((resolve) => { finish = resolve; });
-    const pending: Run = { adapter, messageId: assistantId, cancelled: false, ready, started, done, finish, activity: [] };
+    const pending: Run = { adapter, messageId: assistantId, cancelled: false, ready, started, done, finish, activity: [], contentLength: 0 };
     this.runs.set(threadId, pending);
     const snapshot = this.get(threadId);
     this.emit(threadId);
@@ -302,6 +304,18 @@ export class ChatService {
       }
     })(); });
     return snapshot;
+  }
+
+  /** Rename a chat thread. The original first message is never touched. */
+  rename(threadId: string, title: string): ChatThread {
+    const clean = title.trim().replace(/\s+/g, ' ');
+    if (clean === '') throw new Error('Chat title cannot be empty');
+    if (clean.length > 120) throw new Error('Chat title is too long');
+    this.get(threadId);
+    this.store.db.prepare('UPDATE chat_threads SET title=? WHERE id=?').run(clean, threadId);
+    const thread = this.get(threadId).thread;
+    this.emit(threadId);
+    return thread;
   }
 
   /** Whether the Mem0 context service is reachable right now. */
@@ -565,6 +579,7 @@ export class ChatService {
   }
 
   private write(threadId: string, run: Run, content: string | undefined, status: ChatMessage['status'], error?: string): void {
+    if (content !== undefined) run.contentLength = content.length;
     this.store.transaction(({ db }) => {
       db.prepare('UPDATE chat_messages SET content=coalesce(?,content),status=?,error=?,activity_json=? WHERE id=?')
         .run(content ?? null, status, error ?? null, JSON.stringify(run.activity), run.messageId);
@@ -582,7 +597,7 @@ export class ChatService {
     } else {
       const label = update.label ?? update.detail;
       if (label === undefined || label.trim() === '') return;
-      run.activity.push({ ...update, id: randomUUID(), label: label.trim(), kind: update.kind ?? 'tool' });
+      run.activity.push({ ...update, contentOffset: run.contentLength, id: randomUUID(), label: label.trim(), kind: update.kind ?? 'tool' });
     }
     this.store.transaction(({ db }) => {
       db.prepare('UPDATE chat_messages SET activity_json=? WHERE id=?').run(JSON.stringify(run.activity), run.messageId);

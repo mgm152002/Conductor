@@ -8,6 +8,8 @@ interface ChatState {
   drafts: Record<string, string>;
   select: (id: string | null) => void;
   remove: (threadId: string) => void;
+  /** Apply a renamed thread to the history list and any loaded conversation. */
+  rename: (thread: ChatThread) => void;
   setDraft: (id: string, content: string) => void;
   setThreads: (threads: ChatThread[]) => void;
   receive: (conversation: ChatConversation) => void;
@@ -24,6 +26,15 @@ export const useChatStore = create<ChatState>((set) => ({
       conversations,
       drafts,
       selectedId: state.selectedId === threadId ? null : state.selectedId,
+    };
+  }); },
+  rename: (thread) => { set((state) => {
+    const conversation = state.conversations[thread.id];
+    return {
+      threads: state.threads.map((item) => (item.id === thread.id ? thread : item)),
+      ...(conversation !== undefined
+        ? { conversations: { ...state.conversations, [thread.id]: { ...conversation, thread } } }
+        : {}),
     };
   }); },
   setDraft: (id, content) => { set((state) => ({ drafts: { ...state.drafts, [id]: content } })); },

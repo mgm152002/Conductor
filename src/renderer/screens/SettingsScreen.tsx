@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ExecutionSettings } from '../components/settings/ExecutionSettings';
 import { IntegrationSettings } from '../components/settings/IntegrationSettings';
 import { AgentModels } from '../components/settings/AgentModels';
+import { GitHubSettings } from '../components/settings/GitHubSettings';
 import { ScreenScaffold } from './ScreenScaffold';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
 import { useThemeStore } from '../stores';
@@ -36,6 +37,9 @@ export function SettingsScreen(): React.JSX.Element {
         </SettingGroup>
         <SettingGroup label="Agent models">
           <AgentModels />
+        </SettingGroup>
+        <SettingGroup label="GitHub">
+          <GitHubSettings />
         </SettingGroup>
         <SettingGroup label="Integrations">
           <IntegrationSettings />

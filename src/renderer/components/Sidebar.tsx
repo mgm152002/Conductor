@@ -14,12 +14,15 @@ import { cn } from '../lib/cn';
 import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import {
-  BrainIcon, ChevronRightIcon, LayersIcon, ListChecksIcon, PlugIcon,
-  PlusIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
+  BrainIcon, ChevronRightIcon, LayersIcon, ListChecksIcon, PencilIcon, PlugIcon,
+  PlusIcon, PullRequestIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
+import { ProjectPullRequestsDialog } from './projects/ProjectPullRequestsDialog';
 import { DeleteChatDialog } from './threads/DeleteChatDialog';
 import { DeleteThreadDialog } from './threads/DeleteThreadDialog';
+import { RenameChatDialog } from './threads/RenameChatDialog';
+import { RenameThreadDialog } from './threads/RenameThreadDialog';
 import { SurfaceTabs } from './SurfaceTabs';
 import { useChatStore } from '../stores/chat-store';
 
@@ -45,14 +48,14 @@ const NAV_LABELS: Partial<Record<NavEntryId, string>> = {
   'connected-apps': 'Connections',
 };
 
-function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { thread: ThreadView; selected: boolean; pendingApproval: boolean; onOpen: () => void; onDelete: () => void }): React.JSX.Element {
+function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDelete }: { thread: ThreadView; selected: boolean; pendingApproval: boolean; onOpen: () => void; onRename: () => void; onDelete: () => void }): React.JSX.Element {
   const task = thread.latest;
   const status = threadStatus(task, pendingApproval);
   const showPill = status.active || task.state === 'FAILED';
   return (
     <li
       className={cn(
-        'group/thread flex items-center rounded-lg pr-1 transition-colors',
+        'group/thread relative flex items-center rounded-lg transition-colors',
         'focus-within:bg-sidebar-row-hover',
         selected ? 'bg-sidebar-row-active text-sidebar-foreground shadow-xs dark:shadow-none' : 'text-sidebar-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
       )}
@@ -62,33 +65,60 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onDelete }: { th
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
         title={thread.root.objective}
-        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-lg py-1.5 pr-1 pl-3 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-lg py-1.5 pr-2 pl-3 text-left transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/thread:pr-14 group-focus-within/thread:pr-14"
       >
         <span className="flex w-full min-w-0 items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{threadTitle(thread.root)}</span>
           {showPill ? (
-            <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium', status.colorClass)}>
+            <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0', status.colorClass)}>
               <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
               {status.label}
             </span>
           ) : (
-            <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums">{relativeTime(task.updatedAt)}</span>
+            <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">{relativeTime(task.updatedAt)}</span>
           )}
         </span>
-        <span className="flex w-full min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground/80">
+        <span className={cn('flex w-full min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground/80', thread.root.prUrl !== undefined && 'pr-7')}>
           <span className="truncate font-mono">{`conductor/${thread.key.slice(0, 8)}`}</span>
           {thread.tasks.length > 1 ? <span className="shrink-0 tabular-nums" title={`${thread.tasks.length} messages`}>· {thread.tasks.length} messages</span> : null}
         </span>
       </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        aria-label={`Delete thread: ${threadTitle(thread.root)}`}
-        title="Delete thread"
-        className="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        <TrashIcon size={12} />
-      </button>
+      {thread.root.prUrl !== undefined ? (
+        <button
+          type="button"
+          onClick={() => { void window.conductor.github.openPr(thread.root.prUrl!).catch(() => undefined); }}
+          aria-label={`Open pull request ${thread.root.prNumber !== undefined ? `#${thread.root.prNumber} ` : ''}for thread: ${threadTitle(thread.root)}`}
+          title={`Pull request${thread.root.prNumber !== undefined ? ` #${thread.root.prNumber}` : ''}${thread.root.prState !== undefined ? ` · ${thread.root.prState}` : ''} — open on GitHub`}
+          className={cn(
+            'absolute right-1 bottom-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring',
+            thread.root.prState === 'merged' ? 'text-violet-500' : thread.root.prState === 'closed' ? 'text-destructive' : 'text-success',
+          )}
+        >
+          <PullRequestIcon size={13} />
+        </button>
+      ) : null}
+      {/* Hover actions overlay the row instead of reserving layout space, so
+          titles/timestamps use the full row width when they are hidden. */}
+      <span className="pointer-events-none absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100">
+        <button
+          type="button"
+          onClick={onRename}
+          aria-label={`Rename thread: ${threadTitle(thread.root)}`}
+          title="Rename thread"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <PencilIcon size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete thread: ${threadTitle(thread.root)}`}
+          title="Delete thread"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-destructive-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <TrashIcon size={12} />
+        </button>
+      </span>
     </li>
   );
 }
@@ -107,7 +137,19 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
   const { openThread, newThread } = useThreadNavigation();
   const [expanded, setExpanded] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [prsOpen, setPrsOpen] = useState(false);
+  const [prCount, setPrCount] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ThreadView | null>(null);
+  const [renamingThread, setRenamingThread] = useState<ThreadView | null>(null);
+  // Locally recorded PR count for the header badge; the dialog syncs the
+  // repository's full list from GitHub when opened.
+  useEffect(() => {
+    let active = true;
+    void window.conductor.github.listPrs(project.id)
+      .then((list) => { if (active) setPrCount(list.filter((pr) => pr.state === 'open').length); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [project.id]);
   const allThreads = useMemo(() => groupThreads(tasks), [tasks]);
   const threads = query === '' ? allThreads : allThreads.filter((t) => threadTitle(t.root).toLowerCase().includes(query));
   if (query !== '' && threads.length === 0) return <></>;
@@ -131,6 +173,16 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
         </button>
         <button
           type="button"
+          onClick={() => { setPrsOpen(true); }}
+          aria-label={`Pull requests for ${project.name}`}
+          title={`Pull requests for ${project.name}`}
+          className="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1 text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <PullRequestIcon size={13} />
+          {prCount > 0 ? <span className="text-3xs font-medium tabular-nums">{prCount}</span> : null}
+        </button>
+        <button
+          type="button"
           onClick={() => { void newThread(project.id); }}
           aria-label={`New thread in ${project.name}`}
           title="New thread"
@@ -149,7 +201,9 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
         </button>
       </div>
       <DeleteProjectDialog project={project} open={deleting} onClose={() => { setDeleting(false); }} />
+      {prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
       {deletingThread !== null ? <DeleteThreadDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
+      {renamingThread !== null ? <RenameThreadDialog key={renamingThread.key} threadId={renamingThread.key} currentTitle={threadTitle(renamingThread.root)} open onClose={() => { setRenamingThread(null); }} /> : null}
       {!collapsed ? (
         threads.length === 0 ? (
           <p className="py-1 pl-7 text-2xs text-sidebar-muted-foreground/70">No threads yet</p>
@@ -162,6 +216,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
                 selected={focusedKey === thread.key}
                 pendingApproval={thread.tasks.some((task) => pendingTaskIds.has(task.id))}
                 onOpen={() => { void openThread(thread.latest); onNavigate?.(); }}
+                onRename={() => { setRenamingThread(thread); }}
                 onDelete={() => { setDeletingThread(thread); }}
               />
             ))}
@@ -185,6 +240,7 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
   const selectedId = useChatStore((state) => state.selectedId);
   const [error, setError] = useState<string | null>(null);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
+  const [renamingThread, setRenamingThread] = useState<ChatThread | null>(null);
   const load = (): void => {
     setError(null);
     void window.conductor.chat.list().then((list) => { useChatStore.getState().setThreads(list); })
@@ -201,21 +257,33 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
   return <>
     <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
     {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
-    {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : <ul className="flex flex-col gap-1">{threads.map((thread) => <li key={thread.id} className={cn('group/chat flex h-8 items-center rounded-md pr-1 transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
-      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+    {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : <ul className="flex flex-col gap-1">{threads.map((thread) => <li key={thread.id} className={cn('group/chat relative flex h-8 items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
+      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       </button>
-      <button
-        type="button"
-        onClick={(event) => { event.stopPropagation(); setDeletingThread(thread); }}
-        aria-label={`Delete chat: ${thread.title}`}
-        title="Delete chat"
-        className="ml-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity group-hover/chat:opacity-100 group-focus-within/chat:opacity-100 hover:bg-sidebar-row-hover hover:text-destructive-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
-      >
-        <TrashIcon size={12} />
-      </button>
+      <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/chat:pointer-events-auto group-hover/chat:opacity-100 group-focus-within/chat:pointer-events-auto group-focus-within/chat:opacity-100">
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setRenamingThread(thread); }}
+          aria-label={`Rename chat: ${thread.title}`}
+          title="Rename chat"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <PencilIcon size={12} />
+        </button>
+        <button
+          type="button"
+          onClick={(event) => { event.stopPropagation(); setDeletingThread(thread); }}
+          aria-label={`Delete chat: ${thread.title}`}
+          title="Delete chat"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-destructive-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <TrashIcon size={12} />
+        </button>
+      </span>
     </li>)}</ul>}
     {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={closeDelete} /> : null}
+    {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
   </>;
 }
 
