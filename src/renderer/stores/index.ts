@@ -11,3 +11,4 @@ export { useThemeStore } from './theme-store';
 export { useCliCatalogStore } from './cli-catalog-store';
 export { useUiStore } from './ui-store';
 export { useComposerStore } from './composer-store';
+export { useThreadTierStore } from './thread-tier-store';

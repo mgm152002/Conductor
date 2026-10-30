@@ -3,19 +3,23 @@ import { NavLink, useLocation } from 'react-router-dom';
 import type { ChatThread } from '@shared/chat-contract';
 import type { Task, Workspace } from '@shared/domain';
 import { NAV_ENTRIES, type NavEntryId } from '../navigation';
-import { useApprovalStore, useTaskStore, useUiStore, useWorkspaceStore } from '../stores';
+import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore, useWorkspaceStore } from '../stores';
 import { isTerminalTask } from '../stores/task-store';
 import { useThreadNavigation } from '../hooks/useThreadNavigation';
 import { pickFocusedTask } from './workspace/useFocusedTask';
-import { isWorkingState, threadStatus, threadTitle } from '../lib/thread-status';
+import { threadStatus, threadTitle } from '../lib/thread-status';
 import { relativeTime } from '../lib/time';
 import { groupThreads, threadKey, type ThreadView } from '../lib/threads';
+import {
+  classifyThreadTier, defaultSnoozeUntil, groupThreadsByTier,
+  type ThreadTierId, type ThreadTierInfo, type ThreadTierSignals,
+} from '../lib/thread-tiers';
 import { cn } from '../lib/cn';
 import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import {
-  BrainIcon, ChevronRightIcon, LayersIcon, ListChecksIcon, PencilIcon, PlugIcon,
-  PlusIcon, PullRequestIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
+  BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, LayersIcon, ListChecksIcon, PencilIcon, PlugIcon,
+  PlusIcon, PullRequestIcon, RotateIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
 import { ProjectPullRequestsDialog } from './projects/ProjectPullRequestsDialog';
@@ -29,8 +33,6 @@ import { useChatStore } from '../stores/chat-store';
 // The left sidebar, laid out like T3 Code: a draggable title-bar strip, a
 // "New thread" action, projects as collapsible groups with their threads
 // (tasks) and live status pills, and the secondary destinations at the bottom.
-
-const THREADS_PER_PROJECT = 8;
 
 const NAV_ICONS: Partial<Record<NavEntryId, (p: { size?: number }) => React.JSX.Element>> = {
   projects: LayersIcon,
@@ -48,10 +50,36 @@ const NAV_LABELS: Partial<Record<NavEntryId, string>> = {
   'connected-apps': 'Connections',
 };
 
-function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDelete }: { thread: ThreadView; selected: boolean; pendingApproval: boolean; onOpen: () => void; onRename: () => void; onDelete: () => void }): React.JSX.Element {
+const ATTENTION_PILL_CLASSES: Record<string, { text: string; dot: string }> = {
+  question: { text: 'text-amber-600 dark:text-amber-300/90', dot: 'bg-amber-500 dark:bg-amber-300/90' },
+  approval: { text: 'text-amber-600 dark:text-amber-300/90', dot: 'bg-amber-500 dark:bg-amber-300/90' },
+  completed: { text: 'text-emerald-600 dark:text-emerald-300/90', dot: 'bg-emerald-500 dark:bg-emerald-300/90' },
+  failed: { text: 'text-red-600 dark:text-red-300/90', dot: 'bg-red-500 dark:bg-red-300/90' },
+  blocked: { text: 'text-orange-600 dark:text-orange-300/90', dot: 'bg-orange-500 dark:bg-orange-300/90' },
+  interrupted: { text: 'text-violet-600 dark:text-violet-300/90', dot: 'bg-violet-500 dark:bg-violet-300/90' },
+  'snooze-woke': { text: 'text-violet-600 dark:text-violet-300/90', dot: 'bg-violet-500 dark:bg-violet-300/90' },
+};
+
+function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, onOpen, onRename, onDelete, onMarkSettled, onSnooze, onClearTier }: {
+  thread: ThreadView;
+  selected: boolean;
+  pendingApproval: boolean;
+  tierInfo: ThreadTierInfo;
+  snoozedUntil?: string | undefined;
+  onOpen: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onMarkSettled: () => void;
+  onSnooze: () => void;
+  onClearTier: () => void;
+}): React.JSX.Element {
   const task = thread.latest;
   const status = threadStatus(task, pendingApproval);
-  const showPill = status.active || task.state === 'FAILED';
+  const title = threadTitle(thread.root);
+  const attentionPill = tierInfo.tier === 'needs-attention' && tierInfo.attentionReason !== undefined
+    ? ATTENTION_PILL_CLASSES[tierInfo.attentionReason]
+    : undefined;
+  const showPill = attentionPill !== undefined || tierInfo.tier === 'snoozed' || status.active || task.state === 'FAILED';
   return (
     <li
       className={cn(
@@ -65,14 +93,14 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDele
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
         title={thread.root.objective}
-        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-lg py-1.5 pr-2 pl-3 text-left transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/thread:pr-14 group-focus-within/thread:pr-14"
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-lg py-1.5 pr-2 pl-3 text-left transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/thread:pr-28 group-focus-within/thread:pr-28"
       >
         <span className="flex w-full min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{threadTitle(thread.root)}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{title}</span>
           {showPill ? (
-            <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0', status.colorClass)}>
-              <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
-              {status.label}
+            <span className={cn('flex shrink-0 items-center gap-1 text-3xs font-medium transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0', attentionPill?.text ?? status.colorClass)}>
+              <span className={cn('size-1.5 rounded-full', attentionPill?.dot ?? status.dotClass, status.pulse && tierInfo.tier !== 'snoozed' && 'animate-status-pulse')} />
+              {tierInfo.tier === 'needs-attention' ? tierInfo.attentionLabel : tierInfo.tier === 'snoozed' ? 'Snoozed' : status.label}
             </span>
           ) : (
             <span className="shrink-0 text-3xs text-sidebar-muted-foreground/70 tabular-nums transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">{relativeTime(task.updatedAt)}</span>
@@ -81,6 +109,7 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDele
         <span className={cn('flex w-full min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground/80', thread.root.prUrl !== undefined && 'pr-7')}>
           <span className="truncate font-mono">{`conductor/${thread.key.slice(0, 8)}`}</span>
           {thread.tasks.length > 1 ? <span className="shrink-0 tabular-nums" title={`${thread.tasks.length} messages`}>· {thread.tasks.length} messages</span> : null}
+          {tierInfo.tier === 'snoozed' && snoozedUntil !== undefined ? <span className="shrink-0 truncate">· wakes {new Date(snoozedUntil).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span> : null}
         </span>
       </button>
       {thread.root.prUrl !== undefined ? (
@@ -100,10 +129,42 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDele
       {/* Hover actions overlay the row instead of reserving layout space, so
           titles/timestamps use the full row width when they are hidden. */}
       <span className="pointer-events-none absolute top-1 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100">
+        {tierInfo.tier !== 'settled' ? (
+          <button
+            type="button"
+            onClick={onMarkSettled}
+            aria-label={`Mark thread as settled: ${title}`}
+            title="Mark as settled"
+            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <CheckIcon size={12} />
+          </button>
+        ) : null}
+        {tierInfo.tier === 'snoozed' || tierInfo.tier === 'settled' ? (
+          <button
+            type="button"
+            onClick={onClearTier}
+            aria-label={tierInfo.tier === 'snoozed' ? `Wake thread: ${title}` : `Move thread back to Needs attention: ${title}`}
+            title={tierInfo.tier === 'snoozed' ? 'Wake now' : 'Move back to Needs attention'}
+            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <RotateIcon size={12} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onSnooze}
+            aria-label={`Snooze thread until tomorrow: ${title}`}
+            title="Snooze until tomorrow 9:00 AM"
+            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <ClockIcon size={12} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onRename}
-          aria-label={`Rename thread: ${threadTitle(thread.root)}`}
+          aria-label={`Rename thread: ${title}`}
           title="Rename thread"
           className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
         >
@@ -123,19 +184,25 @@ function ThreadRow({ thread, selected, pendingApproval, onOpen, onRename, onDele
   );
 }
 
-function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, query = '', onNavigate }: {
+function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pendingQuestionTaskIds, query = '', onNavigate }: {
   project: Workspace;
   active: boolean;
   tasks: Task[];
   focusedKey: string | null;
   pendingTaskIds: ReadonlySet<string>;
+  pendingQuestionTaskIds: ReadonlySet<string>;
   query?: string;
   onNavigate?: (() => void) | undefined;
 }): React.JSX.Element {
   const collapsed = useUiStore((s) => s.collapsedProjects[project.id] === true) && query === '';
   const toggle = useUiStore((s) => s.toggleProject);
+  const tierPrefs = useThreadTierStore((s) => s.prefs);
   const { openThread, newThread } = useThreadNavigation();
-  const [expanded, setExpanded] = useState(false);
+  // Working starts open; Settled and Snoozed start hidden behind their
+  // collapsible headers. Needs attention has no header toggle — it is first
+  // and always shown. Searching or opening a thread forces its tier open.
+  const [collapsedTiers, setCollapsedTiers] = useState<Partial<Record<ThreadTierId, boolean>>>({ settled: true, snoozed: true });
+  const [now, setNow] = useState(() => Date.now());
   const [deleting, setDeleting] = useState(false);
   const [prsOpen, setPrsOpen] = useState(false);
   const [prCount, setPrCount] = useState(0);
@@ -150,11 +217,27 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
       .catch(() => undefined);
     return () => { active = false; };
   }, [project.id]);
+  // Re-evaluate tiers once a minute so an expiring snooze wakes up on its
+  // own instead of waiting for the next task event.
+  useEffect(() => {
+    const timer = window.setInterval(() => { setNow(Date.now()); }, 60_000);
+    return () => { window.clearInterval(timer); };
+  }, []);
   const allThreads = useMemo(() => groupThreads(tasks), [tasks]);
   const threads = query === '' ? allThreads : allThreads.filter((t) => threadTitle(t.root).toLowerCase().includes(query));
+  const signalsFor = (thread: ThreadView): ThreadTierSignals => ({
+    hasPendingApproval: thread.tasks.some((task) => pendingTaskIds.has(task.id)),
+    hasPendingQuestion: thread.tasks.some((task) => pendingQuestionTaskIds.has(task.id)),
+  });
+  const tierGroups = useMemo(
+    () => groupThreadsByTier(threads, tierPrefs, signalsFor, now),
+    // signalsFor is derived from the two id sets below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [threads, tierPrefs, pendingTaskIds, pendingQuestionTaskIds, now],
+  );
   if (query !== '' && threads.length === 0) return <></>;
-  const visible = expanded ? threads : threads.slice(0, THREADS_PER_PROJECT);
-  const working = threads.filter((thread) => isWorkingState(thread.latest.state)).length;
+  const working = tierGroups.find((group) => group.id === 'working')?.threads.length ?? 0;
+  const needsAttention = tierGroups.find((group) => group.id === 'needs-attention')?.threads.length ?? 0;
 
   return (
     <li className="flex flex-col">
@@ -169,7 +252,8 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
           <ChevronRightIcon size={12} className={cn('shrink-0 text-sidebar-muted-foreground transition-transform duration-150', !collapsed && 'rotate-90')} />
           <span aria-hidden="true" className={cn('flex size-5 shrink-0 items-center justify-center rounded-md text-3xs font-bold tracking-wide', active ? 'bg-primary/20 text-primary' : 'bg-sidebar-row-active text-sidebar-muted-foreground')}>{project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}</span>
           <span className={cn('min-w-0 flex-1 truncate font-medium', active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/85')}>{project.name}</span>
-          {working > 0 ? <span className="shrink-0 rounded-full bg-sky-500/12 px-1.5 text-3xs font-medium text-sky-600 tabular-nums dark:text-sky-300">{working}</span> : null}
+          {needsAttention > 0 ? <span title={`${needsAttention} need${needsAttention === 1 ? 's' : ''} attention`} className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-3xs font-medium text-amber-600 tabular-nums dark:text-amber-300">{needsAttention}</span> : null}
+          {working > 0 ? <span title={`${working} working`} className="shrink-0 rounded-full bg-sky-500/12 px-1.5 text-3xs font-medium text-sky-600 tabular-nums dark:text-sky-300">{working}</span> : null}
         </button>
         <button
           type="button"
@@ -208,26 +292,66 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, quer
         threads.length === 0 ? (
           <p className="py-1 pl-7 text-2xs text-sidebar-muted-foreground/70">No threads yet</p>
         ) : (
-          <ul className="flex flex-col gap-px pb-1">
-            {visible.map((thread) => (
-              <ThreadRow
-                key={thread.key}
-                thread={thread}
-                selected={focusedKey === thread.key}
-                pendingApproval={thread.tasks.some((task) => pendingTaskIds.has(task.id))}
-                onOpen={() => { void openThread(thread.latest); onNavigate?.(); }}
-                onRename={() => { setRenamingThread(thread); }}
-                onDelete={() => { setDeletingThread(thread); }}
-              />
-            ))}
-            {threads.length > THREADS_PER_PROJECT ? (
-              <li>
-                <button type="button" onClick={() => { setExpanded((v) => !v); }} className="h-6 w-full cursor-pointer rounded-md pl-7 text-left text-2xs text-sidebar-muted-foreground hover:text-sidebar-foreground">
-                  {expanded ? 'Show less' : `Show ${threads.length - THREADS_PER_PROJECT} more`}
-                </button>
-              </li>
-            ) : null}
-          </ul>
+          <div className="flex flex-col pb-1">
+            {tierGroups.map((group) => {
+              const isAttention = group.id === 'needs-attention';
+              const containsFocused = focusedKey !== null && group.threads.some((thread) => thread.key === focusedKey);
+              const tierCollapsed = !isAttention && query === '' && !containsFocused && collapsedTiers[group.id] === true;
+              return (
+                <section key={group.id} aria-label={`${group.label} threads in ${project.name}`} className="flex flex-col">
+                  {isAttention ? (
+                    <h3 className="flex h-6 items-center gap-1.5 pr-1 pl-7 text-2xs font-medium tracking-wide text-amber-600 uppercase dark:text-amber-300/90">
+                      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90" />
+                      <span className="flex-1">{group.label}</span>
+                      <span className="tabular-nums">{group.threads.length}</span>
+                    </h3>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setCollapsedTiers((current) => ({ ...current, [group.id]: !(current[group.id] ?? group.id !== 'working') })); }}
+                      aria-expanded={!tierCollapsed}
+                      aria-label={`${group.label} threads in ${project.name}`}
+                      className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-6 text-left text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    >
+                      <ChevronRightIcon size={11} className={cn('shrink-0 transition-transform duration-150', !tierCollapsed && 'rotate-90')} />
+                      <span className="flex-1">{group.label}</span>
+                      <span className="tabular-nums">{group.threads.length}</span>
+                    </button>
+                  )}
+                  {!tierCollapsed ? (
+                    <ul className="flex flex-col gap-px">
+                      {group.threads.map((thread) => {
+                        const tierInfo = classifyThreadTier(thread, tierPrefs[thread.key], signalsFor(thread), now);
+                        const pref = tierPrefs[thread.key];
+                        return (
+                          <ThreadRow
+                            key={thread.key}
+                            thread={thread}
+                            selected={focusedKey === thread.key}
+                            pendingApproval={pendingTaskIds.has(thread.latest.id) || thread.tasks.some((task) => pendingTaskIds.has(task.id))}
+                            tierInfo={tierInfo}
+                            snoozedUntil={pref?.mode === 'snoozed' ? pref.snoozedUntil : undefined}
+                            onOpen={() => {
+                              // Opening a woken snooze acknowledges it; it then
+                              // falls back to the tier its state dictates.
+                              if (tierInfo.attentionReason === 'snooze-woke') useThreadTierStore.getState().clear(thread.key);
+                              void openThread(thread.latest);
+                              onNavigate?.();
+                            }}
+                            onRename={() => { setRenamingThread(thread); }}
+                            onDelete={() => { setDeletingThread(thread); }}
+                            onMarkSettled={() => { useThreadTierStore.getState().markSettled(thread.key, thread.latest.updatedAt); }}
+                            onSnooze={() => { useThreadTierStore.getState().snooze(thread.key, thread.latest.updatedAt, defaultSnoozeUntil()); }}
+                            onClearTier={() => { useThreadTierStore.getState().clear(thread.key); }}
+                          />
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
         )
       ) : null}
     </li>
@@ -293,6 +417,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const tasks = useTaskStore((s) => s.tasks);
   const focusedTaskId = useTaskStore((s) => s.focusedTaskId);
   const pending = useApprovalStore((s) => s.pending);
+  const pendingQuestions = useQuestionStore((s) => s.pending);
   const draft = useUiStore((s) => s.draft);
   const setAddProjectOpen = useUiStore((s) => s.setAddProjectOpen);
   const { newThread } = useThreadNavigation();
@@ -325,6 +450,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   }, [tasks]);
 
   const pendingTaskIds = useMemo(() => new Set(pending.map((request) => request.taskId)), [pending]);
+  const pendingQuestionTaskIds = useMemo(() => new Set(pendingQuestions.map((request) => request.taskId)), [pendingQuestions]);
   const activeCount = Object.values(tasks).filter((task) => !isTerminalTask(task)).length;
   // The focused thread is only highlighted while it is what the chat shows.
   const focusedTask = pickFocusedTask(tasks, focusedTaskId, activeWorkspaceId);
@@ -396,6 +522,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
                 tasks={byProject.get(project.id) ?? []}
                 focusedKey={focusedKey}
                 pendingTaskIds={pendingTaskIds}
+                pendingQuestionTaskIds={pendingQuestionTaskIds}
                 query={query}
                 onNavigate={onNavigate}
               />

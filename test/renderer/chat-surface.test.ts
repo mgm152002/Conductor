@@ -21,6 +21,24 @@ vi.mock('../../src/renderer/stores/workspace-store', async (importOriginal) => {
   return { ...actual, useWorkspaceStore: renderStore };
 });
 
+vi.mock('../../src/renderer/stores/question-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/stores/question-store')>();
+  const renderStore = Object.assign(
+    (<T,>(selector: (state: ReturnType<typeof actual.useQuestionStore.getState>) => T): T => selector(actual.useQuestionStore.getState())),
+    actual.useQuestionStore,
+  ) as typeof actual.useQuestionStore;
+  return { ...actual, useQuestionStore: renderStore };
+});
+
+vi.mock('../../src/renderer/stores/thread-tier-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/stores/thread-tier-store')>();
+  const renderStore = Object.assign(
+    (<T,>(selector: (state: ReturnType<typeof actual.useThreadTierStore.getState>) => T): T => selector(actual.useThreadTierStore.getState())),
+    actual.useThreadTierStore,
+  ) as typeof actual.useThreadTierStore;
+  return { ...actual, useThreadTierStore: renderStore };
+});
+
 vi.mock('../../src/renderer/stores/task-store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/stores/task-store')>();
   const renderStore = Object.assign(
@@ -33,7 +51,10 @@ vi.mock('../../src/renderer/stores/task-store', async (importOriginal) => {
 import { CasualChat } from '../../src/renderer/components/chat/CasualChat';
 import { Sidebar } from '../../src/renderer/components/Sidebar';
 import { useChatStore } from '../../src/renderer/stores/chat-store';
+import { useApprovalStore } from '../../src/renderer/stores/approval-store';
+import { useQuestionStore } from '../../src/renderer/stores/question-store';
 import { useTaskStore } from '../../src/renderer/stores/task-store';
+import { useThreadTierStore } from '../../src/renderer/stores/thread-tier-store';
 import { useWorkspaceStore } from '../../src/renderer/stores/workspace-store';
 import type { ChatConversation } from '../../src/shared/chat-contract';
 
@@ -46,6 +67,9 @@ beforeEach(() => {
   useChatStore.setState({ threads: [], conversations: {}, selectedId: null, drafts: {} });
   useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
   useTaskStore.setState({ tasks: {}, focusedTaskId: null, detailsRevision: {} });
+  useApprovalStore.setState({ pending: [] });
+  useQuestionStore.setState({ pending: [] });
+  useThreadTierStore.setState({ prefs: {} });
 });
 
 it('offers simple casual Chat without requiring a project or exposing task controls', () => {
@@ -109,6 +133,63 @@ it('shows the renamed Work thread title with a rename action in the sidebar', ()
   expect(html).toContain('aria-label="Rename thread: Renamed thread"');
   expect(html).toContain('aria-label="Pull requests for Project"');
   expect(html).not.toContain('Original objective<');
+});
+
+it('groups Work threads into tiers with Needs attention first and settled threads behind a collapsible list', () => {
+  const project = { id: 'project-1', name: 'Project', rootPath: '/project', createdAt: '2026-10-25', updatedAt: '2026-10-25' };
+  useWorkspaceStore.setState({ workspaces: [project], activeWorkspaceId: project.id });
+  const base = { workspaceId: project.id, acceptanceCriteria: [], contextRefs: [], createdAt: '2026-10-25', updatedAt: '2026-10-25' };
+  useTaskStore.setState({
+    tasks: {
+      'task-done': { ...base, id: 'task-done', objective: 'Finished thread', state: 'COMPLETED' },
+      'task-live': { ...base, id: 'task-live', objective: 'Live thread', state: 'RUNNING' },
+      'task-old': { ...base, id: 'task-old', objective: 'Old finished thread', state: 'COMPLETED' },
+    },
+    focusedTaskId: 'task-done',
+  });
+  useThreadTierStore.getState().markSettled('task-old', '2026-10-25');
+
+  const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/work'] }, createElement(Sidebar)));
+
+  // Needs attention pops up first, before Working.
+  expect(html.indexOf('Needs attention')).toBeGreaterThan(-1);
+  expect(html.indexOf('Needs attention')).toBeLessThan(html.indexOf('Working'));
+  expect(html).toContain('Finished thread');
+  expect(html).toContain('Completed');
+  expect(html).toContain('Live thread');
+  // A thread can be marked settled or snoozed from its row.
+  expect(html).toContain('aria-label="Mark thread as settled: Finished thread"');
+  expect(html).toContain('aria-label="Snooze thread until tomorrow: Finished thread"');
+  // Settled threads are hidden behind their collapsible list.
+  expect(html).toContain('aria-label="Settled threads in Project"');
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).not.toContain('Old finished thread');
+});
+
+it('surfaces a thread with a question requiring an answer in Needs attention', () => {
+  const project = { id: 'project-1', name: 'Project', rootPath: '/project', createdAt: '2026-10-25', updatedAt: '2026-10-25' };
+  useWorkspaceStore.setState({ workspaces: [project], activeWorkspaceId: project.id });
+  useTaskStore.setState({
+    tasks: {
+      'task-1': {
+        id: 'task-1', workspaceId: project.id, objective: 'Question thread',
+        acceptanceCriteria: [], state: 'RUNNING', contextRefs: [], createdAt: '2026-10-25', updatedAt: '2026-10-25',
+      },
+    },
+    focusedTaskId: null,
+  });
+  useQuestionStore.setState({
+    pending: [{
+      id: 'question-1', taskId: 'task-1', agent: 'codex', status: 'pending', createdAt: '2026-10-25',
+      questions: [{ id: 'q1', question: 'Which option?' }],
+    }],
+  });
+
+  const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/work'] }, createElement(Sidebar)));
+
+  expect(html).toContain('Needs attention');
+  expect(html).toContain('Needs answer');
+  expect(html).toContain('Question thread');
 });
 
 it('lists every project in the GitHub settings, not just the active one', async () => {
