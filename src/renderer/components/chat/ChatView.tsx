@@ -239,11 +239,11 @@ function DraftHero(): React.JSX.Element {
         <AgentSetupNotice />
         <Mem0OfflineNotice />
         <Composer task={null} autoFocus variant="hero" />
-        <p className="mt-3 text-center text-2xs text-muted-foreground/80">
-          {planMode
-            ? 'Plan mode: the planner writes requirements and a task list to .conductor/plans, then each task runs on its agent. Tasks that don’t depend on each other run in parallel.'
-            : 'Conductor routes the task to a connected agent CLI, attaches relevant project context, and verifies the result against your checks.'}
-        </p>
+        {planMode ? (
+          <p className="mt-3 text-center text-2xs text-muted-foreground/80">
+            Plan mode: the planner writes requirements and a task list to .conductor/plans, then each task runs on its agent. Tasks that don’t depend on each other run in parallel.
+          </p>
+        ) : null}
       </div>
     </div>
   );
