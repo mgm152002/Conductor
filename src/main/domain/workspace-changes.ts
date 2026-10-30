@@ -138,9 +138,74 @@ function parseNumstat(stdout: string, prefix: string): Map<string, { additions?:
   return counts;
 }
 
+export interface BranchBase {
+  /** Merge-base commit of HEAD and the base branch. */
+  ref: string;
+  /** Display name of the base branch, e.g. `main` or `origin/main`. */
+  name: string;
+}
+
 /**
- * Uncommitted files for a workspace, including staged, unstaged, untracked and
- * renamed paths. A folder outside a Git work tree is an empty, non-error view.
+ * The commit this branch forked from, so committed branch work stays visible
+ * after it is committed/pushed (e.g. once a PR is raised and the worktree is
+ * clean against HEAD). Tries origin's default branch first, then common base
+ * branch names; the current branch itself is never its own base. Returns null
+ * when HEAD has no commits ahead of any candidate.
+ */
+export async function branchBaseRef(root: string): Promise<BranchBase | null> {
+  const head = await git(root, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (head.code !== 0) return null;
+  const headSha = head.stdout.trim();
+  const current = (await git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+  const candidates: string[] = [];
+  const originHead = await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (originHead.code === 0 && originHead.stdout.trim() !== '') candidates.push(originHead.stdout.trim());
+  candidates.push('origin/main', 'origin/master', 'main', 'master');
+  for (const candidate of new Set(candidates)) {
+    if (candidate === current || candidate === `origin/${current}`) continue;
+    const exists = await git(root, ['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`]);
+    if (exists.code !== 0) continue;
+    const mergeBase = await git(root, ['merge-base', 'HEAD', candidate]);
+    if (mergeBase.code !== 0) continue;
+    const base = mergeBase.stdout.trim();
+    if (base === '' || base === headSha) continue; // nothing committed ahead of the base
+    return { ref: base, name: candidate.replace(/^origin\//, '') };
+  }
+  return null;
+}
+
+/** Parse `git diff --name-status -z <base> HEAD` into workspace-relative entries. */
+function parseNameStatus(stdout: string, prefix: string): StatusEntry[] {
+  const records = stdout.split('\0').filter((record) => record !== '');
+  const entries: StatusEntry[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const code = records[index]!;
+    const repositoryPath = records[++index];
+    if (repositoryPath === undefined) break;
+    let repositoryPrevious: string | undefined;
+    if (code.startsWith('R') || code.startsWith('C')) {
+      repositoryPrevious = repositoryPath;
+      const renamed = records[++index];
+      if (renamed === undefined) break;
+      const path = workspacePath(renamed, prefix);
+      if (path === null || path === '') continue;
+      const previousPath = workspacePath(repositoryPrevious, prefix) ?? repositoryPrevious;
+      entries.push({ path, status: 'renamed', previousPath });
+      continue;
+    }
+    const path = workspacePath(repositoryPath, prefix);
+    if (path === null || path === '') continue;
+    const status: ChangedFileStatus = code.startsWith('A') ? 'added' : code.startsWith('D') ? 'deleted' : 'modified';
+    entries.push({ path, status });
+  }
+  return entries;
+}
+
+/**
+ * Files differing from HEAD (staged, unstaged, untracked, renamed) plus, when
+ * this branch has commits ahead of its base branch, the committed branch
+ * changes — so diffs remain visible after a PR is raised and the agent's work
+ * is committed. A folder outside a Git work tree is an empty, non-error view.
  */
 export async function listWorkspaceChanges(root: string): Promise<WorkspaceChanges> {
   const prefix = await repositoryPrefix(root);
@@ -172,8 +237,28 @@ export async function listWorkspaceChanges(root: string): Promise<WorkspaceChang
     }
   }
 
-  const files: ChangedFile[] = parseStatus(status.stdout, prefix).map((entry) => {
-    const value = counts.get(entry.path);
+  // Committed branch changes (e.g. after "File PR" committed the worktree):
+  // diff the merge-base against the working tree so those files stay listed
+  // with their full branch counts, merged under any uncommitted entries.
+  const base = head.code === 0 ? await branchBaseRef(root) : null;
+  let totalCounts = counts;
+  const byPath = new Map<string, StatusEntry>();
+  for (const entry of parseStatus(status.stdout, prefix)) byPath.set(entry.path, entry);
+  if (base !== null) {
+    const [nameStatus, baseNumstat] = await Promise.all([
+      git(root, ['diff', '--name-status', '-z', '--no-renames', base.ref, 'HEAD', '--']),
+      git(root, ['diff', '--numstat', '-z', '--no-renames', base.ref, '--']),
+    ]);
+    if (nameStatus.code === 0) {
+      for (const entry of parseNameStatus(nameStatus.stdout, prefix)) {
+        if (!byPath.has(entry.path)) byPath.set(entry.path, entry);
+      }
+    }
+    if (baseNumstat.code === 0) totalCounts = parseNumstat(baseNumstat.stdout, prefix);
+  }
+
+  const files: ChangedFile[] = [...byPath.values()].map((entry) => {
+    const value = totalCounts.get(entry.path) ?? counts.get(entry.path);
     return {
       ...entry,
       ...(value?.additions !== undefined ? { additions: value.additions } : {}),
@@ -181,7 +266,7 @@ export async function listWorkspaceChanges(root: string): Promise<WorkspaceChang
     };
   });
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { files, isRepository: true };
+  return { files, isRepository: true, ...(base !== null ? { baseBranch: base.name } : {}) };
 }
 
 /** Resolve the request path inside the workspace and reject traversal/symlinks. */
@@ -226,7 +311,11 @@ export async function readWorkspaceFileDiff(root: string, path: string): Promise
     if (diff.code > 1) throw new Error(diff.stderr.trim() || 'Could not read the file diff');
     patch = diff.stdout;
   } else if (await hasHead(root)) {
-    const diff = await git(root, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--relative', '--unified=3', 'HEAD', '--', pathRelative]);
+    // Diff from the branch's fork point when it has committed work ahead of
+    // its base, so a file that was committed for a PR still shows its diff
+    // even though it is clean against HEAD.
+    const base = await branchBaseRef(root);
+    const diff = await git(root, ['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--relative', '--unified=3', base?.ref ?? 'HEAD', '--', pathRelative]);
     if (diff.code !== 0) throw new Error(diff.stderr.trim() || 'Could not read the file diff');
     patch = diff.stdout;
   } else {

@@ -83,4 +83,10 @@ export interface WorkspaceChanges {
   worktree?: boolean;
   /** The thread worktree's branch, e.g. `conductor/<thread>`. */
   branch?: string;
+  /**
+   * Base ref the branch is compared against (e.g. `main`) when committed
+   * branch changes are included — after a PR is raised the worktree is clean
+   * against HEAD, but its commits still differ from this base.
+   */
+  baseBranch?: string;
 }

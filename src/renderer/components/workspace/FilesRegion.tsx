@@ -153,7 +153,9 @@ export function FilesRegion({ task, details }: { task: Task | null; details: Tas
   const files = changes?.files ?? [];
   const isRepository = changes?.isRepository !== false;
   const emptyLabel = isRepository
-    ? 'No uncommitted changes in this project.'
+    ? changes?.baseBranch !== undefined
+      ? `No changes on this branch compared with ${changes.baseBranch}.`
+      : 'No uncommitted changes in this project.'
     : 'This project is not a Git repository, so changed files can’t be listed.';
 
   return (
@@ -168,7 +170,7 @@ export function FilesRegion({ task, details }: { task: Task | null; details: Tas
         bare
         title="Changed files"
         count={files.length}
-        {...(changes !== null ? { subtitle: isRepository ? `${files.reduce((sum, f) => sum + (f.additions ?? 0), 0) > 0 || files.reduce((sum, f) => sum + (f.deletions ?? 0), 0) > 0 ? `+${files.reduce((sum, f) => sum + (f.additions ?? 0), 0)} −${files.reduce((sum, f) => sum + (f.deletions ?? 0), 0)}` : `${files.length} uncommitted`}` : 'Not a Git repository' } : {})}
+        {...(changes !== null ? { subtitle: isRepository ? `${files.reduce((sum, f) => sum + (f.additions ?? 0), 0) > 0 || files.reduce((sum, f) => sum + (f.deletions ?? 0), 0) > 0 ? `+${files.reduce((sum, f) => sum + (f.additions ?? 0), 0)} −${files.reduce((sum, f) => sum + (f.deletions ?? 0), 0)}` : `${files.length} changed`}${changes.baseBranch !== undefined ? ` vs ${changes.baseBranch}` : ''}` : 'Not a Git repository' } : {})}
         action={(
           <Button size="icon-sm" variant="ghost" aria-label="Refresh changed files" title="Refresh changed files" onClick={() => { refresh(); setNonce((value) => value + 1); }}>
             <RotateIcon size={12} />
