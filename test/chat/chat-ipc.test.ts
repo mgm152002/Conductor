@@ -46,6 +46,15 @@ describe('chat IPC boundary', () => {
     expect(chat.get(sent.value.thread.id).messages[0]?.content).toBe('hi');
     expect(await invoke('chat.rename', { threadId: sent.value.thread.id, title: ' ' })).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
     expect(await invoke('chat.rename', { threadId: '00000000-0000-4000-8000-000000000000', title: 'Nope' })).toMatchObject({ ok: false, error: { code: 'handler_error', message: expect.stringMatching(/not found/i) } });
+    const space = await invoke('chat.createSpace', { name: ' Trip ' }) as IpcResult<{ id: string; name: string; threadCount: number }>;
+    expect(space).toEqual({ ok: true, value: expect.objectContaining({ name: 'Trip', threadCount: 0 }) });
+    if (!space.ok) throw new Error('space failed');
+    expect(await invoke('chat.createSpace', { name: ' ' })).toMatchObject({ ok: false, error: { code: 'validation_failed' } });
+    expect(await invoke('chat.setThreadSpace', { threadId: sent.value.thread.id, spaceId: space.value.id })).toEqual({ ok: true, value: expect.objectContaining({ spaceId: space.value.id }) });
+    expect(await invoke('chat.listSpaces')).toEqual({ ok: true, value: [expect.objectContaining({ id: space.value.id, threadCount: 1 })] });
+    expect(await invoke('chat.deleteSpace', { spaceId: space.value.id })).toEqual({ ok: true, value: undefined });
+    expect(chat.get(sent.value.thread.id).thread.spaceId).toBeNull();
+    expect(await invoke('chat.listSpaces')).toEqual({ ok: true, value: [] });
     expect(await invoke('chat.cancel', { threadId: sent.value.thread.id })).toEqual({ ok: true, value: undefined });
     expect(await invoke('chat.delete', { threadId: sent.value.thread.id })).toEqual({ ok: true, value: undefined });
     expect(await invoke('chat.list')).toEqual({ ok: true, value: [] });
@@ -75,10 +84,20 @@ describe('chat IPC boundary', () => {
     await bridge.chat.cancel('thread');
     await bridge.chat.delete('thread');
     await bridge.chat.rename('thread', 'Renamed');
+    await bridge.chat.listSpaces();
+    await bridge.chat.createSpace('Trip');
+    await bridge.chat.renameSpace('space', 'Journey');
+    await bridge.chat.deleteSpace('space');
+    await bridge.chat.setThreadSpace('thread', 'space');
+    await bridge.chat.setThreadSpace('thread', null);
     expect(invokes).toEqual([
       ['chat.list', undefined], ['chat.get', { threadId: 'thread' }],
       ['chat.send', { content: 'hello', agentId: 'codex' }], ['chat.cancel', { threadId: 'thread' }],
       ['chat.delete', { threadId: 'thread' }], ['chat.rename', { threadId: 'thread', title: 'Renamed' }],
+      ['chat.listSpaces', undefined], ['chat.createSpace', { name: 'Trip' }],
+      ['chat.renameSpace', { spaceId: 'space', name: 'Journey' }], ['chat.deleteSpace', { spaceId: 'space' }],
+      ['chat.setThreadSpace', { threadId: 'thread', spaceId: 'space' }],
+      ['chat.setThreadSpace', { threadId: 'thread', spaceId: null }],
     ]);
     let snapshot: unknown;
     const off = bridge.on('chat.updated', (value) => { snapshot = value; });

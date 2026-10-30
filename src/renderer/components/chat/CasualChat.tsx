@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import type { RunChoice } from '@shared/agent-models';
-import type { ChatThread } from '@shared/chat-contract';
+import type { ChatSpace, ChatThread } from '@shared/chat-contract';
 import { useChatStore } from '../../stores/chat-store';
 import { useComposerStore } from '../../stores/composer-store';
 import { useAgents } from '../../hooks/useAgents';
@@ -12,6 +12,7 @@ import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PendingQuestionPanel } from './PendingQuestionPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { RenameChatDialog } from '../threads/RenameChatDialog';
+import { SpaceNameDialog } from '../threads/SpaceDialogs';
 import { ArrowUpIcon, PencilIcon, StopIcon, TrashIcon } from '../ui/icons';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
@@ -38,6 +39,14 @@ export function CasualChat(): React.JSX.Element {
   const [revision, setRevision] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ChatThread | null>(null);
   const [renamingThread, setRenamingThread] = useState<ChatThread | null>(null);
+  const spaces = useChatStore((state) => state.spaces);
+  const threads = useChatStore((state) => state.threads);
+  /** Space chosen for the next new chat; existing chats use their stored space. */
+  const [draftSpaceId, setDraftSpaceId] = useState<string | null>(null);
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  const currentSpaceId = conversation?.thread.spaceId ?? (selectedId === null ? draftSpaceId : null);
+  const currentSpace = spaces.find((space) => space.id === currentSpaceId) ?? null;
+  const spaceSiblingCount = currentSpaceId === null ? 0 : threads.filter((thread) => thread.spaceId === currentSpaceId && thread.id !== selectedId).length;
   const attachmentDraft = useAttachmentDraft();
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -52,6 +61,18 @@ export function CasualChat(): React.JSX.Element {
     || conversation?.thread.agentId || agents[0]?.id || '';
   const runChoice: RunChoice = chatChoices[selectedAgent] ?? {};
   const agentName = (id: string): string => agents.find((agent) => agent.id === id)?.name ?? id;
+
+  useEffect(() => {
+    void window.conductor.chat.listSpaces().then((list) => { useChatStore.getState().setSpaces(list); }).catch(() => undefined);
+  }, []);
+
+  async function assignSpace(spaceId: string | null): Promise<void> {
+    if (selectedId === null) { setDraftSpaceId(spaceId); return; }
+    try {
+      const updated = await window.conductor.chat.setThreadSpace(selectedId, spaceId);
+      useChatStore.getState().setThreadSpace(updated);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not move the chat'); }
+  }
 
   useEffect(() => {
     setError(null);
@@ -88,6 +109,7 @@ export function CasualChat(): React.JSX.Element {
     try {
       const snapshot = await window.conductor.chat.send({
         ...(selectedId === null ? {} : { threadId: selectedId }),
+        ...(selectedId === null && draftSpaceId !== null ? { spaceId: draftSpaceId } : {}),
         content: text.trim(), agentId: selectedAgent,
         ...(Object.keys(runChoice).length > 0 ? { runOptions: runChoice } : {}),
         ...(attachmentDraft.attachmentIds.length > 0 ? { attachments: attachmentDraft.attachmentIds } : {}),
@@ -138,8 +160,34 @@ export function CasualChat(): React.JSX.Element {
             </>
           ) : null}
         </div>
-        <span className="shrink-0 text-2xs text-muted-foreground">Personal conversation</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <label htmlFor="chat-space" className="sr-only">Space for this chat</label>
+          <select
+            id="chat-space"
+            value={currentSpaceId ?? ''}
+            title={currentSpace !== null ? `In Space "${currentSpace.name}" — chats in this space share context` : 'Put this chat in a space to share context with other chats'}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === '__new__') { setCreatingSpace(true); return; }
+              void assignSpace(value === '' ? null : value);
+            }}
+            className="max-w-40 truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="">No space</option>
+            {spaces.map((space: ChatSpace) => <option key={space.id} value={space.id}>Space: {space.name}</option>)}
+            <option value="__new__">New space…</option>
+          </select>
+          <span className="hidden shrink-0 text-2xs text-muted-foreground sm:inline">Personal conversation</span>
+        </div>
       </header>
+      {creatingSpace ? (
+        <SpaceNameDialog
+          space={null}
+          open
+          onClose={() => { setCreatingSpace(false); }}
+          onSaved={(saved) => { void assignSpace(saved.id); }}
+        />
+      ) : null}
       {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
       <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
@@ -220,7 +268,7 @@ export function CasualChat(): React.JSX.Element {
             {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:cursor-default disabled:opacity-30"><ArrowUpIcon size={17} /></button>}
           </div>
         </form>
-        <p className="mt-2 text-center text-3xs text-muted-foreground">No project context · Use Work for project threads</p>
+        <p className="mt-2 text-center text-3xs text-muted-foreground">{currentSpace !== null ? `Sharing context with ${spaceSiblingCount} other ${spaceSiblingCount === 1 ? 'chat' : 'chats'} in Space "${currentSpace.name}" · No project context` : 'No project context · Use Work for project threads'}</p>
       </div>
     </div>
   );

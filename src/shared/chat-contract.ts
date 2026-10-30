@@ -7,6 +7,18 @@ export interface ChatThread {
   agentId: string;
   createdAt: string;
   updatedAt: string;
+  /** Space this personal chat belongs to, or null/undefined when ungrouped. Chats in one space share context. */
+  spaceId?: string | null;
+}
+
+/** A named group of personal chats ("Space"). Chats in a space share context with each other. */
+export interface ChatSpace {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Number of chats currently in the space. */
+  threadCount: number;
 }
 
 export interface ChatMessage {
@@ -72,6 +84,8 @@ const ChatRunChoice = z.object({
 
 export const ChatSendRequest = z.object({
   threadId: z.string().uuid().optional(),
+  /** Space for a newly created thread (ignored once the thread exists, except an explicit move). */
+  spaceId: z.string().uuid().optional(),
   content: z.string().trim().min(1).max(10_000),
   agentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
   /** Model and reasoning effort for this reply. Omitted fields mean Auto. */
@@ -94,6 +108,9 @@ export interface Mem0Health {
 /** A user-chosen thread title: non-blank and short enough for the sidebar. */
 export const ThreadTitle = z.string().trim().min(1).max(120);
 
+/** A user-chosen Space name: same shape as a thread title. */
+export const SpaceName = ThreadTitle;
+
 export const CHAT_SCHEMAS = {
   'chat.list': z.void(),
   'chat.get': z.object({ threadId: z.string().uuid() }).strict(),
@@ -101,6 +118,11 @@ export const CHAT_SCHEMAS = {
   'chat.cancel': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.delete': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.rename': z.object({ threadId: z.string().uuid(), title: ThreadTitle }).strict(),
+  'chat.listSpaces': z.void(),
+  'chat.createSpace': z.object({ name: SpaceName }).strict(),
+  'chat.renameSpace': z.object({ spaceId: z.string().uuid(), name: SpaceName }).strict(),
+  'chat.deleteSpace': z.object({ spaceId: z.string().uuid() }).strict(),
+  'chat.setThreadSpace': z.object({ threadId: z.string().uuid(), spaceId: z.string().uuid().nullable() }).strict(),
   'chat.mem0Health': z.void(),
 } as const;
 
@@ -112,6 +134,14 @@ export interface ChatBridge {
   delete(threadId: string): Promise<void>;
   /** Rename a chat thread; resolves to the updated thread. */
   rename(threadId: string, title: string): Promise<ChatThread>;
+  /** Spaces (groups of personal chats that share context), most recently updated first. */
+  listSpaces(): Promise<ChatSpace[]>;
+  createSpace(name: string): Promise<ChatSpace>;
+  renameSpace(spaceId: string, name: string): Promise<ChatSpace>;
+  /** Delete a space; its chats become ungrouped and are not deleted. */
+  deleteSpace(spaceId: string): Promise<void>;
+  /** Move a chat into a space, or out of any space with `null`; resolves to the updated thread. */
+  setThreadSpace(threadId: string, spaceId: string | null): Promise<ChatThread>;
   /** Check whether the Mem0 context service is reachable right now. */
   mem0Health(): Promise<Mem0Health>;
 }

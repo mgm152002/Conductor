@@ -135,6 +135,11 @@ const chat: ChatBridge = {
   cancel: (threadId) => invoke('chat.cancel', { threadId }),
   delete: (threadId) => invoke('chat.delete', { threadId }),
   rename: (threadId, title) => invoke('chat.rename', { threadId, title }),
+  listSpaces: () => invoke('chat.listSpaces'),
+  createSpace: (name) => invoke('chat.createSpace', { name }),
+  renameSpace: (spaceId, name) => invoke('chat.renameSpace', { spaceId, name }),
+  deleteSpace: (spaceId) => invoke('chat.deleteSpace', { spaceId }),
+  setThreadSpace: (threadId, spaceId) => invoke('chat.setThreadSpace', { threadId, spaceId }),
   mem0Health: () => invoke('chat.mem0Health'),
 };
 

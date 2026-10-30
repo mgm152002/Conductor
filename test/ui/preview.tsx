@@ -61,10 +61,10 @@ window.conductor = {
   chat: {
     list: async (): Promise<ChatThread[]> => Object.values(chats).map((chat) => chat.thread),
     get: async (id: string) => structuredClone(chats[id]!),
-    send: async (input: { threadId?: string; content: string; agentId?: string }) => {
+    send: async (input: { threadId?: string; spaceId?: string; content: string; agentId?: string }) => {
       const id = input.threadId ?? crypto.randomUUID();
       const now = new Date().toISOString();
-      const chat = chats[id] ?? { thread: { id, title: input.content.slice(0, 60), agentId: input.agentId ?? 'codex', createdAt: now, updatedAt: now }, messages: [] };
+      const chat = chats[id] ?? { thread: { id, title: input.content.slice(0, 60), agentId: input.agentId ?? 'codex', createdAt: now, updatedAt: now, spaceId: input.spaceId ?? null }, messages: [] };
       chats[id] = chat;
       chat.thread.updatedAt = now;
       chat.messages.push({ id: crypto.randomUUID(), threadId: id, role: 'user', content: input.content, status: 'complete', createdAt: now });
@@ -86,6 +86,16 @@ window.conductor = {
       return structuredClone(chat.thread);
     },
     mem0Health: async () => ({ reachable: true, detail: 'Fixture memory service', checkedAt: new Date().toISOString() }),
+    listSpaces: async () => [],
+    createSpace: async (name: string) => ({ id: crypto.randomUUID(), name, createdAt, updatedAt: createdAt, threadCount: 0 }),
+    renameSpace: async (id: string, name: string) => ({ id, name, createdAt, updatedAt: createdAt, threadCount: 0 }),
+    deleteSpace: async () => {},
+    setThreadSpace: async (id: string, spaceId: string | null) => {
+      const chat = chats[id]!;
+      chat.thread.spaceId = spaceId;
+      publish(chat);
+      return structuredClone(chat.thread);
+    },
   },
   github: {
     status: async () => ({ workspaceId: project.id, repo: { owner: 'example', name: 'conductor', fullName: 'example/conductor' }, connected: true, login: 'fixture-user', autoPr: true }),

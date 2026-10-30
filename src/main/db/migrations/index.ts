@@ -1332,6 +1332,27 @@ const migration029: Migration = {
   },
 };
 
+// Migration 30 — Spaces: named groups of personal chats. Chats in the same
+// space share context (recent turns from sibling chats are supplied to the
+// agent as untrusted contextData). Deleting a space ungroups its chats; the
+// chats and their messages are never deleted with the space.
+const migration030: Migration = {
+  version: 30,
+  name: 'chat_spaces',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE chat_spaces (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      ALTER TABLE chat_threads ADD COLUMN space_id TEXT REFERENCES chat_spaces(id) ON DELETE SET NULL;
+      CREATE INDEX idx_chat_threads_space ON chat_threads(space_id, updated_at DESC);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1363,4 +1384,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration027,
   migration028,
   migration029,
+  migration030,
 ];
