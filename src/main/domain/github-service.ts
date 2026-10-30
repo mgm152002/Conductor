@@ -10,6 +10,7 @@ import type {
 import type { WorkspaceService } from './workspace-service';
 import type { SecretStore } from '../secrets/secret-store';
 import { worktreeBranch, worktreePathFor } from './worktree';
+import { resolvePrDescription, type PrDescriptionContext } from './pr-description';
 
 // Per-project GitHub integration. A project's repository is detected from
 // its git `origin` remote; the user's personal access token lives in the
@@ -32,6 +33,12 @@ export interface GitHubServiceDeps {
    * first-message placeholder as its title when a generated title is coming.
    */
   ensureThreadTitle?: (task: Task) => Promise<string | undefined>;
+  /**
+   * Agent-written PR description from the finished change (commits, files,
+   * diff). Absent or failing means a deterministic summary of the change is
+   * used — the PR body is never the user's raw prompt.
+   */
+  generatePrDescription?: (context: PrDescriptionContext) => Promise<string | undefined>;
   openExternal: (url: string) => Promise<void>;
   fetchFn?: typeof fetch;
 }
@@ -293,6 +300,32 @@ export class GitHubService {
       if (existing !== undefined) return { status: 'existing', pr: existing };
       return { status: 'no-changes', branch };
     }
+    // The description is written by the agent from the finished change —
+    // commits, changed files and the diff against the base — not pasted from
+    // the user's prompt. Gather that context while FETCH_HEAD still names
+    // the base tip.
+    const lines = (result: { stdout: string } | null): string[] =>
+      (result?.stdout ?? '').split('\n').map((line) => line.trim()).filter((line) => line !== '');
+    const [log, nameOnly, stat, diff] = await Promise.all([
+      git(worktree, ['log', '--reverse', '--format=%s', 'FETCH_HEAD..HEAD']).catch(() => null),
+      git(worktree, ['diff', '--name-only', 'FETCH_HEAD..HEAD']).catch(() => null),
+      git(worktree, ['diff', '--stat', 'FETCH_HEAD..HEAD']).catch(() => null),
+      git(worktree, ['diff', 'FETCH_HEAD..HEAD']).catch(() => null),
+    ]);
+    const objectives = ((): string[] => {
+      try {
+        const rows = this.deps.store.db.prepare(
+          'SELECT objective FROM tasks WHERE thread_id = ? OR id = ? ORDER BY created_at ASC, rowid ASC',
+        ).all(threadKey, threadKey) as { objective: string }[];
+        return rows.map((row) => row.objective).filter((objective) => objective.trim() !== '');
+      } catch { return [root.objective]; }
+    })();
+    const body = await resolvePrDescription({
+      title, objectives, branch, base,
+      commits: lines(log), changedFiles: lines(nameOnly),
+      diffStat: stat?.stdout.trim() ?? '', diff: diff?.stdout ?? '',
+    }, this.deps.generatePrDescription);
+
     const push = await git(worktree, ['push', authRemote, `HEAD:${branch}`]);
     if (push.code !== 0) throw new Error(clean(push.stderr.trim() || 'git push failed'));
 
@@ -304,7 +337,7 @@ export class GitHubService {
           title,
           head: branch,
           base,
-          body: `Opened by Conductor from a Work thread.\n\n${root.objective}`,
+          body,
         }),
       });
     } catch (error) {

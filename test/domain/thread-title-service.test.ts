@@ -79,6 +79,16 @@ describe('AgentTitleGenerator', () => {
     expect(input.models).toEqual({ opencode: 'opencode/deepseek-v4.1-flash-free' });
   });
 
+  it('returns raw agent text for caller-built prompts such as PR descriptions', async () => {
+    const adapter = fake('opencode', { events: [{ kind: 'stdout', data: '## Summary\n\nDid the thing.' }] });
+    const generator = new AgentTitleGenerator(registryFor([adapter]), sandbox(), undefined, 5_000);
+    await expect(generator.generateText('Write the PR description for this diff', 'Describe a change'))
+      .resolves.toBe('## Summary\n\nDid the thing.');
+    const input = adapter.calls.started[0] as { objective?: string; description?: string };
+    expect(input.objective).toBe('Write the PR description for this diff');
+    expect(input.description).toBe('Describe a change');
+  });
+
   it('falls back to the next agent when the first fails, and reports it', async () => {
     const broken = fake('opencode', { crashAt: 'start', crashMessage: 'default model unavailable' });
     const working = fake('codex', { events: [{ kind: 'stdout', data: '{"type":"item.completed","item":{"type":"agent_message","text":"Plan the weekend trip"}}' }] });

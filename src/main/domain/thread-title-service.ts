@@ -176,23 +176,42 @@ export class AgentTitleGenerator {
   }
 
   async generate(objective: string): Promise<string | undefined> {
+    return this.generateWith('Thread title generation', async (agentId) => {
+      const text = await this.runWith(agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.');
+      return text !== undefined && cleanGeneratedTitle(text) !== undefined ? text : undefined;
+    });
+  }
+
+  /**
+   * Raw agent text for a caller-built prompt (e.g. PR descriptions), through
+   * the same candidate agents, model pinning and timeout as title generation.
+   * Returns the first non-empty reply; cleaning is the caller's job.
+   */
+  async generateText(prompt: string, description: string): Promise<string | undefined> {
+    return this.generateWith('Agent text generation', async (agentId) => {
+      const text = await this.runWith(agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.');
+      return text !== undefined && text.trim() !== '' ? text : undefined;
+    });
+  }
+
+  /** Try each available chat-capable CLI agent in preference order until one yields text. */
+  private async generateWith(label: string, attempt: (agentId: string) => Promise<string | undefined>): Promise<string | undefined> {
     const candidates = this.registry.listAdapters()
       .filter((a) => a.available && a.class === 'local_cli_agent' && a.capabilities.some((c) => c.id === 'objective.fulfill'))
       .sort((a, b) => compareAgentPreference(a.id, b.id));
     for (const candidate of candidates) {
       try {
-        const text = await this.runWith(candidate.id, objective);
-        const title = text === undefined ? undefined : cleanGeneratedTitle(text);
-        if (title !== undefined) return text;
-        this.onError?.(`Thread title generation: ${candidate.id} returned no usable title`);
+        const text = await attempt(candidate.id);
+        if (text !== undefined) return text;
+        this.onError?.(`${label}: ${candidate.id} returned nothing usable`);
       } catch (error) {
-        this.onError?.(`Thread title generation via ${candidate.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+        this.onError?.(`${label} via ${candidate.id} failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     return undefined;
   }
 
-  private async runWith(agentId: string, objective: string): Promise<string | undefined> {
+  private async runWith(agentId: string, prompt: string, description: string, guidance: string): Promise<string | undefined> {
     const adapter = this.registry.resolve(agentId);
     // Warm the catalog (bounded) so Auto can pick a working economy model
     // instead of leaving the CLI on its own default.
@@ -208,9 +227,9 @@ export class AgentTitleGenerator {
       ? settingsChoice
       : chooseRun({ catalog, difficulty: 'simple', ...(settingsChoice !== undefined ? { settings: settingsChoice } : {}) });
     const handle = await adapter.start({
-      objective: buildTitlePrompt(objective),
-      description: 'Name a work thread from its first message.',
-      guidance: 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.',
+      objective: prompt,
+      description,
+      guidance,
       taskId: `title-${randomUUID()}`,
       stepId: 'thread-title',
       rootPath: this.sandboxPath,
@@ -221,7 +240,7 @@ export class AgentTitleGenerator {
     });
     let timedOut = false;
     const timeout = new Promise<never>((_resolve, reject) => {
-      setTimeout(() => { timedOut = true; reject(new Error('Title generation timed out')); }, this.timeoutMs);
+      setTimeout(() => { timedOut = true; reject(new Error('Agent text generation timed out')); }, this.timeoutMs);
     });
     try {
       const collect = (async (): Promise<string> => {
@@ -240,7 +259,7 @@ export class AgentTitleGenerator {
         if (typeof result.output === 'string' && result.output.trim() !== '') {
           text = adapter.record.id === 'codex' ? responseText(result.output) || text : result.output;
         }
-        if (result.status !== 'succeeded') throw new Error(result.error ?? 'Title generation failed');
+        if (result.status !== 'succeeded') throw new Error(result.error ?? 'Agent text generation failed');
         return text;
       })();
       return await Promise.race([collect, timeout]);

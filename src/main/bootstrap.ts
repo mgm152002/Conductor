@@ -78,6 +78,7 @@ import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
 import { AgentTitleGenerator, ThreadTitleService, TITLE_TIMEOUT_MS } from './domain/thread-title-service';
+import { AgentPrDescriptionGenerator } from './domain/pr-description';
 import { defaultModelKey } from '@shared/model-defaults';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
 import { AgentLearningAnalyzer } from './domain/learning-analyzer';
@@ -402,6 +403,12 @@ export async function bootstrap(): Promise<AppServices> {
     },
   );
 
+  // PR bodies are written by an agent from the finished change (commits,
+  // files, diff) via the same pinned economy-model call as thread titles.
+  const prDescriptions = new AgentPrDescriptionGenerator(
+    (prompt, description) => titleGenerator.generateText(prompt, description),
+  );
+
   // GitHub integration: per-project token (Keychain), auto-PR on completion.
   const github = new GitHubService({
     store, workspaces, secrets: secretStore,
@@ -409,6 +416,7 @@ export async function bootstrap(): Promise<AppServices> {
     getTask: (taskId) => stateMachine.getTask(taskId),
     onTaskUpdated: (task) => { taskEvents.emit('task.updated', task); },
     ensureThreadTitle: (task) => threadTitles.ensure(task),
+    generatePrDescription: (context) => prDescriptions.generate(context),
     openExternal: (url) => shell.openExternal(url),
   });
 
