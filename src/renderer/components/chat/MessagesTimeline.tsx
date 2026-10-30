@@ -7,6 +7,7 @@ import {
   AlertCircleIcon, CheckIcon, ChevronRightIcon, ListChecksIcon, SparklesIcon, Spinner, TerminalIcon, XIcon,
 } from '../ui/icons';
 import { AttachmentTray } from '../attachments';
+import { HandoffDivider } from './AgentMark';
 
 // Renders the chat timeline built by lib/timeline: right-aligned user bubble,
 // collapsible "work log" groups, assistant prose, errors, and diagnostics.
@@ -131,6 +132,16 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
         <li key={item.id}>
           {item.kind === 'user' ? <UserMessage item={item} /> : null}
           {item.kind === 'work' ? <WorkGroup item={item} live={live && index === lastWorkIndex} /> : null}
+          {item.kind === 'handoff' ? (
+            <HandoffDivider
+              toAgentId={item.toAgentId}
+              toAgent={item.toAgent}
+              {...(item.fromAgent !== undefined ? { fromAgent: item.fromAgent } : {})}
+              {...(item.fromModel !== undefined ? { fromModel: item.fromModel } : {})}
+              {...(item.toModel !== undefined ? { toModel: item.toModel } : {})}
+              {...(item.reason !== undefined ? { reason: item.reason } : {})}
+            />
+          ) : null}
           {item.kind === 'notice' ? (
             <div role="status" className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
               <SparklesIcon size={13} className="mt-0.5 shrink-0 text-primary" />

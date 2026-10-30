@@ -35,7 +35,8 @@ export type TimelineItem =
   | { kind: 'assistant'; id: string; text: string; at: string }
   | { kind: 'notice'; id: string; text: string; at: string }
   | { kind: 'error'; id: string; text: string; at: string; stale?: boolean }
-  | { kind: 'diagnostics'; id: string; text: string; at: string };
+  | { kind: 'diagnostics'; id: string; text: string; at: string }
+  | { kind: 'handoff'; id: string; fromAgent?: string; fromModel?: string; toAgentId: string; toAgent: string; toModel?: string; reason?: string; at: string };
 
 type Json = Record<string, unknown>;
 
@@ -427,6 +428,15 @@ export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
     ...(entry.source !== undefined ? { source: entry.source } : {}),
   });
   const content = message.content;
+  const toHandoff = (entry: ChatActivity): TimelineItem | null => entry.kind === 'handoff' && entry.handoff !== undefined
+    ? {
+      kind: 'handoff', id: entry.id, toAgentId: entry.handoff.toAgentId, toAgent: entry.handoff.toAgent, at: entry.createdAt,
+      ...(entry.handoff.fromAgent !== undefined ? { fromAgent: entry.handoff.fromAgent } : {}),
+      ...(entry.handoff.fromModel !== undefined ? { fromModel: entry.handoff.fromModel } : {}),
+      ...(entry.handoff.toModel !== undefined ? { toModel: entry.handoff.toModel } : {}),
+      ...(entry.handoff.reason !== undefined ? { reason: entry.handoff.reason } : {}),
+    }
+    : null;
   if (activity.some((entry) => entry.contentOffset !== undefined) && content.trim() !== '') {
     // Interleave: prose up to each activity's offset, then that work, in
     // the order the agent actually produced them. Consecutive activities
@@ -440,6 +450,8 @@ export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
       work = [];
     };
     for (const entry of activity) {
+      const handoff = toHandoff(entry);
+      if (handoff !== null) { flushWork(); items.push(handoff); continue; }
       const offset = Math.min(Math.max(entry.contentOffset ?? cursor, cursor), content.length);
       const prose = content.slice(cursor, offset).trim();
       if (prose !== '') {
@@ -453,7 +465,19 @@ export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
     const tail = content.slice(cursor).trim();
     if (tail !== '') items.push({ kind: 'assistant', id: message.id, text: tail, at: message.createdAt });
   } else {
-    if (activity.length > 0) items.push({ kind: 'work', id: `chat-work:${message.id}`, entries: activity.map(toEntry) });
+    let work: WorkEntry[] = [];
+    let group = 0;
+    const flushWork = (): void => {
+      if (work.length === 0) return;
+      items.push({ kind: 'work', id: `chat-work:${message.id}:${group++}`, entries: work });
+      work = [];
+    };
+    for (const entry of activity) {
+      const handoff = toHandoff(entry);
+      if (handoff !== null) { flushWork(); items.push(handoff); continue; }
+      work.push(toEntry(entry));
+    }
+    flushWork();
     if (content.trim() !== '') items.push({ kind: 'assistant', id: message.id, text: content, at: message.createdAt });
   }
   if (message.error !== undefined && message.error.trim() !== '') items.push({ kind: 'error', id: `chat-error:${message.id}`, text: message.error, at: message.createdAt });

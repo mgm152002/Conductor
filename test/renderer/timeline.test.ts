@@ -52,6 +52,21 @@ describe('chat timeline', () => {
     expect(work.entries[2]).toMatchObject({ icon: 'read', label: 'Viewed image.png', detail: '/w/photos/image.png' });
   });
 
+  it('turns a handoff activity into a handoff divider item, not a work row', () => {
+    const message: ChatMessage = {
+      id: 'm1', threadId: 't', role: 'assistant', content: 'Recovered.', status: 'complete',
+      createdAt: '2026-10-24T00:00:00Z', attachments: [],
+      activity: [{
+        id: 'h1', kind: 'handoff', label: 'OpenCode → Codex', status: 'neutral', source: 'Codex',
+        createdAt: '2026-10-24T00:00:00Z', contentOffset: 0,
+        handoff: { fromAgentId: 'opencode', fromAgent: 'OpenCode', toAgentId: 'codex', toAgent: 'Codex', toModel: 'gpt-5', reason: 'quota exhausted' },
+      }],
+    };
+    const items = buildChatMessageTimeline(message);
+    expect(items.map((i) => i.kind)).toEqual(['handoff', 'assistant']);
+    expect(items[0]).toMatchObject({ kind: 'handoff', fromAgent: 'OpenCode', toAgent: 'Codex', toModel: 'gpt-5', reason: 'quota exhausted' });
+  });
+
   it('streams reply snapshots into one assistant item and dedupes the final reply', () => {
     const items = buildTimeline(task, details([
       log({ message: 'Hello', kind: 'reply', key: 'codex:reply:m1', status: 'running', source: 'Codex' }),

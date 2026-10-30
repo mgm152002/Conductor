@@ -90,6 +90,41 @@ describe('standalone casual chat', () => {
     expect(service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
   });
 
+  it('records the CLI and model on each reply and shows a handoff when the user switches', async () => {
+    const { service, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'first reply' }] } });
+    const second = new FakeAdapter({ script: { events: [{ kind: 'stdout', data: 'second reply' }] }, record: {
+      id: 'other-agent', class: 'local_cli_agent', available: true,
+      capabilities: [{ id: 'objective.fulfill', title: 'Chat', inputSchema: {}, outputSchema: {}, streaming: true, cancellable: true, resumable: false, requiredPermissions: [] }],
+    } });
+    registry.register(second);
+
+    const first = await service.send({ content: 'Hello', agentId: 'chat-agent', runOptions: { model: 'model-a' } });
+    const doneFirst = await settled(service, first.thread.id);
+    expect(doneFirst.messages.at(-1)).toMatchObject({ agentId: 'chat-agent', model: 'model-a' });
+
+    const next = await service.send({ threadId: first.thread.id, content: 'Continue', agentId: 'other-agent', runOptions: { model: 'model-b' } });
+    const done = await settled(service, next.thread.id);
+    expect(done.messages.at(-1)).toMatchObject({ agentId: 'other-agent', model: 'model-b', content: 'second reply' });
+  });
+
+  it('records a handoff activity when a fallback agent takes over mid-reply', async () => {
+    const { service, registry } = await setup({ script: { result: { status: 'failed', error: 'quota exhausted for this account' } } });
+    const second = new FakeAdapter({ script: { events: [{ kind: 'stdout', data: 'recovered reply' }] }, record: {
+      id: 'other-agent', class: 'local_cli_agent', available: true,
+      capabilities: [{ id: 'objective.fulfill', title: 'Chat', inputSchema: {}, outputSchema: {}, streaming: true, cancellable: true, resumable: false, requiredPermissions: [] }],
+    } });
+    registry.register(second);
+
+    const sent = await service.send({ content: 'Hello' });
+    const done = await settled(service, sent.thread.id);
+    const reply = done.messages.at(-1)!;
+    expect(reply.content).toBe('recovered reply');
+    expect(reply.agentId).toBe('other-agent');
+    const handoff = reply.activity?.find((entry) => entry.kind === 'handoff');
+    expect(handoff?.handoff).toMatchObject({ fromAgentId: 'chat-agent', toAgentId: 'other-agent' });
+    expect(handoff?.handoff?.reason).toContain('quota');
+  });
+
   it('backfills titles for chats still carrying the first-message placeholder', async () => {
     const { root, store, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
     const service = new ChatService(store, registry, join(root, 'chat-sandbox'), () => {}, {

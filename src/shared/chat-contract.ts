@@ -17,9 +17,25 @@ export interface ChatMessage {
   status: 'complete' | 'streaming' | 'failed' | 'cancelled';
   createdAt: string;
   attachments: AttachmentRef[];
+  /** Agent CLI that produced this reply (assistant messages), for handoff display. */
+  agentId?: string;
+  /** Model that produced this reply, when the run resolved one. */
+  model?: string;
   /** Durable reasoning/tool activity emitted while the assistant produced this reply. */
   activity?: ChatActivity[];
   error?: string;
+}
+
+/** A switch of CLI and/or model, shown as a divider in the answer space. */
+export interface ChatHandoff {
+  fromAgentId?: string;
+  fromAgent?: string;
+  toAgentId: string;
+  toAgent: string;
+  fromModel?: string;
+  toModel?: string;
+  /** Why the switch happened, e.g. the failure that triggered a fallback. */
+  reason?: string;
 }
 
 export type ChatActivityStatus = 'neutral' | 'running' | 'completed' | 'failed';
@@ -40,6 +56,8 @@ export interface ChatActivity {
    * activity above the reply. Absent on messages recorded before this field.
    */
   contentOffset?: number;
+  /** Set when `kind` is `handoff`: the CLI/model switch this entry records. */
+  handoff?: ChatHandoff;
 }
 
 export interface ChatConversation {

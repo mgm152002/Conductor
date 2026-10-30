@@ -1318,6 +1318,20 @@ const migration028: Migration = {
   },
 };
 
+// Migration 29 — which agent CLI and model produced each chat reply, so a
+// switch of CLI or model between (or within) replies can be shown as a
+// handoff in the conversation instead of changing silently.
+const migration029: Migration = {
+  version: 29,
+  name: 'chat_message_agent_model',
+  up({ db }: Tx): void {
+    db.exec(`
+      ALTER TABLE chat_messages ADD COLUMN agent_id TEXT;
+      ALTER TABLE chat_messages ADD COLUMN model TEXT;
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1348,4 +1362,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration026,
   migration027,
   migration028,
+  migration029,
 ];
