@@ -3,8 +3,10 @@ import { NavLink } from 'react-router-dom';
 import type { RunChoice } from '@shared/agent-models';
 import type { ChatThread } from '@shared/chat-contract';
 import { useChatStore } from '../../stores/chat-store';
+import { useComposerStore } from '../../stores/composer-store';
 import { useAgents } from '../../hooks/useAgents';
 import { MessagesTimeline } from './MessagesTimeline';
+import { HandoffDivider } from './AgentMark';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PendingQuestionPanel } from './PendingQuestionPanel';
@@ -22,8 +24,13 @@ export function CasualChat(): React.JSX.Element {
   const draftKey = selectedId ?? 'new';
   const text = useChatStore((state) => state.drafts[draftKey] ?? '');
   const agents = useAgents().filter((agent) => !agent.remote && agent.available);
-  const [agentId, setAgentId] = useState('');
-  const [runChoice, setRunChoice] = useState<RunChoice>({});
+  // The CLI/model selection lives in the persisted composer store, per CLI:
+  // sending a message, opening another thread, or switching CLI never clears
+  // it — it changes only when the user picks something else.
+  const agentId = useComposerStore((s) => s.chatAgentId);
+  const setAgentId = useComposerStore((s) => s.setChatAgentId);
+  const chatChoices = useComposerStore((s) => s.chatChoices);
+  const setChatChoice = useComposerStore((s) => s.setChatChoice);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -43,8 +50,8 @@ export function CasualChat(): React.JSX.Element {
   // conversation; history is passed to whichever agent runs next.
   const selectedAgent = (agents.some((agent) => agent.id === agentId) ? agentId : '')
     || conversation?.thread.agentId || agents[0]?.id || '';
-
-  useEffect(() => { setAgentId(''); setRunChoice({}); }, [selectedId]);
+  const runChoice: RunChoice = chatChoices[selectedAgent] ?? {};
+  const agentName = (id: string): string => agents.find((agent) => agent.id === id)?.name ?? id;
 
   useEffect(() => {
     setError(null);
@@ -138,14 +145,37 @@ export function CasualChat(): React.JSX.Element {
       <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
         {hasMessages ? (
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">
-            {conversation?.messages.map((message) => (
-              <article key={message.id} aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl bg-accent px-4 py-3')}>
+            {conversation?.messages.map((message, index) => {
+              // A handoff divider wherever the replying CLI or model changed
+              // from the previous reply: the switch is visible in the answer
+              // space, with the new CLI's mark, instead of happening silently.
+              const previousAssistant = message.role === 'assistant'
+                ? [...(conversation?.messages.slice(0, index) ?? [])].reverse().find((m) => m.role === 'assistant' && m.agentId !== undefined)
+                : undefined;
+              const showHandoff = previousAssistant !== undefined && message.agentId !== undefined
+                && (previousAssistant.agentId !== message.agentId
+                  || (previousAssistant.model !== undefined && message.model !== undefined && previousAssistant.model !== message.model));
+              return (
+              <div key={message.id} className="flex flex-col gap-7">
+                {showHandoff ? (
+                  <HandoffDivider
+                    fromAgent={agentName(previousAssistant!.agentId!)}
+                    toAgentId={message.agentId!}
+                    toAgent={agentName(message.agentId!)}
+                    {...(previousAssistant!.model !== undefined ? { fromModel: previousAssistant!.model } : {})}
+                    {...(message.model !== undefined ? { toModel: message.model } : {})}
+                    reason="The CLI or model changed between replies"
+                  />
+                ) : null}
+              <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl bg-accent px-4 py-3')}>
                 {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Thinking…'}</p> : null}
                 {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 px-1 text-xs text-muted-foreground"><span className="text-shimmer">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Working…'}</span></p> : null}
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
-            ))}
+              </div>
+              );
+            })}
           </div>
         ) : (
           <div className="flex h-full min-h-44 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -180,12 +210,12 @@ export function CasualChat(): React.JSX.Element {
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
               <label htmlFor="chat-agent" className="sr-only">Chat agent</label>
-              <select id="chat-agent" value={selectedAgent} disabled={busy} title="Switch CLI for the next message in this conversation" onChange={(event) => { setAgentId(event.target.value); setRunChoice({}); }} className="max-w-full truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
+              <select id="chat-agent" value={selectedAgent} disabled={busy} title="Switch CLI for the next message in this conversation" onChange={(event) => { setAgentId(event.target.value); }} className="max-w-full truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
                 {!selectedAgent ? <option value="">Choose an agent</option> : null}
                 {selectedAgent && !agents.some((agent) => agent.id === selectedAgent) ? <option value={selectedAgent}>{selectedAgent} (unavailable)</option> : null}
                 {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
               </select>
-              {selectedAgent ? <ModelEffortPicker agentId={selectedAgent} value={runChoice} onChange={setRunChoice} /> : null}
+              {selectedAgent ? <ModelEffortPicker agentId={selectedAgent} value={runChoice} onChange={(choice) => { setChatChoice(selectedAgent, choice); }} /> : null}
             </div>
             {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:cursor-default disabled:opacity-30"><ArrowUpIcon size={17} /></button>}
           </div>

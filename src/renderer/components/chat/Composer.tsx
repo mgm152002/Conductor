@@ -53,10 +53,10 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   // picking a different CLI in the agent menu switches provider in-thread.
   const effectiveAgent = chosenAgent ?? (task !== null && variant === 'docked' && currentAgentId !== undefined
     ? agents.find((agent) => agent.id === currentAgentId && agent.available) : undefined);
-  // Model and effort: for the chosen agent (or the planner), and in plan mode
-  // per sub-agent. Empty means Auto: Conductor picks by how demanding the work is.
-  const mainChoice = useComposerStore((s) => s.mainChoice);
-  const setMainChoice = useComposerStore((s) => s.setMainChoice);
+  // Model and effort are kept per agent: switching CLI shows that CLI's own
+  // selection (each agent remembers its last model/effort), and sending a
+  // message never clears any of them. Empty means Auto: Conductor picks by
+  // how demanding the work is.
   const agentChoices = useComposerStore((s) => s.agentChoices);
   const setAgentChoice = useComposerStore((s) => s.setAgentChoice);
   const [subAgentsOpen, setSubAgentsOpen] = useState(false);
@@ -65,6 +65,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
     setAgentId(defaultAgentId ?? '');
   }, [agentId, agents, defaultAgentId, setAgentId]);
   const customSubAgents = Object.values(agentChoices).filter((c) => Object.keys(c).length > 0).length;
+  const mainChoice = effectiveAgent !== undefined ? agentChoices[effectiveAgent.id] ?? {} : {};
   const runOptions: RunOptions = {
     ...(effectiveAgent !== undefined && Object.keys(mainChoice).length > 0 ? { main: mainChoice } : {}),
     ...(planMode && customSubAgents > 0 ? { agents: Object.fromEntries(Object.entries(agentChoices).filter(([, c]) => Object.keys(c).length > 0)) } : {}),
@@ -252,7 +253,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             <select
               id={agentSelectId}
               value={chosenAgent?.id ?? ''}
-              onChange={(event) => { setAgentId(event.target.value); setMainChoice({}); }}
+              onChange={(event) => { setAgentId(event.target.value); }}
               title={planMode ? 'The agent that writes the plan' : task !== null && variant === 'docked' ? 'Switch CLI for the next message, or keep the same agent and just change its model' : 'Auto picks an available agent'}
               className="h-7 max-w-full sm:max-w-44 cursor-pointer appearance-none truncate rounded-full bg-transparent pr-6 pl-7 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
             >
@@ -263,7 +264,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground"><ChevronDownIcon size={11} /></div>
           </div>
-          {effectiveAgent !== undefined ? <ModelEffortPicker agentId={effectiveAgent.id} value={mainChoice} onChange={setMainChoice} {...(planMode ? { label: 'Planner' } : {})} /> : null}
+          {effectiveAgent !== undefined ? <ModelEffortPicker agentId={effectiveAgent.id} value={mainChoice} onChange={(choice) => { setAgentChoice(effectiveAgent.id, choice); }} {...(planMode ? { label: 'Planner' } : {})} /> : null}
           <button
             type="button"
             onClick={() => { setPlanMode(!planMode); }}
