@@ -423,13 +423,6 @@ export class ChatService {
           )
           : [];
         const contextData = [...await this.recall(input.content), ...this.spaceContext(threadId, effectiveSpaceId)];
-        // The previous reply's CLI/model, so a deliberate switch by the user
-        // can be recorded as a handoff in the answer space.
-        const previousAssistant = [...(previous?.messages ?? [])].reverse().find((m) => m.role === 'assistant');
-        const previousReply = previous === undefined ? undefined : {
-          agentId: previousAssistant?.agentId ?? previous.thread.agentId,
-          ...(previousAssistant?.model !== undefined ? { model: previousAssistant.model } : {}),
-        };
         await this.runWithFallback(threadId, pending, order, {
           objective: input.content, description: INSTRUCTION, guidance: INSTRUCTION,
           taskId: threadId, stepId: assistantId,
@@ -437,7 +430,7 @@ export class ChatService {
           conversation,
           ...(materialized.length > 0 ? { attachments: materialized } : {}),
           ...(contextData.length > 0 ? { contextData } : {}),
-        }, input.runOptions, input.content, previousReply);
+        }, input.runOptions, input.content);
       } catch (error) {
         if (this.runs.get(threadId) !== pending) return;
         const message = error instanceof Error ? error.message : String(error);
@@ -619,7 +612,7 @@ export class ChatService {
    * model_unavailable and the agent has a configured fallback model, the same
    * agent is retried once with that fallback model before moving on.
    */
-  private async runWithFallback(threadId: string, run: Run, order: readonly string[], input: ObjectiveInput, options: ChatSendInput['runOptions'], content: string, previousReply?: { agentId: string; model?: string }): Promise<void> {
+  private async runWithFallback(threadId: string, run: Run, order: readonly string[], input: ObjectiveInput, options: ChatSendInput['runOptions'], content: string): Promise<void> {
     try {
       let lastError = 'Agent returned no reply';
       let lastAttempt: { agentId: string; agentName: string; model?: string } | undefined;
@@ -634,18 +627,10 @@ export class ChatService {
         const choice = this.resolveRun(agentId, i === 0 ? options : undefined, content);
         const agentName = this.registry.has(agentId) ? this.registry.resolve(agentId).record.name : agentId;
         this.setReplyAgent(threadId, run, agentId, choice.model);
-        if (i === 0 && previousReply !== undefined
-          && (previousReply.agentId !== agentId
-            || (choice.model !== undefined && previousReply.model !== undefined && choice.model !== previousReply.model))) {
-          this.recordHandoff(threadId, run, {
-            fromAgentId: previousReply.agentId,
-            fromAgent: this.registry.has(previousReply.agentId) ? this.registry.resolve(previousReply.agentId).record.name : previousReply.agentId,
-            toAgentId: agentId, toAgent: agentName,
-            ...(previousReply.model !== undefined ? { fromModel: previousReply.model } : {}),
-            ...(choice.model !== undefined ? { toModel: choice.model } : {}),
-            reason: previousReply.agentId !== agentId ? 'You switched CLI' : 'You switched model',
-          });
-        }
+        // A switch between replies is not recorded here: the renderer derives
+        // that divider once from the replies' recorded agent/model. This
+        // activity is only for a switch that happens within this reply, so
+        // the same handoff cannot be shown twice.
         if (i > 0 && lastAttempt !== undefined) {
           this.recordHandoff(threadId, run, {
             fromAgentId: lastAttempt.agentId, fromAgent: lastAttempt.agentName,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskEvent } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
-import { buildChatMessageTimeline, buildTimeline, latestActivity, recentActivities } from '../../src/renderer/lib/timeline';
+import { buildChatMessageTimeline, buildTimeline, latestActivity, messageShowsCurrentHandoff, recentActivities } from '../../src/renderer/lib/timeline';
 import type { ChatMessage } from '../../src/shared/chat-contract';
 
 const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 'COMPLETED', acceptanceCriteria: ['response: nonempty'], contextRefs: [], createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z' };
@@ -65,6 +65,10 @@ describe('chat timeline', () => {
     const items = buildChatMessageTimeline(message);
     expect(items.map((i) => i.kind)).toEqual(['handoff', 'assistant']);
     expect(items[0]).toMatchObject({ kind: 'handoff', fromAgent: 'OpenCode', toAgent: 'Codex', toModel: 'gpt-5', reason: 'quota exhausted' });
+    // When that inline handoff ends at the reply's own agent/model, a caller
+    // must not derive a second divider from the reply metadata.
+    expect(messageShowsCurrentHandoff({ ...message, agentId: 'codex', model: 'gpt-5' })).toBe(true);
+    expect(messageShowsCurrentHandoff({ ...message, agentId: 'opencode', model: 'gpt-5' })).toBe(false);
   });
 
   it('streams reply snapshots into one assistant item and dedupes the final reply', () => {

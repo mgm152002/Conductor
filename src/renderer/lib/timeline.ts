@@ -413,6 +413,22 @@ export function recentActivities(items: TimelineItem[], limit = 5): WorkEntry[] 
   return entries.slice(-limit);
 }
 
+/**
+ * Whether this reply already contains an inline handoff ending at the CLI and
+ * model recorded on the reply itself. Older replies recorded a between-reply
+ * switch both ways, so callers that also derive a divider from reply metadata
+ * use this to avoid showing the same handoff twice.
+ */
+export function messageShowsCurrentHandoff(message: ChatMessage): boolean {
+  if (message.agentId === undefined) return false;
+  return (message.activity ?? []).some((entry) => {
+    if (entry.kind !== 'handoff' || entry.handoff === undefined) return false;
+    const { toAgentId, toModel } = entry.handoff;
+    return toAgentId === message.agentId
+      && (toModel === undefined || message.model === undefined || toModel === message.model);
+  });
+}
+
 /** Builds the same work-log presentation for a standalone Chat assistant reply. */
 export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
   const items: TimelineItem[] = [];

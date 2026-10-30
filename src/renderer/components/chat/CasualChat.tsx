@@ -16,7 +16,7 @@ import { SpaceNameDialog } from '../threads/SpaceDialogs';
 import { ArrowUpIcon, PencilIcon, StopIcon, TrashIcon } from '../ui/icons';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
-import { buildChatMessageTimeline } from '../../lib/timeline';
+import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
 
 /** Project-free conversation: no plans, project context or task workflow. */
 export function CasualChat(): React.JSX.Element {
@@ -202,7 +202,10 @@ export function CasualChat(): React.JSX.Element {
                 : undefined;
               const showHandoff = previousAssistant !== undefined && message.agentId !== undefined
                 && (previousAssistant.agentId !== message.agentId
-                  || (previousAssistant.model !== undefined && message.model !== undefined && previousAssistant.model !== message.model));
+                  || (previousAssistant.model !== undefined && message.model !== undefined && previousAssistant.model !== message.model))
+                // Replies recorded before this dedupe may already carry the
+                // same switch as an inline handoff activity.
+                && !messageShowsCurrentHandoff(message);
               return (
               <div key={message.id} className="flex flex-col gap-7">
                 {showHandoff ? (

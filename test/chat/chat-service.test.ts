@@ -105,6 +105,9 @@ describe('standalone casual chat', () => {
     const next = await service.send({ threadId: first.thread.id, content: 'Continue', agentId: 'other-agent', runOptions: { model: 'model-b' } });
     const done = await settled(service, next.thread.id);
     expect(done.messages.at(-1)).toMatchObject({ agentId: 'other-agent', model: 'model-b', content: 'second reply' });
+    // The between-reply divider is derived from these agent/model fields, so
+    // no inline handoff is stored as well (that showed the switch twice).
+    expect(done.messages.at(-1)?.activity?.some((entry) => entry.kind === 'handoff')).toBe(false);
   });
 
   it('records a handoff activity when a fallback agent takes over mid-reply', async () => {
