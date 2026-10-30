@@ -64,7 +64,7 @@ const conversation: ChatConversation = {
 };
 
 beforeEach(() => {
-  useChatStore.setState({ threads: [], conversations: {}, selectedId: null, drafts: {} });
+  useChatStore.setState({ threads: [], spaces: [], conversations: {}, selectedId: null, drafts: {} });
   useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
   useTaskStore.setState({ tasks: {}, focusedTaskId: null, detailsRevision: {} });
   useApprovalStore.setState({ pending: [] });
@@ -112,6 +112,27 @@ it('offers rename actions for populated Chat history and the open chat', () => {
 
   const open = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/home'] }, createElement(CasualChat)));
   expect(open).toContain('aria-label="Rename chat: Saved chat"');
+});
+
+it('renders personal chats as draggable with space and ungrouped drop targets', () => {
+  useChatStore.setState({
+    spaces: [{ id: 'space-1', name: 'Trip planning', createdAt: '2026-10-25', updatedAt: '2026-10-25', threadCount: 1 }],
+    threads: [
+      { id: 'chat-1', title: 'Lisbon chat', agentId: 'codex', createdAt: '2026-10-25', updatedAt: '2026-10-25', spaceId: 'space-1' },
+      { id: 'chat-2', title: 'Loose chat', agentId: 'codex', createdAt: '2026-10-25', updatedAt: '2026-10-25', spaceId: null },
+    ],
+  });
+
+  const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/home'] }, createElement(Sidebar)));
+
+  // Rows carry the drag source, spaces and the ungrouped Chats list the targets:
+  // dropping on a space calls chat.setThreadSpace(id, spaceId); dropping on
+  // Chats calls it with null, which stops context sharing in both directions.
+  expect(html).toContain('data-chat-thread-id="chat-1"');
+  expect(html).toContain('draggable="true"');
+  expect(html).toContain('data-chat-space-id="space-1"');
+  expect(html).toContain('data-chat-ungrouped-drop-target=""');
+  expect(html).toContain('Drag into a space to share context');
 });
 
 it('shows the renamed Work thread title with a rename action in the sidebar', () => {

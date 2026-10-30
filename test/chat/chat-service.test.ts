@@ -258,6 +258,35 @@ describe('standalone casual chat', () => {
     expect(service.list()).toHaveLength(4);
   });
 
+  it('stops sharing context in both directions when a chat is moved out of a space', async () => {
+    const { service, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
+    const space = service.createSpace('Trip');
+
+    const first = await service.send({ content: 'We are going to Lisbon in May', spaceId: space.id });
+    await settled(service, first.thread.id);
+    const second = await service.send({ content: 'The hotel budget is 200 a night', spaceId: space.id });
+    await settled(service, second.thread.id);
+    expect(service.listSpaces()).toEqual([expect.objectContaining({ id: space.id, threadCount: 2 })]);
+
+    // Removing the second chat ungroups it and shrinks the space.
+    expect(service.setThreadSpace(second.thread.id, null).spaceId).toBeNull();
+    expect(service.listSpaces()).toEqual([expect.objectContaining({ id: space.id, threadCount: 1 })]);
+
+    // The removed chat no longer receives the space's context.
+    const removedFollowUp = await service.send({ threadId: second.thread.id, content: 'Which city did we pick?' });
+    await settled(service, removedFollowUp.thread.id);
+    const removedContext = (adapter.calls.started[2] as ObjectiveInput).contextData ?? [];
+    expect(removedContext).toEqual([]);
+    expect(JSON.stringify(removedContext)).not.toContain('Lisbon');
+
+    // And the chats left in the space no longer receive the removed chat's turns.
+    const remainingFollowUp = await service.send({ threadId: first.thread.id, content: 'What was the hotel budget?' });
+    await settled(service, remainingFollowUp.thread.id);
+    const remainingContext = (adapter.calls.started[3] as ObjectiveInput).contextData ?? [];
+    expect(remainingContext).toEqual([]);
+    expect(JSON.stringify(remainingContext)).not.toContain('hotel budget');
+  });
+
   it('passes locally recognized pasted-image text only with the current turn attachment', async () => {
     const { store, registry, root, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'answer' }] } });
     const image = {

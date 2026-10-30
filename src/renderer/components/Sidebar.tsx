@@ -443,6 +443,9 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   );
 }
 
+const CHAT_THREAD_DRAG_TYPE = 'application/x-conductor-chat-thread';
+const UNGROUPED_DROP_TARGET = '__ungrouped__';
+
 function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: (() => void) | undefined }): React.JSX.Element {
   const allThreads = useChatStore((state) => state.threads);
   const spaces = useChatStore((state) => state.spaces);
@@ -454,6 +457,10 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
   const [creatingSpace, setCreatingSpace] = useState(false);
   const [renamingSpace, setRenamingSpace] = useState<ChatSpace | null>(null);
   const [deletingSpace, setDeletingSpace] = useState<ChatSpace | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const load = (): void => {
     setError(null);
     void window.conductor.chat.list().then((list) => { useChatStore.getState().setThreads(list); })
@@ -469,8 +476,60 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
     setDeletingThread(null);
     if (thread !== null && !useChatStore.getState().threads.some((item) => item.id === thread.id)) load();
   };
+  // Dragging a chat into a space shares its context with that space's chats;
+  // dragging it out to the ungrouped Chats list (setThreadSpace null) ends the
+  // sharing — spaceContext only ever reads current members, in both directions.
+  const draggedThread = draggedId === null ? undefined : allThreads.find((thread) => thread.id === draggedId);
+  const acceptsSpace = (spaceId: string): boolean => draggedThread !== undefined && (draggedThread.spaceId ?? null) !== spaceId;
+  const acceptsUngrouped = draggedThread?.spaceId != null;
+  async function moveThread(threadId: string, spaceId: string | null): Promise<void> {
+    const thread = allThreads.find((item) => item.id === threadId);
+    if (thread === undefined || (thread.spaceId ?? null) === spaceId || movingId !== null) return;
+    setMovingId(threadId);
+    setMoveError(null);
+    try {
+      const updated = await window.conductor.chat.setThreadSpace(threadId, spaceId);
+      useChatStore.getState().setThreadSpace(updated);
+    } catch (err) {
+      setMoveError(err instanceof Error ? err.message : 'Could not move the chat');
+    } finally {
+      setMovingId(null);
+      setDraggedId(null);
+      setDropTarget(null);
+    }
+  }
+  function onDragOverTarget(event: React.DragEvent, target: string, accepts: boolean): void {
+    if (!accepts) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTarget((current) => (current === target ? current : target));
+  }
+  function onDragLeaveTarget(event: React.DragEvent, target: string): void {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDropTarget((current) => (current === target ? null : current));
+  }
+  function onDropTarget(event: React.DragEvent, spaceId: string | null): void {
+    event.preventDefault();
+    const threadId = event.dataTransfer.getData(CHAT_THREAD_DRAG_TYPE) || draggedId;
+    setDropTarget(null);
+    if (threadId !== null) void moveThread(threadId, spaceId);
+  }
   const renderThread = (thread: ChatThread): React.JSX.Element => (
-    <li key={thread.id} className={cn('group/chat relative flex h-8 items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover')}>
+    <li
+      key={thread.id}
+      data-chat-thread-id={thread.id}
+      draggable={movingId === null}
+      title="Drag into a space to share context, or drag to Chats to remove it from its space"
+      onDragStart={(event) => {
+        setDraggedId(thread.id);
+        setMoveError(null);
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData(CHAT_THREAD_DRAG_TYPE, thread.id);
+        event.dataTransfer.setData('text/plain', thread.id);
+      }}
+      onDragEnd={() => { setDraggedId(null); setDropTarget(null); }}
+      className={cn('group/chat relative flex h-8 cursor-grab items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover active:cursor-grabbing', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover', draggedId === thread.id && 'opacity-50')}
+    >
       <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       </button>
@@ -505,13 +564,22 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
         <PlusIcon size={14} />
       </button>
     </div>
+    {moveError ? <p role="alert" className="px-2 pb-2 text-xs text-destructive-foreground">{moveError}</p> : null}
     {spaces.length === 0
       ? <p className="px-2 pb-2 text-xs text-sidebar-muted-foreground">Group chats in a space so they share context with each other.</p>
       : spaces.map((space) => {
         const members = threads.filter((thread) => thread.spaceId === space.id);
         if (query !== '' && members.length === 0) return null;
         return (
-          <section key={space.id} aria-label={`Space: ${space.name}`} className="pb-1">
+          <section
+            key={space.id}
+            aria-label={`Space: ${space.name}`}
+            data-chat-space-id={space.id}
+            onDragOver={(event) => { onDragOverTarget(event, space.id, acceptsSpace(space.id)); }}
+            onDragLeave={(event) => { onDragLeaveTarget(event, space.id); }}
+            onDrop={(event) => { if (acceptsSpace(space.id)) onDropTarget(event, space.id); }}
+            className={cn('rounded-md pb-1 transition-colors', dropTarget === space.id && 'bg-sidebar-row-hover ring-1 ring-ring/60 ring-inset')}
+          >
             <div className="group/space flex h-7 items-center gap-1 px-1.5">
               <LayersIcon size={12} className="shrink-0 text-sidebar-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={space.name}>{space.name}</span>
@@ -523,15 +591,25 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
                 <TrashIcon size={12} />
               </button>
             </div>
+            {dropTarget === space.id ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Drop to add this chat to the space</p> : null}
             {members.length === 0
-              ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Open a chat and put it in this space to share context.</p>
+              ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Drop chats here, or open a chat and put it in this space, to share context.</p>
               : <ul className="flex flex-col gap-1 pl-3">{members.map(renderThread)}</ul>}
           </section>
         );
       })}
-    <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
-    {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
-    {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : ungrouped.length === 0 && spaces.length > 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">All your chats are in spaces.</p> : <ul className="flex flex-col gap-1">{ungrouped.map(renderThread)}</ul>}
+    <div
+      data-chat-ungrouped-drop-target=""
+      onDragOver={(event) => { onDragOverTarget(event, UNGROUPED_DROP_TARGET, acceptsUngrouped); }}
+      onDragLeave={(event) => { onDragLeaveTarget(event, UNGROUPED_DROP_TARGET); }}
+      onDrop={(event) => { if (acceptsUngrouped) onDropTarget(event, null); }}
+      className={cn('rounded-md transition-colors', dropTarget === UNGROUPED_DROP_TARGET && 'bg-sidebar-row-hover ring-1 ring-ring/60 ring-inset')}
+    >
+      <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
+      {acceptsUngrouped ? <p className="px-2 pb-1 text-2xs text-sidebar-muted-foreground">{dropTarget === UNGROUPED_DROP_TARGET ? 'Drop to remove from its space — its context will no longer be shared' : 'Drag a chat here to remove it from its space'}</p> : null}
+      {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
+      {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : ungrouped.length === 0 && spaces.length > 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">All your chats are in spaces.</p> : <ul className="flex flex-col gap-1">{ungrouped.map(renderThread)}</ul>}
+    </div>
     {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={closeDelete} /> : null}
     {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
     {creatingSpace ? <SpaceNameDialog space={null} open onClose={() => { setCreatingSpace(false); }} /> : null}
