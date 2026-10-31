@@ -48,7 +48,7 @@ jobs:
     # Only this job may write: it creates/updates the GitHub Release for v* tags.
     permissions:
       contents: write
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
