@@ -77,9 +77,11 @@ jobs:
         # No Developer ID certificate is provisioned in CI, so identity
         # auto-discovery is disabled: the DMG is unsigned/not notarized
         # and Gatekeeper will warn on first launch.
+        # GH_TOKEN is deliberately NOT set here: with a token present,
+        # electron-builder auto-publishes a draft Release on tag builds.
+        # Publishing is handled explicitly by the step below instead.
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
         run: npm run dist:mac
 
       - name: Upload DMG
@@ -105,3 +107,6 @@ jobs:
               --title "Conductor $GITHUB_REF_NAME" \
               --generate-notes
           fi
+          # Guarantee the Release is visible, not left as a draft.
+          gh release edit "$GITHUB_REF_NAME" \
+            --title "Conductor $GITHUB_REF_NAME" --draft=false
