@@ -4,6 +4,10 @@
 # available in CI (CSC_IDENTITY_AUTO_DISCOVERY=false there), so Gatekeeper
 # will warn on first launch. Add a Developer ID certificate + notarization
 # credentials before distributing outside local evaluation.
+# Publishing is disabled via `--publish never` in the dist:mac script:
+# without it electron-builder auto-detects the GitHub origin and tries to
+# publish a release (requiring GH_TOKEN), which neither local builds nor
+# the artifact-upload CI job want.
 appId: com.conductor.app
 productName: Conductor
 copyright: Copyright © 2026 Conductor

@@ -17,7 +17,7 @@
     "mem0:stop": "docker compose -f services/mem0/compose.yaml stop",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist:mac": "npm run build && electron-builder --mac dmg --arm64",
+    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never",
     "preview": "electron-vite preview",
     "lint": "eslint . --max-warnings=0",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
