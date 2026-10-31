@@ -125,9 +125,3 @@ docs/           Implementation notes and operational documentation
 - New MCP servers remain untrusted until explicitly approved.
 - Source content and prior agent output are treated as untrusted reference data.
 - Destructive or privileged agent actions are gated by the active permission profile.
-
-## Current limitations
-
-- Gmail, Outlook, and Google Calendar integrations currently rely on app passwords or secret iCalendar URLs rather than OAuth.
-- Workflow branches, loops, scheduled workflow triggers, and automatic retention cleanup are not yet executable.
-- Some integrations are covered by automated fakes but have not been verified against live third-party services. See [the implementation status](docs/implementation/status.md) for details.
