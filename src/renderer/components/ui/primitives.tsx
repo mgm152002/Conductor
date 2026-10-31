@@ -3,15 +3,16 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../lib/cn';
 import { XIcon } from './icons';
 
-// Shared UI primitives in the T3 Code idiom: compact controls, hairline
-// borders, subtle hover fills, a single accent colour, and visible focus rings.
+// Shared UI primitives in the dispatch-ledger idiom: squared ticket-stub
+// controls, hairline borders, punch red for the primary action (with a hard
+// offset shadow so it reads as stamped, not floating), and visible focus rings.
 
 type Variant = 'default' | 'primary' | 'outline' | 'ghost' | 'destructive' | 'destructive-outline';
 type Size = 'xs' | 'sm' | 'md' | 'icon' | 'icon-sm';
 
 const VARIANTS: Record<Variant, string> = {
   default: 'bg-foreground text-background hover:opacity-90',
-  primary: 'bg-primary text-primary-foreground shadow-sm hover:brightness-110',
+  primary: 'bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--shadow-hard-color)] hover:brightness-110',
   outline: 'border border-border bg-card text-foreground shadow-xs hover:bg-accent',
   ghost: 'bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
   destructive: 'bg-destructive text-white hover:opacity-90',
@@ -19,11 +20,11 @@ const VARIANTS: Record<Variant, string> = {
 };
 
 const SIZES: Record<Size, string> = {
-  xs: 'h-6 gap-1 rounded-full px-2.5 text-2xs',
-  sm: 'h-7 gap-1.5 rounded-full px-3 text-xs',
-  md: 'h-8 gap-2 rounded-full px-3.5 text-sm',
-  icon: 'size-8 rounded-full',
-  'icon-sm': 'size-6 rounded-full',
+  xs: 'h-6 gap-1 rounded-md px-2.5 text-2xs',
+  sm: 'h-7 gap-1.5 rounded-md px-3 text-xs',
+  md: 'h-8 gap-2 rounded-md px-3.5 text-sm',
+  icon: 'size-8 rounded-md',
+  'icon-sm': 'size-6 rounded-md',
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -40,7 +41,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       type={type}
       className={cn(
-        'inline-flex shrink-0 cursor-pointer items-center justify-center font-medium whitespace-nowrap transition-colors',
+        'inline-flex shrink-0 cursor-pointer items-center justify-center font-medium whitespace-nowrap transition-[color,background-color,border-color,filter,transform] duration-150 active:scale-[0.97]',
         'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
         'disabled:pointer-events-none disabled:opacity-45',
         VARIANTS[variant],
@@ -61,7 +62,7 @@ export function Badge({ children, className, tone = 'neutral' }: { children: Rea
     info: 'border-info/25 bg-info/8 text-info',
     primary: 'border-primary/25 bg-primary/10 text-primary',
   } as const;
-  return <span className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-3xs font-medium whitespace-nowrap', tones[tone], className)}>{children}</span>;
+  return <span className={cn('inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-3xs font-medium whitespace-nowrap', tones[tone], className)}>{children}</span>;
 }
 
 export function Kbd({ children }: { children: ReactNode }): React.JSX.Element {
@@ -85,8 +86,8 @@ export function Alert({ children, tone = 'destructive', action }: { children: Re
 export function EmptyState({ title, description, children, icon }: { title: string; description?: ReactNode; children?: ReactNode; icon?: ReactNode }): React.JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-14 text-center">
-      {icon !== undefined ? <div className="mb-2 flex size-11 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground shadow-xs">{icon}</div> : null}
-      <p className="text-[15px] font-medium text-foreground">{title}</p>
+      {icon !== undefined ? <div className="mb-2 flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-[3px_3px_0_0_var(--shadow-hard-color)]">{icon}</div> : null}
+      <p className="font-display text-lg font-semibold text-foreground">{title}</p>
       {description !== undefined ? <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">{description}</p> : null}
       {children !== undefined ? <div className="mt-3 flex gap-2">{children}</div> : null}
     </div>
@@ -108,13 +109,22 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
 }): React.JSX.Element | null {
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
+  // Callers pass an inline onClose, so its identity changes on every render
+  // (e.g. each keystroke in a dialog field). Keep the latest in a ref: if the
+  // effect below re-ran on those renders, its cleanup would restore focus to
+  // the element focused before the dialog and typing would lose focus after
+  // one character.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    const focusable = panel.current?.querySelector<HTMLElement>('input, textarea, select, button:not([data-dialog-close])');
+    // Prefer a text field, so dialogs with inputs open ready to type.
+    const focusable = panel.current?.querySelector<HTMLElement>('input:not([type="file"]):not([type="hidden"]), textarea, select')
+      ?? panel.current?.querySelector<HTMLElement>('button:not([data-dialog-close])');
     (focusable ?? panel.current)?.focus();
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); }
       if (event.key === 'Tab' && panel.current) {
         const items = [...panel.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])')];
         if (items.length === 0) return;
@@ -126,15 +136,15 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
-  }, [open, onClose]);
+  }, [open ]);
   if (!open) return null;
   const dialog = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
-      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn('relative z-10 w-full rounded-[20px] border border-border bg-surface-raised p-5 text-foreground shadow-2xl outline-none', width)}>
+      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn('animate-pop-in relative z-10 w-full rounded-xl border border-border bg-surface-raised p-5 text-foreground shadow-2xl outline-none', width)}>
         <div className="mb-3 flex items-start justify-between gap-4">
           <div>
-            <h2 id={titleId} className="text-sm font-semibold">{title}</h2>
+            <h2 id={titleId} className="font-display text-base font-semibold">{title}</h2>
             {description !== undefined ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close" data-dialog-close><XIcon size={14} /></Button>

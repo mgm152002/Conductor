@@ -1,33 +1,20 @@
 import { useEffect } from 'react';
 import type { Task } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
-import { useUiStore, type DetailsTab } from '../../stores/ui-store';
+import { useUiStore } from '../../stores/ui-store';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/primitives';
-import { XIcon } from '../ui/icons';
-import { PlanTimelineRegion } from '../workspace/PlanTimelineRegion';
-import { VerificationRegion } from '../workspace/VerificationRegion';
+import { PullRequestIcon, XIcon } from '../ui/icons';
 import { FilesRegion } from '../workspace/FilesRegion';
-import { ContextPanelRegion } from '../workspace/ContextPanelRegion';
-import { ActivityRegion } from '../workspace/ActivityRegion';
-
-const TABS: { id: DetailsTab; label: string }[] = [
-  { id: 'plan', label: 'Plan' },
-  { id: 'checks', label: 'Checks' },
-  { id: 'files', label: 'Changes' },
-  { id: 'context', label: 'Context' },
-  { id: 'activity', label: 'Log' },
-];
 
 /**
- * Thread inspector as a floating window over the conversation (T3 style):
- * it never takes layout space or pushes the thread aside. It opens from the
- * header toggle or the floating environment card, and closes with Escape,
- * the close button, or the header toggle.
+ * The thread's diff viewer, floating over the conversation: changed files
+ * and their diffs, nothing else. Plans, checks, context and logs live in
+ * the conversation itself; artifacts are handed back there as documents.
+ * Opens from the header toggle or the environment bar, and closes with
+ * Escape, the close button, or the header toggle.
  */
 export function DetailsPanel({ task, details, embedded = false }: { task: Task; details: TaskDetails | null; embedded?: boolean }): React.JSX.Element {
-  const tab = useUiStore((s) => s.detailsTab);
-  const openDetails = useUiStore((s) => s.openDetails);
   const setOpen = useUiStore((s) => s.setDetailsOpen);
   useEffect(() => {
     if (embedded) return;
@@ -37,61 +24,25 @@ export function DetailsPanel({ task, details, embedded = false }: { task: Task; 
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('keydown', onKey); };
   }, [embedded, setOpen]);
-  const counts: Partial<Record<DetailsTab, number>> = {
-    plan: details?.steps.length ?? 0,
-    context: task.contextRefs.length,
-  };
   return (
     <aside
-      aria-label="Thread details"
+      aria-label="Changed files and diffs"
       className={cn(
         'flex min-h-0 min-w-0 flex-col',
         embedded
           ? 'h-full w-full bg-background'
-          : 'absolute top-14 right-4 bottom-4 z-20 w-[380px] max-w-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-border bg-surface-raised shadow-2xl',
+          : 'animate-slide-in absolute top-14 right-4 bottom-4 z-20 w-[380px] max-w-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-border-strong bg-surface-raised shadow-2xl',
       )}
     >
-      <div className="flex h-11 shrink-0 items-center gap-1 px-2 pt-1.5">
-        <div role="tablist" aria-label="Details" className="seg-control min-w-0 flex-1 overflow-x-auto">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              id={`${embedded ? 'work' : 'chat'}-details-${item.id}`}
-              aria-controls={`${embedded ? 'work' : 'chat'}-details-content`}
-              aria-selected={tab === item.id}
-              tabIndex={tab === item.id ? 0 : -1}
-              onClick={() => { openDetails(item.id); }}
-              onKeyDown={(event) => {
-                const index = TABS.findIndex((candidate) => candidate.id === item.id);
-                const nextIndex = event.key === 'ArrowRight' ? (index + 1) % TABS.length
-                  : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length
-                    : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : undefined;
-                if (nextIndex === undefined) return;
-                event.preventDefault();
-                const next = TABS[nextIndex]!;
-                openDetails(next.id);
-                document.getElementById(`${embedded ? 'work' : 'chat'}-details-${next.id}`)?.focus();
-              }}
-              data-active={tab === item.id}
-              className={cn(
-                'seg-item shrink-0 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-              )}
-            >
-              {item.label}
-              {(counts[item.id] ?? 0) > 0 ? <span className="text-3xs text-muted-foreground tabular-nums">{counts[item.id]}</span> : null}
-            </button>
-          ))}
-        </div>
-        {!embedded ? <Button size="icon-sm" variant="ghost" aria-label="Close details" onClick={() => { setOpen(false); }}><XIcon size={13} /></Button> : null}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+        <span aria-hidden="true" className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <PullRequestIcon size={12} />
+        </span>
+        <h2 className="min-w-0 flex-1 truncate font-display text-sm font-semibold text-foreground">Changes</h2>
+        {!embedded ? <Button size="icon-sm" variant="ghost" aria-label="Close changes" onClick={() => { setOpen(false); }}><XIcon size={13} /></Button> : null}
       </div>
-      <div role="tabpanel" id={`${embedded ? 'work' : 'chat'}-details-content`} aria-labelledby={`${embedded ? 'work' : 'chat'}-details-${tab}`} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 [overflow-wrap:anywhere]">
-        {tab === 'plan' ? <PlanTimelineRegion task={task} details={details} /> : null}
-        {tab === 'checks' ? <VerificationRegion task={task} details={details} /> : null}
-        {tab === 'files' ? <FilesRegion task={task} details={details} /> : null}
-        {tab === 'context' ? <ContextPanelRegion task={task} /> : null}
-        {tab === 'activity' ? <ActivityRegion details={details} /> : null}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 [overflow-wrap:anywhere]">
+        <FilesRegion task={task} details={details} />
       </div>
     </aside>
   );

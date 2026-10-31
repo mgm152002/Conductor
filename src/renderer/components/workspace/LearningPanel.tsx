@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
+import { MenuSelect } from '../ui/MenuSelect';
+import { ProviderAvatar, agentBrand, modelBrand } from '../ui/BrandMarks';
 import type { AutoExecuteRule, ImprovementProposal } from '@shared/domain';
 import type { AgentStat } from '@shared/integrations-contract';
 import type { LearningConfig, LearningStatus } from '@shared/learning-contract';
 import { LEARNING_INTERVAL_MS } from '@shared/learning-contract';
 import { relativeTime, formatDuration } from '../../lib/time';
-import { Badge, Button, Dialog, EmptyState, Switch, inputClassName } from '../ui/primitives';
-import { BrainIcon } from '../ui/icons';
+import { Badge, Button, Dialog, EmptyState, Switch } from '../ui/primitives';
+import { BrainIcon, SparklesIcon } from '../ui/icons';
 import type { AgentOption } from '@shared/integrations-contract';
 import { useAgentModels } from '../../hooks/useAgentModels';
 
@@ -78,21 +80,21 @@ export function LearningPanel(): React.JSX.Element {
 
       <div className="flex flex-col gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><BrainIcon size={14} className="text-muted-foreground" />Learning LLM</h2>
-        <p className="text-xs text-muted-foreground">Approve one installed agent to analyze routing. It runs read-only over each agent&apos;s success rate and the recent audit log — it can only suggest routing, and every suggestion is checked against the measured evidence before it is proposed or applied.</p>
+        <p className="text-xs text-muted-foreground">Runs read-only. It can only suggest routing.</p>
         <label className="flex flex-col gap-1 text-xs">
           <span className="font-medium text-foreground">Approved LLM (agent)</span>
-          <select aria-label="Approved learning LLM" className={inputClassName} value={agentId} onChange={(e) => { setAgentId(e.target.value); setModel(''); }}>
-            <option value="">Select an agent…</option>
-            {agents.map((a) => <option key={a.id} value={a.id} disabled={!a.available}>{a.name} ({a.id}){a.available ? '' : ' — unavailable'}</option>)}
-          </select>
+          <MenuSelect variant="box" label="Approved learning LLM" value={agentId} onChange={(next) => { setAgentId(next); setModel(''); }} options={[
+            { value: '', label: 'Select an agent…' },
+            ...agents.map((a) => ({ value: a.id, label: `${a.name} (${a.id})`, disabled: !a.available, ...(a.available ? {} : { hint: 'Unavailable' }), mark: <ProviderAvatar brand={agentBrand(a.id)} label={a.name} size={13} /> })),
+          ]} />
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <span className="font-medium text-foreground">Model</span>
-          <select aria-label="Learning LLM model" className={inputClassName} value={model} disabled={agentId === '' || catalog === null} onChange={(e) => { setModel(e.target.value); }}>
-            <option value="">Default / Auto</option>
-            {savedModelMissing ? <option value={model}>{model} (saved — not in this agent&apos;s catalog)</option> : null}
-            {(catalog?.models ?? []).map((m) => <option key={m.id} value={m.id}>{m.label} ({m.id}){m.isDefault ? ' — default' : ''} · {m.tier}</option>)}
-          </select>
+          <MenuSelect variant="box" searchable label="Learning LLM model" value={model} disabled={agentId === '' || catalog === null} onChange={setModel} options={[
+            { value: '', label: 'Default / Auto', mark: <SparklesIcon size={13} /> },
+            ...(savedModelMissing ? [{ value: model, label: model, hint: 'Saved — not in catalog' }] : []),
+            ...(catalog?.models ?? []).map((m) => ({ value: m.id, label: `${m.label} (${m.id})`, hint: `${m.isDefault ? 'Default · ' : ''}${m.tier}`, mark: <ProviderAvatar brand={modelBrand(m.id)} label={m.label} size={13} /> })),
+          ]} />
           {agentId !== '' && catalog !== null && catalog.models.length === 0 ? <span className="text-2xs text-muted-foreground">This agent reported no model list; Default / Auto will be used.</span> : null}
           {agentId !== '' && catalog === null ? <span className="text-2xs text-muted-foreground">Loading models…</span> : null}
         </label>
@@ -102,7 +104,7 @@ export function LearningPanel(): React.JSX.Element {
           </Button>
           {approvedAgent !== undefined ? <Badge tone="success">Approved: {approvedAgent}{config?.analyzerModel ? ` · ${config.analyzerModel}` : ''}</Badge> : <Badge tone="warning">No LLM approved — cron will skip</Badge>}
         </div>
-        <p className="text-2xs text-muted-foreground">Changing the approved LLM or its model purges old routing approvals, so routing decided under the previous analyzer does not carry over.</p>
+        <p className="text-2xs text-muted-foreground">Changing this clears old routing approvals.</p>
       </div>
 
       <div className="flex flex-col gap-3">

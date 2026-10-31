@@ -65,7 +65,7 @@ export function SkillAutomationPanel({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 id="automation-bindings-heading" className="text-sm font-semibold text-foreground">Automation bindings</h2>
-            <p className="mt-0.5 text-2xs text-muted-foreground">Vendor keys automatically select the current version of their learned skill.</p>
+            <p className="mt-0.5 text-2xs text-muted-foreground">Uses the current skill version.</p>
           </div>
           <Button variant="outline" size="xs" onClick={onRetry} disabled={mutating}>Refresh</Button>
         </div>

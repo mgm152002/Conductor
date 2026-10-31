@@ -49,7 +49,7 @@ export function RemoteHosts(): React.JSX.Element {
       <header className="flex items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><ServerIcon size={15} className="text-muted-foreground" />Remote hosts</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Run Codex on another machine over SSH (key-based, non-interactive). Choose the host in the composer’s agent menu.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Over SSH. Pick the host in the composer.</p>
         </div>
         <Button size="sm" variant="primary" onClick={() => { setForm({ name: '', host: '', remoteDir: '~/', installIfMissing: false }); setError(null); setAdding(true); }}><PlusIcon size={13} />Add host</Button>
       </header>

@@ -22,6 +22,7 @@ function applyAppearance(appearance: Appearance): void {
 
 export function useSystemAppearance(): Appearance {
   const appearance = useThemeStore((state) => state.appearance);
+  const accent = useThemeStore((state) => state.accent);
   const setAppearance = useThemeStore((state) => state.setAppearance);
 
   useEffect(() => {
@@ -54,6 +55,11 @@ export function useSystemAppearance(): Appearance {
   useEffect(() => {
     applyAppearance(appearance);
   }, [appearance]);
+
+  // The accent theme is a `data-accent` attribute the CSS keys off.
+  useEffect(() => {
+    document.documentElement.dataset.accent = accent;
+  }, [accent]);
 
   return appearance;
 }

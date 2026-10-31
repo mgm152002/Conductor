@@ -1,4 +1,6 @@
 import type { SkillExportFormat, SkillScope, SkillVersion, SkillVersionBody } from '@shared/domain';
+import { MenuSelect } from '../ui/MenuSelect';
+import { ProviderAvatar, agentBrand } from '../ui/BrandMarks';
 import { Badge, Button, Dialog, EmptyState, Alert, inputClassName, textareaClassName } from '../ui/primitives';
 import { FileTextIcon, RotateIcon, Spinner } from '../ui/icons';
 import { cn } from '../../lib/cn';
@@ -66,7 +68,7 @@ function OverviewTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
       <section className="space-y-3">
         <div>
           <h3 className="text-xs font-semibold text-foreground">Identity</h3>
-          <p className="mt-0.5 text-2xs text-muted-foreground">Name and scope cannot change after the first save; create a new skill to change them.</p>
+          <p className="mt-0.5 text-2xs text-muted-foreground">Fixed after the first save.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <FieldBlock label="Skill name">
@@ -82,17 +84,11 @@ function OverviewTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
             />
           </FieldBlock>
           <FieldBlock label="Scope">
-            <select
-              className={inputClassName}
-              aria-label="Skill scope"
-              disabled={!!selected}
-              value={form.scope}
-              onChange={(event) => changeForm({ scope: event.target.value as SkillScope, scopeRef: '' })}
-            >
-              <option value="global">Global</option>
-              <option value="project">Project</option>
-              <option value="workflow">Workflow</option>
-            </select>
+            <MenuSelect variant="box" label="Skill scope" disabled={!!selected} value={form.scope} onChange={(next) => changeForm({ scope: next as SkillScope, scopeRef: '' })} options={[
+              { value: 'global', label: 'Global' },
+              { value: 'project', label: 'Project' },
+              { value: 'workflow', label: 'Workflow' },
+            ]} />
           </FieldBlock>
         </div>
         {form.scope !== 'global' ? (
@@ -100,16 +96,10 @@ function OverviewTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
             {selected ? (
               <input className={inputClassName} aria-label="Skill scope reference" disabled value={form.scopeRef} />
             ) : (
-              <select
-                className={inputClassName}
-                aria-label="Skill scope reference"
-                required
-                value={form.scopeRef}
-                onChange={(event) => changeForm({ scopeRef: event.target.value })}
-              >
-                <option value="">Choose {form.scope}</option>
-                {referenceOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-              </select>
+              <MenuSelect variant="box" label="Skill scope reference" value={form.scopeRef} onChange={(next) => changeForm({ scopeRef: next })} options={[
+                { value: '', label: `Choose ${form.scope}` },
+                ...referenceOptions.map((option) => ({ value: option.id, label: option.name })),
+              ]} />
             )}
           </FieldBlock>
         ) : null}
@@ -279,7 +269,7 @@ function VersionsTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
       <section className="space-y-2">
         <div>
           <h3 className="text-xs font-semibold text-foreground">Version history</h3>
-          <p className="mt-0.5 text-2xs text-muted-foreground">Every confirmed save appends a version. Restoring keeps all prior versions.</p>
+          <p className="mt-0.5 text-2xs text-muted-foreground">Each save adds a version.</p>
         </div>
         {versions.length === 0 ? (
           <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Spinner size={13} />Loading version history…</div>
@@ -351,28 +341,20 @@ function ExportTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
       <section className="space-y-3">
         <div>
           <h3 className="text-xs font-semibold text-foreground">Export current saved version</h3>
-          <p className="mt-0.5 text-2xs text-muted-foreground">Generate a portable instruction file. Downloading does not install or alter an agent.</p>
+          <p className="mt-0.5 text-2xs text-muted-foreground">Exports a file. Installs nothing.</p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <FieldBlock label="Export target">
-            <select className={inputClassName} aria-label="Export target" disabled={busy} value={agentId} onChange={(event) => setAgentId(event.target.value)}>
-              <option value="portable-file">Portable instruction file</option>
-              {adapters.map((adapter) => (
-                <option key={adapter.id} value={adapter.id}>{adapter.name}{adapter.available ? '' : ' (unavailable)'}</option>
-              ))}
-            </select>
+            <MenuSelect variant="box" label="Export target" disabled={busy} value={agentId} onChange={setAgentId} options={[
+              { value: 'portable-file', label: 'Portable instruction file', mark: <FileTextIcon size={13} /> },
+              ...adapters.map((adapter) => ({ value: adapter.id, label: adapter.name, ...(adapter.available ? {} : { hint: 'Unavailable' }), mark: <ProviderAvatar brand={agentBrand(adapter.id)} label={adapter.name} size={13} /> })),
+            ]} />
           </FieldBlock>
           <FieldBlock label="Instruction format">
-            <select
-              className={inputClassName}
-              aria-label="Instruction format"
-              disabled={busy}
-              value={format}
-              onChange={(event) => setFormat(event.target.value as SkillExportFormat)}
-            >
-              <option value="markdown">Markdown</option>
-              <option value="json">JSON</option>
-            </select>
+            <MenuSelect variant="box" label="Instruction format" disabled={busy} value={format} onChange={(next) => setFormat(next as SkillExportFormat)} options={[
+              { value: 'markdown', label: 'Markdown' },
+              { value: 'json', label: 'JSON' },
+            ]} />
           </FieldBlock>
         </div>
         <Button variant="primary" size="sm" type="button" disabled={busy || !agentId} onClick={() => void exportSkill()}>

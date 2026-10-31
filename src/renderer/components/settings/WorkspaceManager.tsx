@@ -3,7 +3,9 @@ import type { Workspace } from '@shared/domain';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { DeleteProjectDialog } from '../projects/DeleteProjectDialog';
 import { Button } from '../ui/primitives';
-import { TrashIcon } from '../ui/icons';
+import { ImageIcon, TrashIcon } from '../ui/icons';
+import { EntityIcon } from '../ui/EntityIcon';
+import { IconPickerDialog } from '../icons/IconPickerDialog';
 
 // Workspace create/list/select wired to the `window.conductor.workspace` bridge
 // (Requirement 2, surfaced for task 5.2). Listing loads on mount; create
@@ -19,6 +21,7 @@ export function WorkspaceManager(): React.JSX.Element {
   const [rootPath, setRootPath] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<Workspace | null>(null);
+  const [iconProject, setIconProject] = useState<Workspace | null>(null);
 
   const canCreate =
     name.trim().length > 0 && rootPath.trim().length > 0 && !submitting;
@@ -43,26 +46,27 @@ export function WorkspaceManager(): React.JSX.Element {
   }
 
   return (
-    <section className="flex flex-col gap-4">
+    <section className="flex flex-col gap-3">
       {deleting !== null ? <DeleteProjectDialog project={deleting} open onClose={() => { setDeleting(null); }} /> : null}
+      {iconProject !== null ? <IconPickerDialog key={iconProject.id} target={{ kind: 'project', id: iconProject.id, name: iconProject.name, icon: iconProject.icon ?? null }} open onClose={() => { setIconProject(null); }} /> : null}
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-foreground">
+        <h2 className="text-[13px] font-semibold text-foreground">
           Workspaces
         </h2>
         {loading ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             Loading workspaces…
           </p>
         ) : workspaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             No workspaces yet. Create one below to start.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border">
             {workspaces.map((workspace) => {
               const isActive = workspace.id === activeWorkspaceId;
               return (
-                <li key={workspace.id} className="flex items-stretch gap-1.5">
+                <li key={workspace.id} className="flex items-stretch">
                   <button
                     type="button"
                     onClick={() => {
@@ -73,26 +77,30 @@ export function WorkspaceManager(): React.JSX.Element {
                     aria-pressed={isActive}
                     className={
                       isActive
-                        ? 'flex w-full flex-col items-start gap-0.5 bg-accent px-3 py-2.5 text-left'
-                        : 'flex w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-accent'
+                        ? 'flex w-full min-w-0 flex-col items-start gap-0.5 bg-accent px-3 py-2 text-left'
+                        : 'flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors hover:bg-accent'
                     }
                   >
                     <span className="flex w-full items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">
+                      <span className="flex min-w-0 items-center gap-2 truncate text-[13px] font-medium text-foreground">
+                        <EntityIcon icon={workspace.icon ?? null} name={workspace.name} kind="project" />
                         {workspace.name}
                       </span>
                       {isActive ? (
-                        <span className="text-xs font-medium text-success">
+                        <span className="shrink-0 text-2xs font-medium text-success">
                           Active
                         </span>
                       ) : null}
                     </span>
-                    <span className="truncate font-mono text-xs text-muted-foreground">
+                    <span className="w-full truncate font-mono text-2xs text-muted-foreground">
                       {workspace.rootPath}
                     </span>
                   </button>
-                  <Button variant="destructive-outline" size="sm" className="h-auto self-stretch" aria-label={`Delete ${workspace.name}`} onClick={() => { setDeleting(workspace); }}>
-                    <TrashIcon size={13} />Delete
+                  <Button variant="outline" size="sm" className="m-1.5 shrink-0 self-center" aria-label={`Icon for ${workspace.name}`} onClick={() => { setIconProject(workspace); }}>
+                    <ImageIcon size={12} />Icon
+                  </Button>
+                  <Button variant="destructive-outline" size="sm" className="m-1.5 shrink-0 self-center" aria-label={`Delete ${workspace.name}`} onClick={() => { setDeleting(workspace); }}>
+                    <TrashIcon size={12} />Delete
                   </Button>
                 </li>
               );
@@ -102,7 +110,7 @@ export function WorkspaceManager(): React.JSX.Element {
       </div>
 
       <form
-        className="flex flex-col gap-2 rounded-xl bg-muted/50 p-3"
+        className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3"
         onSubmit={(event) => {
           void handleCreate(event);
         }}
@@ -110,7 +118,7 @@ export function WorkspaceManager(): React.JSX.Element {
       >
         <label
           htmlFor="workspace-name"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-2xs font-medium text-muted-foreground"
         >
           Name
         </label>
@@ -122,12 +130,12 @@ export function WorkspaceManager(): React.JSX.Element {
           onChange={(event) => {
             setName(event.target.value);
           }}
-          className="inset-field px-3 py-2 text-sm"
+          className="inset-field h-8 px-2.5 text-[13px]"
           placeholder="My project"
         />
         <label
           htmlFor="workspace-root"
-          className="text-xs font-medium text-muted-foreground"
+          className="text-2xs font-medium text-muted-foreground"
         >
           Root path
         </label>
@@ -138,19 +146,15 @@ export function WorkspaceManager(): React.JSX.Element {
           onChange={(event) => {
             setRootPath(event.target.value);
           }}
-          className="inset-field px-3 py-2 font-mono text-sm"
+          className="inset-field h-8 px-2.5 font-mono text-[13px]"
           placeholder="/Users/you/projects/my-project"
         />
         {error !== null ? (
           <p className="text-xs text-destructive-foreground">{error}</p>
         ) : null}
-        <button
-          type="submit"
-          disabled={!canCreate}
-          className="self-start rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+        <Button variant="primary" size="sm" type="submit" disabled={!canCreate} className="self-start">
           {submitting ? 'Creating…' : 'Create workspace'}
-        </button>
+        </Button>
       </form>
     </section>
   );

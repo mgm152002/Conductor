@@ -78,6 +78,13 @@ export function Spinner({ size = 14, className }: { size?: number; className?: s
     </svg>
   );
 }
+export const ChartIcon = (p: IconProps) => <Icon {...p}><path d="M4 4v15a1 1 0 0 0 1 1h15" /><path d="M8 16v-5M12 16V8M16 16v-8M20 16V5" /></Icon>;
+export const DownloadIcon = (p: IconProps) => <Icon {...p}><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></Icon>;
+export const MonitorIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16v4" /></Icon>;
+export const GitBranchIcon = (p: IconProps) => <Icon {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 3.5-4 3.6-7 5" /></Icon>;
+export const HomeIcon = (p: IconProps) => <Icon {...p}><path d="m3 11 9-8 9 8" /><path d="M5.5 9.5V20a1 1 0 0 0 1 1h4v-6h3v6h4a1 1 0 0 0 1-1V9.5" /></Icon>;
+export const GradCapIcon = (p: IconProps) => <Icon {...p}><path d="m12 4 10 5-10 5L2 9z" /><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5" /><path d="M22 9v5" /></Icon>;
+export const TicketIcon = (p: IconProps) => <Icon {...p}><path d="M4 8a2 2 0 0 1 0-4h16v4a2.5 2.5 0 0 0 0 5v4H4v-4a2.5 2.5 0 0 0 0-5z" /><path d="M14 5v2M14 11v2M14 17v2" /></Icon>;
 export const MailIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3.5 6.5 8.5 6 8.5-6" /></Icon>;
 export const CalendarIcon = (p: IconProps) => <Icon {...p}><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M8 3v4M16 3v4M3.5 10h17" /></Icon>;
 export const MessageIcon = (p: IconProps) => <Icon {...p}><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" /></Icon>;

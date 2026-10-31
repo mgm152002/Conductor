@@ -7,12 +7,12 @@ import { diffLineKind } from '../../lib/diff';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/primitives';
 import { ChevronRightIcon, RotateIcon, Spinner } from '../ui/icons';
-import { ArtifactsRegion } from './ArtifactsRegion';
 import { RegionCard } from './RegionCard';
 
-// The Files tab: uncommitted Git changes with per-file unified diffs, followed
-// by the outputs the task actually recorded. Everything is read-only; the main
-// process resolves paths inside the workspace and bounds/redacts diff text.
+// Changed files and their unified diffs — the whole of this panel.
+// Everything is read-only; the main process resolves paths inside the
+// workspace and bounds/redacts diff text. Task outputs are not here: they
+// are handed back in the chat as document cards.
 
 const STATUS: Record<ChangedFileStatus, { label: string; letter: string; textClass: string }> = {
   added: { label: 'Added', letter: 'A', textClass: 'text-success' },
@@ -200,7 +200,6 @@ export function FilesRegion({ task, details }: { task: Task | null; details: Tas
           </ul>
         ) : null}
       </RegionCard>
-      <ArtifactsRegion task={task} details={details} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Alert, Button } from '../components/ui/primitives';
-import { CheckIcon, PlusIcon } from '../components/ui/icons';
+import { CheckIcon, PlusIcon, SparklesIcon } from '../components/ui/icons';
 import { SkillEditorPanel } from '../components/skills/SkillEditorPanel';
 import { SkillAutomationPanel } from '../components/skills/SkillAutomationPanel';
 import { SkillsListPanel } from '../components/skills/SkillsListPanel';
@@ -27,7 +27,9 @@ export function SkillsScreenView({ controller }: { controller: SkillsController 
   return (
     <ScreenScaffold
       title="Skills"
-      description="Reusable procedures Conductor can learn, version, and reuse. Pick a skill to edit its tabs, or review changes before saving."
+      screen="skills"
+      layout="dashboard"
+      icon={<SparklesIcon size={14} />}
       actions={screenTab === 'skills' ? (
         <Button variant="primary" size="sm" onClick={createNew} disabled={busy}>
           <PlusIcon size={13} />
@@ -72,7 +74,7 @@ export function SkillsScreenView({ controller }: { controller: SkillsController 
         ) : null}
 
         {screenTab === 'skills' ? (
-          <div id="skills-section-skills" role="tabpanel" aria-labelledby="skills-tab-skills" className="grid items-start gap-5 lg:grid-cols-[minmax(15rem,17rem)_minmax(0,1fr)]">
+          <div id="skills-section-skills" role="tabpanel" aria-labelledby="skills-tab-skills" className="grid items-start gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
             <SkillsListPanel
               skills={items}
               visible={visible}

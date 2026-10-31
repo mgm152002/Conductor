@@ -3,14 +3,18 @@ import { FolderConnectors } from '../components/connected-apps/FolderConnectors'
 import { McpServers } from '../components/connected-apps/McpServers';
 import { RemoteHosts } from '../components/connected-apps/RemoteHosts';
 import { ScreenScaffold } from './ScreenScaffold';
+import { PlugIcon } from '../components/ui/icons';
 
 export function ConnectedAppsScreen(): React.JSX.Element {
   return (
     <ScreenScaffold
       title="Connections"
-      description="Sources Conductor indexes for context, the agents it routes tasks to (local CLIs and remote hosts), and MCP tools."
+      screen="connected-apps"
+      layout="wide"
+      icon={<PlugIcon size={14} />}
     >
-      <div className="flex flex-col gap-10">
+      {/* Integrations hub: four independent panels in a 2x2, sources first. */}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <FolderConnectors />
         <CliCatalog />
         <RemoteHosts />

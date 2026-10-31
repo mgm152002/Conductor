@@ -1,6 +1,9 @@
-// A CLI's "logo" in the app's visual idiom: a small monogram tile in a
-// colour derived from the agent id, like the project tiles in the sidebar.
-// Used wherever an agent/model switch needs to be attributed at a glance.
+import { BrandMark, agentBrand } from '../ui/BrandMarks';
+
+// A CLI's logo: the provider's real brand mark (vendored open-source
+// logos, see BrandMarks) on a tile in a colour derived from the agent id.
+// Agents without a known logo keep the monogram tile. Used wherever an
+// agent/model switch needs to be attributed at a glance.
 
 const HUES = [222, 262, 190, 150, 24, 340, 96, 12];
 
@@ -18,6 +21,7 @@ function initials(name: string): string {
 }
 
 export function AgentMark({ agentId, name, size = 18 }: { agentId: string; name: string; size?: number }): React.JSX.Element {
+  const brand = agentBrand(agentId);
   return (
     <span
       aria-hidden="true"
@@ -28,7 +32,7 @@ export function AgentMark({ agentId, name, size = 18 }: { agentId: string; name:
         backgroundColor: `hsl(${hueFor(agentId)} 45% 42%)`,
       }}
     >
-      {initials(name)}
+      {brand !== null ? <BrandMark brand={brand} size={Math.round(size * 0.62)} /> : initials(name)}
     </span>
   );
 }

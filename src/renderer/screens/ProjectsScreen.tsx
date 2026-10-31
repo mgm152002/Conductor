@@ -1,11 +1,14 @@
 import { ScreenScaffold } from './ScreenScaffold';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
+import { FolderIcon } from '../components/ui/icons';
 
 export function ProjectsScreen(): React.JSX.Element {
   return (
     <ScreenScaffold
       title="Projects"
-      description="Organize work into projects, each with its own context, memory, and connected sources."
+      screen="projects"
+      layout="wide"
+      icon={<FolderIcon size={14} />}
     >
       <WorkspaceManager />
     </ScreenScaffold>

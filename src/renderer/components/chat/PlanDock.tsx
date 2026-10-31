@@ -50,7 +50,7 @@ export function PlanDock({ task, details }: { task: Task; details: TaskDetails |
 
   return (
     <section aria-label="Pinned plan tasks" className="mx-auto mb-2 w-full max-w-(--chat-max)">
-      <div className="overflow-hidden rounded-2xl border border-border/70 bg-surface-raised/95 shadow-sm">
+      <div className="bar-card">
         <button
           type="button"
           onClick={() => { setOpen((value) => !value); }}

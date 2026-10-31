@@ -49,7 +49,9 @@ export function AppLayout(): React.JSX.Element {
             ) : null}
           </div>
         ) : null}
-        <div className="min-h-0 flex-1">
+        {/* One page-in per top-level navigation; deeper route changes (a
+            different PR, another thread) keep the same key and don't replay. */}
+        <div key={pathname.split('/')[1] ?? ''} className="animate-page-in min-h-0 flex-1">
           <Outlet />
         </div>
       </main>

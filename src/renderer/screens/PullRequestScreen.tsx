@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { MenuSelect } from '../components/ui/MenuSelect';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { PrMergeMethod, PullRequestBundle } from '@shared/github-contract';
 import { usePrStore, useTaskStore } from '../stores';
@@ -137,7 +138,7 @@ export function PullRequestScreen(): React.JSX.Element {
                   <Button size="xs" variant="outline" onClick={() => { void window.conductor.github.openPr(detail.url).catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)); }); }}><ExternalLinkIcon size={11} /> GitHub</Button>
                 </span>
               </div>
-              <h1 className="text-lg font-semibold text-foreground">{detail.title} <span className="font-normal text-muted-foreground">#{detail.number}</span></h1>
+              <h1 className="font-display text-[22px] font-semibold text-foreground">{detail.title} <span className="font-normal text-muted-foreground">#{detail.number}</span></h1>
               <p className="text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{detail.author}</span> wants to merge
                 {' '}<span className="font-mono">{detail.headBranch}</span> into <span className="font-mono">{detail.baseBranch}</span>
@@ -157,7 +158,7 @@ export function PullRequestScreen(): React.JSX.Element {
             <div role="tablist" aria-label="Pull request sections" className="flex gap-1 border-b border-border">
               {TABS.map((t) => (
                 <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => { setTab(t.id); }}
-                  className={cn('cursor-pointer border-b-2 px-3 py-2 text-[13px] focus-visible:outline-2 focus-visible:outline-ring', tab === t.id ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+                  className={cn('cursor-pointer border-b-2 px-3 py-2 text-[13px] transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring', tab === t.id ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}>
                   {t.label}{t.id === 'files' ? ` (${bundle.files.length})` : t.id === 'commits' ? ` (${bundle.commits.length})` : t.id === 'conversation' ? ` (${bundle.comments.length})` : t.id === 'checks' ? ` (${bundle.checks.length})` : ''}
                 </button>
               ))}
@@ -175,9 +176,11 @@ export function PullRequestScreen(): React.JSX.Element {
                   <p className="mt-0.5 text-xs text-muted-foreground">{detail.draft ? 'Draft pull requests cannot be merged.' : detail.mergeableState !== undefined ? `Merge status: ${detail.mergeableState.replaceAll('_', ' ')}.` : ''}{checksFailed ? ' Some checks are failing — review Checks before merging.' : ''}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Method
-                      <select aria-label="Merge method" value={method} onChange={(e) => { setMethod(e.target.value as PrMergeMethod); }} className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground">
-                        <option value="merge">Merge commit</option><option value="squash">Squash and merge</option><option value="rebase">Rebase and merge</option>
-                      </select>
+                      <MenuSelect variant="box" label="Merge method" value={method} onChange={(next) => { setMethod(next as PrMergeMethod); }} options={[
+                        { value: 'merge', label: 'Merge commit' },
+                        { value: 'squash', label: 'Squash and merge' },
+                        { value: 'rebase', label: 'Rebase and merge' },
+                      ]} />
                     </label>
                     <Button size="sm" variant="primary" disabled={!canMerge || busy !== null} onClick={() => { setConfirmMerge(true); }}><CheckIcon size={12} /> Merge pull request</Button>
                     <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { void run('approve', () => window.conductor.github.reviewPr({ workspaceId, number, event: 'APPROVE' }), 'Approved.'); }}>Approve</Button>

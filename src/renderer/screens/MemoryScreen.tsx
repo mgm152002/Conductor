@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useRef, useState } from 'react';
+import { MenuSelect } from '../components/ui/MenuSelect';
 import type { ContextItem, ContextScope, MemoryLayer, MemoryRecord, Provenance, Veracity } from '@shared/domain';
 import type { KnowledgeBridge, KnowledgeRequest, MemoryInspection } from '@shared/knowledge-contract';
 import { ScreenScaffold } from './ScreenScaffold';
@@ -17,19 +18,17 @@ const layers: MemoryLayer[] = ['personal', 'project', 'task', 'procedural'];
 const scopes: ContextScope['level'][] = ['global', 'project', 'task', 'workflow', 'source'];
 const trust: Veracity[] = ['unverified_assumption', 'inferred', 'observed_fact'];
 const message = (error: unknown): string => (error instanceof Error ? error.message : 'The request failed. Try again.');
-const select = `${inputClassName} cursor-pointer appearance-none pr-8`;
 const label = 'text-xs font-medium text-muted-foreground';
 
 function api(): KnowledgeBridge { return window.conductor as typeof window.conductor & KnowledgeBridge; }
 
 /** A select with a chevron affordance, matching the input styling. */
 function Select({ title, value, onChange, children }: { title: string; value: string; onChange: (v: string) => void; children: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="relative">
-      <select aria-label={title} className={select} value={value} onChange={(e) => onChange(e.target.value)}>{children}</select>
-      <ChevronDownIcon size={13} className="pointer-events-none absolute inset-y-0 right-2.5 my-auto text-muted-foreground" />
-    </div>
-  );
+  const options = Children.toArray(children).flatMap((child) => {
+    if (!isValidElement<{ value?: string; children?: React.ReactNode }>(child)) return [];
+    return [{ value: child.props.value ?? '', label: String(child.props.children ?? child.props.value ?? '') }];
+  });
+  return <MenuSelect variant="box" label={title} value={value} onChange={onChange} options={options} />;
 }
 
 function Field({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }): React.JSX.Element {
@@ -184,7 +183,7 @@ function Inspector({ entry, inspection, busy, onCorrect, onDelete, onClose }: {
         ) : null}
         <form className="space-y-2 border-t border-border pt-4" onSubmit={(e) => { e.preventDefault(); void onCorrect(content); }}>
           <label className="flex flex-col gap-1.5"><span className={label}>Corrected content</span><textarea className={textareaClassName} rows={4} required value={content} maxLength={100_000} onChange={(e) => setContent(e.target.value)} /></label>
-          <p className="text-2xs text-muted-foreground">Saving a correction confirms this as an observed fact and records you as the source.</p>
+          <p className="text-2xs text-muted-foreground">Saved as an observed fact, with you as the source.</p>
           <Button variant="primary" size="md" type="submit" disabled={busy || !content.trim()} className="w-full"><PencilIcon size={13} />Save correction</Button>
         </form>
       </div>
@@ -337,7 +336,7 @@ export function MemoryScreen(): React.JSX.Element {
   );
 
   return (
-    <ScreenScaffold title="Memory" description="Search lasting knowledge and inspect the context Conductor uses. Every item shows its source, confidence, and classification." actions={headerActions}>
+    <ScreenScaffold title="Memory" actions={headerActions} screen="memory" layout="dashboard" icon={<BrainIcon size={14} />}>
       <div className="space-y-4 text-foreground">
         {/* Segmented view toggle */}
         <div className="inline-flex rounded-lg bg-muted/50 p-0.5" role="tablist" aria-label="Knowledge category">
@@ -367,7 +366,7 @@ export function MemoryScreen(): React.JSX.Element {
               <input
                 className={cn(inputClassName, 'h-9 pl-8.5')}
                 value={draft.text}
-                placeholder={view === 'memory' ? 'Search by meaning, or leave blank to browse' : 'Search context, or leave blank to browse'}
+                placeholder={view === 'memory' ? 'Search memories' : 'Search context'}
                 onChange={(e) => setDraft({ ...draft, text: e.target.value })}
               />
             </div>
@@ -409,7 +408,7 @@ export function MemoryScreen(): React.JSX.Element {
         <div className="grid items-start gap-5 xl:grid-cols-[1fr_minmax(20rem,24rem)]">
           <section className="space-y-3" aria-label="Search results" aria-busy={loading}>
             <p className="text-xs text-muted-foreground">
-              {view === 'memory' ? 'Ranked by meaning with Mem0; newest first when browsing. Expired and replaced memories are excluded.' : 'Current context, newest first.'} Up to 100 items.
+              Newest first · 100 max
             </p>
             {loading ? (
               <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-12 text-sm text-muted-foreground"><Spinner size={15} />Loading {view === 'memory' ? 'memories' : 'context'}…</div>
@@ -417,13 +416,13 @@ export function MemoryScreen(): React.JSX.Element {
               <EmptyState
                 icon={view === 'memory' ? <BrainIcon size={26} /> : <DatabaseIcon size={26} />}
                 title={activeFilterCount > 0 || filters.text.trim() ? 'No matches' : `No ${view === 'memory' ? 'memories' : 'context items'} yet`}
-                description={activeFilterCount > 0 || filters.text.trim() ? 'Adjust your search or filters.' : `Create your first ${view === 'memory' ? 'memory' : 'context item'} to get started.`}
+                description={activeFilterCount > 0 || filters.text.trim() ? 'Adjust your filters.' : undefined}
               >
                 <Button variant="primary" size="sm" onClick={() => setCreating(true)}><PlusIcon size={13} />Add {view === 'memory' ? 'memory' : 'context'}</Button>
               </EmptyState>
             ) : (
               <ul className="space-y-2.5">
-                {entries.map((entry) => <li key={entry.id}><ResultCard entry={entry} active={selected?.id === entry.id} disabled={busy || loading} onClick={() => void inspect(entry.id)} /></li>)}
+                {entries.map((entry) => <li key={entry.id} className="row-in"><ResultCard entry={entry} active={selected?.id === entry.id} disabled={busy || loading} onClick={() => void inspect(entry.id)} /></li>)}
               </ul>
             )}
           </section>
@@ -431,7 +430,7 @@ export function MemoryScreen(): React.JSX.Element {
             <Inspector key={selected.id + selected.content} entry={selected} inspection={inspection} busy={busy} onCorrect={correct} onDelete={remove} onClose={() => { setSelected(null); setInspection(null); }} />
           ) : (
             <div className="hidden items-center justify-center rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground xl:flex">
-              <p>Select an item to inspect its sources, history, and trust, or to correct or delete it.</p>
+              <p>Select an item to inspect it.</p>
             </div>
           )}
         </div>

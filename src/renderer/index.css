@@ -3,82 +3,152 @@
 /* Dark mode follows the `dark` class set by useSystemAppearance (macOS). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens, modelled on T3 Code: zinc surfaces in light mode, near-black
-   neutral surfaces in dark mode, a single blue-violet accent, and hairline
-   borders. Components reference these through the semantic utilities declared
-   in @theme inline (bg-background, text-muted-foreground, border-border, …). */
+/* Design tokens — "the dispatch ledger".
+   Conductor is a desk where work is dispatched to agents and every task is
+   a ticket on the board. The identity is built from that world, not from a
+   generic SaaS kit: sage ledger paper, deep pine ink, and one punch-red
+   reserved for the action that starts work and the mark that shows where
+   you are. References (PostHog's plain-spoken product grouping,
+   bengaluru.fyi's ink-on-paper directness) informed the tone only; the
+   palette, type and shapes below are Conductor's own.
+   Components reference these through the semantic utilities declared in
+   @theme inline (bg-background, text-muted-foreground, border-border, …). */
 :root {
-  /* T3-inspired warm neutral light theme: soft rose-tinted paper, raised
-     white cards, hairline borders, one rose accent. */
-  --background: oklch(0.965 0.006 350);
-  --foreground: oklch(0.28 0.01 350);
-  --card: oklch(0.995 0.002 350);
-  --surface-raised: oklch(0.99 0.003 350);
-  --muted: oklch(0.94 0.008 350);
-  --muted-foreground: oklch(0.52 0.012 350);
-  --accent: oklch(0.93 0.01 350);
-  --border: oklch(0.28 0.02 350 / 9%);
-  --input: oklch(0.28 0.02 350 / 14%);
-  --primary: oklch(0.55 0.19 12);
-  --primary-foreground: var(--color-white);
-  --ring: oklch(0.55 0.19 12);
-  --message: oklch(0.93 0.01 350);
-  --message-foreground: oklch(0.28 0.01 350);
-  --destructive: var(--color-red-500);
+  /* Ledger paper: cool sage, never cream. Cards sit one step lighter,
+     the sidebar is a green-tinted board the tickets are pinned to. */
+  --background: #e8eae1;
+  --foreground: #1d2822;
+  --card: #f3f4ed;
+  --surface-raised: #fafbf5;
+  --muted: #dde1d2;
+  --muted-foreground: #5b695f;
+  --accent: #e1e5d7;
+  --border: rgb(29 40 34 / 15%);
+  --border-strong: rgb(29 40 34 / 32%);
+  --input: rgb(29 40 34 / 22%);
+  /* Punch red: the colour of the stamp, not a brand gradient. */
+  --primary: #b23f16;
+  --primary-foreground: #fff8ee;
+  --ring: #b23f16;
+  --message: #edefe5;
+  --message-foreground: #1d2822;
+  --destructive: var(--color-red-600);
   --destructive-foreground: var(--color-red-700);
-  --success: var(--color-emerald-600);
-  --warning: var(--color-amber-600);
-  --info: var(--color-sky-600);
-  --sidebar: oklch(0.945 0.008 350);
-  --sidebar-foreground: oklch(0.28 0.01 350);
-  --sidebar-muted-foreground: oklch(0.52 0.012 350);
-  --sidebar-border: oklch(0.28 0.02 350 / 8%);
-  --sidebar-row-hover: oklch(0.28 0.02 350 / 5%);
-  --sidebar-row-active: oklch(0.995 0.002 350);
-  --code: oklch(0.95 0.006 350);
-  --scrollbar-thumb: rgb(0 0 0 / 14%);
-  --scrollbar-thumb-hover: rgb(0 0 0 / 24%);
-  --shadow-composer-color: rgb(60 20 35 / 18%);
+  --success: #27714a;
+  --warning: #9a6a12;
+  --info: #2f4fc4;
+  --sidebar: #dee3d2;
+  --sidebar-foreground: #1d2822;
+  --sidebar-muted-foreground: #5b695f;
+  --sidebar-border: rgb(29 40 34 / 14%);
+  --sidebar-row-hover: rgb(29 40 34 / 6%);
+  --sidebar-row-active: #f7f8f0;
+  --code: #e6e9dc;
+  --scrollbar-thumb: rgb(29 40 34 / 22%);
+  --scrollbar-thumb-hover: rgb(29 40 34 / 36%);
+  --shadow-composer-color: rgb(29 40 34 / 28%);
+  --shadow-hard-color: rgb(29 40 34 / 16%);
   --chat-max: 48rem;
   --topbar-height: 48px;
 }
 
 .dark {
-  /* T3 Code's dark plum, as a surface ladder: sidebar darkest, canvas one
-     step up, cards/popovers raised above it, hairline borders, rose accent. */
-  --background: oklch(0.175 0.009 345);
-  --foreground: oklch(0.93 0.005 345);
-  --card: oklch(0.215 0.011 345);
-  --surface-raised: oklch(0.245 0.012 345);
-  --muted: oklch(1 0 0 / 4%);
-  --muted-foreground: oklch(0.68 0.012 345);
-  --accent: oklch(1 0 0 / 6%);
-  --border: oklch(1 0 0 / 7%);
-  --input: oklch(1 0 0 / 11%);
-  --primary: oklch(0.62 0.21 10);
-  --ring: oklch(0.62 0.21 10);
+  /* The same desk after hours: near-green black, paper becomes slate-pine,
+     punch red lifts so it stays legible as a stamp on the dark board. */
+  --background: #121814;
+  --foreground: #e6ede3;
+  --card: #202a21;
+  --surface-raised: #2a362a;
+  --muted: oklch(1 0 0 / 5%);
+  --muted-foreground: #9aa99d;
+  --accent: oklch(1 0 0 / 7%);
+  --border: oklch(1 0 0 / 12%);
+  --border-strong: oklch(1 0 0 / 26%);
+  --input: oklch(1 0 0 / 13%);
+  --primary: #e2703a;
+  --primary-foreground: #1c1108;
+  --ring: #e2703a;
   --message: oklch(1 0 0 / 6%);
-  --message-foreground: oklch(0.93 0.005 345);
+  --message-foreground: #e6ede3;
   --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
   --destructive-foreground: var(--color-red-400);
   --success: var(--color-emerald-400);
   --warning: var(--color-amber-300);
-  --info: var(--color-sky-300);
-  --sidebar: oklch(0.145 0.008 345);
-  --sidebar-foreground: oklch(0.93 0.005 345);
-  --sidebar-muted-foreground: oklch(0.64 0.012 345);
-  --sidebar-border: oklch(1 0 0 / 6%);
-  --sidebar-row-hover: oklch(1 0 0 / 4%);
-  --sidebar-row-active: oklch(1 0 0 / 7%);
-  --code: oklch(1 0 0 / 3%);
-  --scrollbar-thumb: rgb(255 255 255 / 9%);
-  --scrollbar-thumb-hover: rgb(255 255 255 / 16%);
+  --info: #93a7f5;
+  --sidebar: #0b100d;
+  --sidebar-foreground: #e6ede3;
+  --sidebar-muted-foreground: #8d9c90;
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-row-hover: oklch(1 0 0 / 5%);
+  --sidebar-row-active: oklch(1 0 0 / 8%);
+  --code: oklch(1 0 0 / 4%);
+  --scrollbar-thumb: rgb(255 255 255 / 12%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 22%);
   --shadow-composer-color: rgb(0 0 0 / 70%);
+  --shadow-hard-color: rgb(0 0 0 / 32%);
+}
+
+/* Accent themes, chosen in Settings > Appearance and persisted on this
+   machine. Only the punch colour (primary actions, selection marks, focus
+   ring) changes; surfaces and ink stay put so every theme keeps the same
+   contrast relationships. `punch` is the default and needs no overrides. */
+:root[data-accent='cobalt'] {
+  --primary: #2f4fc4;
+  --ring: #2f4fc4;
+  --primary-foreground: #f5f7ff;
+}
+:root.dark[data-accent='cobalt'] {
+  --primary: #8ba3f7;
+  --ring: #8ba3f7;
+  --primary-foreground: #101736;
+}
+:root[data-accent='plum'] {
+  --primary: #7431c8;
+  --ring: #7431c8;
+  --primary-foreground: #faf5ff;
+}
+:root.dark[data-accent='plum'] {
+  --primary: #b795f2;
+  --ring: #b795f2;
+  --primary-foreground: #21103d;
+}
+:root[data-accent='pine'] {
+  --primary: #1e7046;
+  --ring: #1e7046;
+  --primary-foreground: #f2fbf5;
+}
+:root.dark[data-accent='pine'] {
+  --primary: #57bd85;
+  --ring: #57bd85;
+  --primary-foreground: #0c2417;
+}
+:root[data-accent='marigold'] {
+  --primary: #9c6a0a;
+  --ring: #9c6a0a;
+  --primary-foreground: #fffaeb;
+}
+:root.dark[data-accent='marigold'] {
+  --primary: #e0af45;
+  --ring: #e0af45;
+  --primary-foreground: #261b04;
 }
 
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  /* Ledger hand: a native serif for headings and the wordmark. No webfont —
+     the app is local-first and must render identically offline. */
+  --font-display: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
   --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+  /* Squared, ticket-like corners. The scale is deliberately tighter than
+     the rounded SaaS default: stubs and ledger cards, not pills. */
+  --radius-xs: 0.1875rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.625rem;
+  --radius-2xl: 0.75rem;
+  --radius-3xl: 1rem;
+  --radius-4xl: 1.25rem;
 }
 
 @theme inline {
@@ -90,6 +160,7 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
@@ -138,22 +209,38 @@ body {
   overflow: hidden;
 }
 
-/* ---- T3-style shared surfaces -------------------------------------------
-   Grouped cards (label above, raised card, hairline-divided rows), inset
-   segmented controls, pill chips and striped quota tracks. Components use
+/* ---- Dispatch-ledger shared surfaces ------------------------------------
+   Grouped cards read as entries in a ledger: a serif group heading, a card
+   lifted off the paper with a hard offset shadow (a ticket on the desk,
+   not a floating SaaS tile), and hairline-divided rows. Segmented controls
+   are squared stubs; quota tracks keep their stamp stripes. Components use
    these so every screen shares one look instead of inventing its own. */
 @layer components {
   .group-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--muted-foreground);
-    margin-bottom: 0.5rem;
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 0.375rem;
   }
   .group-card {
     background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+    border: 1px solid var(--border-strong);
+    border-radius: 0.5rem;
+    box-shadow: 2px 2px 0 0 var(--shadow-hard-color);
+    overflow: hidden;
+  }
+  /* Conversation bars (thread environment, work log, diagnostics). These
+     sit directly on the canvas between prose, so a grouped card is too
+     quiet for them: raised surface, strong edge, and the punch mark at
+     the left so the eye lands on them first. */
+  .bar-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 0.5rem;
+    box-shadow:
+      inset 3px 0 0 0 var(--primary),
+      2px 2px 0 0 var(--shadow-hard-color);
     overflow: hidden;
   }
   .group-row {
@@ -170,7 +257,7 @@ body {
     align-items: center;
     gap: 2px;
     padding: 3px;
-    border-radius: 9999px;
+    border-radius: 0.5rem;
     background: var(--muted);
     border: 1px solid var(--border);
   }
@@ -180,7 +267,7 @@ body {
     gap: 0.375rem;
     height: 1.5rem;
     padding: 0 0.65rem;
-    border-radius: 9999px;
+    border-radius: 0.3125rem;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--muted-foreground);
@@ -192,12 +279,12 @@ body {
   .seg-item[data-active='true'] {
     background: var(--surface-raised);
     color: var(--foreground);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+    box-shadow: inset 0 -2px 0 0 var(--primary);
   }
   .inset-field {
     background: var(--muted);
     border: 1px solid var(--border);
-    border-radius: 0.625rem;
+    border-radius: 0.375rem;
     color: var(--foreground);
     outline: none;
   }
@@ -225,7 +312,7 @@ body {
   }
 }
 
-/* Thin, unobtrusive scrollbars like T3 Code. */
+/* Thin, unobtrusive scrollbars in the pine ink. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -295,13 +382,138 @@ body {
   animation: conductor-shimmer 2.4s linear infinite;
 }
 
+/* ---- Motion -------------------------------------------------------------
+   One orchestrated moment per navigation: the incoming page rises a few
+   pixels and settles, like a ticket sliding onto the desk. Everything else
+   is feedback for an action the user just took (press, open, expand).
+   All of it is transform/opacity only, so it never triggers layout and the
+   app stays fast on low-end hardware. */
+@keyframes conductor-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-page-in {
+  animation: conductor-page-in 180ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+@keyframes conductor-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-pop-in {
+  animation: conductor-pop-in 160ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+@keyframes conductor-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-slide-in {
+  animation: conductor-slide-in 200ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
+
+/* Cards in a list arrive in a short cascade. The delay is capped by the
+   nth-child rules below so a 100-row list never keeps the user waiting. */
+@keyframes conductor-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.row-in {
+  animation: conductor-row-in 160ms ease-out both;
+}
+.row-in:nth-child(2) { animation-delay: 25ms; }
+.row-in:nth-child(3) { animation-delay: 50ms; }
+.row-in:nth-child(4) { animation-delay: 75ms; }
+.row-in:nth-child(5) { animation-delay: 100ms; }
+.row-in:nth-child(n + 6) { animation-delay: 125ms; }
+
+/* ---- Per-screen layouts ---------------------------------------------------
+   Each destination has its own job, so each gets its own desk. These rules
+   only restyle existing structure inside the named screen; Settings reuses
+   several of the same components and must not inherit these shapes. */
+
+/* Projects: a pinboard of project cards, not a settings list. */
+[data-screen='projects'] ul:has(> li > button[aria-pressed]) {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  border: none;
+  overflow: visible;
+}
+[data-screen='projects'] ul:has(> li > button[aria-pressed]) > li {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card);
+  box-shadow: 2px 2px 0 0 var(--shadow-hard-color);
+  overflow: hidden;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+[data-screen='projects'] ul:has(> li > button[aria-pressed]) > li:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 0 var(--shadow-hard-color);
+}
+
+[data-screen='projects'] form[aria-label='Create workspace'] {
+  max-width: 38rem;
+}
+
+/* Learning: a control room — configuration on the left, outcomes on the right. */
+@media (min-width: 1024px) {
+  [data-screen='learning'] section[aria-label='Learning'] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* Memory: the search bar stays pinned while results scroll under it. */
+[data-screen='memory'] form:has(input[placeholder^='Search']) {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 10;
+  background: var(--background);
+  padding-top: 1.25rem;
+  padding-bottom: 0.5rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-status-pulse,
-  .text-shimmer {
+  .text-shimmer,
+  .animate-page-in,
+  .animate-pop-in,
+  .animate-slide-in,
+  .row-in {
     animation: none;
   }
   .text-shimmer {
     color: var(--muted-foreground);
     background: none;
+  }
+  [data-screen='projects'] ul:has(> li > button[aria-pressed]) > li {
+    transition: none;
   }
 }

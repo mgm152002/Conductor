@@ -85,13 +85,13 @@ it('shows casual history only in Chat, and project navigation only in Work', () 
   const sidebar = (route: string): string => renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: [route] }, createElement(Sidebar)));
   const chat = sidebar('/home');
   expect(chat).toContain('New chat');
-  expect(chat).toContain('Your conversations will appear here.');
+  expect(chat).toContain('No chats yet.');
   expect(chat).not.toContain('Add project');
   expect(chat).not.toContain('Workflows');
   const work = sidebar('/work');
   expect(work).toContain('New thread');
   expect(work).toContain('Add project');
-  expect(work).not.toContain('Your conversations will appear here.');
+  expect(work).not.toContain('No chats yet.');
 });
 
 it('offers a delete action for populated Chat history', () => {
@@ -132,7 +132,7 @@ it('renders personal chats as draggable with space and ungrouped drop targets', 
   expect(html).toContain('draggable="true"');
   expect(html).toContain('data-chat-space-id="space-1"');
   expect(html).toContain('data-chat-ungrouped-drop-target=""');
-  expect(html).toContain('Drag into a space to share context');
+  expect(html).toContain('Drag to a space');
 });
 
 it('shows the renamed Work thread title with a rename action in the sidebar', () => {

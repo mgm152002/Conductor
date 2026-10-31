@@ -94,6 +94,14 @@ export default defineConfig(({ mode }) => {
         outDir: 'out/renderer',
         rollupOptions: {
           input: { index: resolve(__dirname, 'src/renderer/index.html') },
+          output: {
+            // Vendor code sits in its own chunks so lazy screen chunks stay
+            // small and the framework is parsed once, not per screen.
+            manualChunks: {
+              'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+              'vendor-markdown': ['react-markdown', 'remark-gfm'],
+            },
+          },
         },
       },
     },

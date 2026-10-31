@@ -1,4 +1,5 @@
 import type { Skill } from '@shared/domain';
+import { MenuSelect } from '../ui/MenuSelect';
 import { Badge, Button, EmptyState, inputClassName } from '../ui/primitives';
 import { PlusIcon, RotateIcon, SearchIcon, Spinner, XIcon } from '../ui/icons';
 import { cn } from '../../lib/cn';
@@ -58,17 +59,12 @@ export function SkillsListPanel({
         <div className="flex items-center gap-2">
           <label className="min-w-0 flex-1">
             <span className="sr-only">Filter by scope</span>
-            <select
-              className={inputClassName}
-              aria-label="Filter by scope"
-              value={scopeFilter}
-              onChange={(event) => onScopeFilterChange(event.target.value as ScopeFilter)}
-            >
-              <option value="all">All scopes</option>
-              <option value="global">Global</option>
-              <option value="project">Project</option>
-              <option value="workflow">Workflow</option>
-            </select>
+            <MenuSelect variant="box" label="Filter by scope" value={scopeFilter} onChange={(next) => onScopeFilterChange(next as ScopeFilter)} options={[
+              { value: 'all', label: 'All scopes' },
+              { value: 'global', label: 'Global' },
+              { value: 'project', label: 'Project' },
+              { value: 'workflow', label: 'Workflow' },
+            ]} />
           </label>
           <Button variant="ghost" size="icon" aria-label="Refresh skills" title="Refresh skills" onClick={onRefresh} disabled={loading || busy}>
             <RotateIcon size={14} />

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { MenuSelect } from '../ui/MenuSelect';
 import { useWorkspaceStore } from '../../stores';
 import { Button, Dialog, inputClassName } from '../ui/primitives';
 
@@ -116,10 +117,10 @@ export function AddAccountDialog({ kind, onClose }: { kind: AccountKind | null; 
           </>
         ) : null}
         <Field label="Use as context for" id={ids.project}>
-          <select id={ids.project} className={inputClassName} value={workspaceId} onChange={(e) => { setWorkspaceId(e.target.value); }}>
-            <option value="">No project (search only)</option>
-            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-          </select>
+          <MenuSelect variant="box" label="Use as context for" value={workspaceId} onChange={setWorkspaceId} options={[
+            { value: '', label: 'No project (search only)' },
+            ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
+          ]} />
         </Field>
         <p className="text-3xs text-muted-foreground">Connecting records your consent for Conductor to contact this provider. You can revoke it in Settings → External provider consent.</p>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}

@@ -13,6 +13,9 @@ interface UiState {
   detailsOpen: boolean;
   detailsTab: DetailsTab;
   collapsedProjects: Record<string, boolean>;
+  /** Sidebar Spaces whose thread list is collapsed (default: expanded). */
+  collapsedSpaces: Record<string, boolean>;
+  toggleSpace: (id: string) => void;
   addProjectOpen: boolean;
   /** Composer plan mode: a planner agent splits the message across agents. */
   planMode: boolean;
@@ -31,6 +34,10 @@ export const useUiStore = create<UiState>((set) => ({
   detailsOpen: false,
   detailsTab: 'files',
   collapsedProjects: {},
+  collapsedSpaces: {},
+  toggleSpace: (id): void => {
+    set((state) => ({ collapsedSpaces: { ...state.collapsedSpaces, [id]: !state.collapsedSpaces[id] } }));
+  },
   addProjectOpen: false,
   planMode: false,
   notice: null,

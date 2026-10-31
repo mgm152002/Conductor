@@ -86,7 +86,7 @@ export function TaskList({ history = false }: { history?: boolean }): React.JSX.
       {workspaceId === null ? <p className="text-sm text-muted-foreground">Select a workspace in Projects to see its tasks.</p> : tasks.length === 0 && !loading ? <p className="text-sm text-muted-foreground">{history ? 'No task history in this workspace yet.' : 'No active tasks in this workspace.'}</p> : null}
       <ul className="flex flex-col gap-2">
         {tasks.map((task) => (
-          <li key={task.id} className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4">
+          <li key={task.id} className="row-in flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-[3px_3px_0_0_var(--shadow-hard-color)]">
             <div className="flex items-start gap-3">
             <button type="button" className="flex min-w-0 flex-1 flex-col gap-1 text-left" onClick={() => { focus(task.id); useUiStore.getState().setDraft(false); navigate('/work'); }}>
               <span className="whitespace-pre-wrap break-words text-sm font-medium text-foreground">{task.objective}</span>

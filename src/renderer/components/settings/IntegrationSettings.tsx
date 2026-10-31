@@ -28,10 +28,10 @@ export function IntegrationSettings(): React.JSX.Element {
       <section aria-label="Stored credentials" className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Stored credentials</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Passwords, tokens and feed URLs you gave Conductor. Values live in the macOS Keychain (service “Conductor”) and are only inserted into requests made by the integration that owns them.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Stored in the macOS Keychain.</p>
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
-        {secrets.length === 0 ? <EmptyState icon={<KeyIcon size={18} />} title="No stored credentials" description="Connecting an email account, calendar feed or Slack workspace stores its credential here." /> : (
+        {secrets.length === 0 ? <EmptyState icon={<KeyIcon size={18} />} title="No stored credentials" /> : (
           <ul className="flex flex-col divide-y divide-border rounded-xl border border-border">
             {secrets.map((secret) => (
               <li key={secret.id} className="flex items-center gap-3 px-3.5 py-2.5 text-xs">
@@ -49,7 +49,7 @@ export function IntegrationSettings(): React.JSX.Element {
       <section aria-label="Integration consents" className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Integration consents</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Services Conductor may contact for your sources and remote hosts. Revoking stops syncing and remote runs for that provider until you allow it again.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Revoking stops syncing for that provider.</p>
         </div>
         {consents.length === 0 ? <p className="text-xs text-muted-foreground">No integration consents.</p> : (
           <ul className="flex flex-col divide-y divide-border rounded-xl border border-border">

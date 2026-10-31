@@ -133,6 +133,7 @@ window.conductor = {
     renameThread: async (_threadId: string, title: string) => ({ ...task, title }),
   },
   approval: { list: async () => [], resolve: async () => {} },
+  question: { list: async () => [], answer: async () => {} },
   agents: {
     list: async () => agents,
     models: async (agentId: string) => ({ agentId, models: [{ id: 'test-model', label: 'A model with an unusually long descriptive name', tier: 'balanced' }], efforts: ['low', 'medium', 'high', 'xhigh'], source: 'cli' }),

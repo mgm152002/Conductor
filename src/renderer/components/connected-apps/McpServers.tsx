@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
+import { MenuSelect } from '../ui/MenuSelect';
 import type { McpDiscoveryEntry, McpInvocationResult, McpServer } from '@shared/mcp';
 import { relativeTime } from '../../lib/time';
 import { Badge, Button, Dialog, EmptyState, inputClassName, textareaClassName } from '../ui/primitives';
@@ -43,9 +44,7 @@ function ToolRunner({ server, onClose }: { server: McpServer | null; onClose: ()
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <label htmlFor={toolId} className="text-xs font-medium">Tool</label>
-          <select id={toolId} className={inputClassName} value={tool} onChange={(e) => { setTool(e.target.value); }}>
-            {server?.capabilities.map((c) => <option key={c.id} value={c.id}>{c.id}{c.title !== c.id ? ` — ${c.title}` : ''}</option>)}
-          </select>
+          <MenuSelect variant="box" label="Tool" value={tool} onChange={setTool} options={(server?.capabilities ?? []).map((c) => ({ value: c.id, label: c.id, ...(c.title !== c.id ? { hint: c.title } : {}) }))} />
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor={argsId} className="text-xs font-medium">Arguments (JSON)</label>
@@ -100,7 +99,7 @@ export function McpServers(): React.JSX.Element {
       <header className="flex items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />MCP servers</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Model Context Protocol tools. Approved servers can be called from here and are offered to Codex when the permission profile allows execution.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Approved servers are offered to agents.</p>
         </div>
         <div className="flex gap-1.5">
           <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void act('discover', async () => { setDiscovered(await window.conductor.mcp.discover()); }); }}><SearchIcon size={13} />Find installed</Button>
@@ -160,7 +159,7 @@ export function McpServers(): React.JSX.Element {
           <div className="flex flex-col gap-1.5">
             <label htmlFor={endpointId} className="text-xs font-medium">Command or URL</label>
             <input id={endpointId} className={`${inputClassName} font-mono text-xs`} value={endpoint} onChange={(e) => { setEndpoint(e.target.value); }} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/notes" spellCheck={false} />
-            <p className="text-3xs text-muted-foreground">A command runs the server locally over stdio. An https:// URL uses Streamable HTTP. Don’t put API keys here.</p>
+            <p className="text-3xs text-muted-foreground">Command = local stdio. URL = Streamable HTTP. No API keys here.</p>
           </div>
           <div className="mt-2 flex justify-end gap-2"><Button size="md" variant="ghost" onClick={() => { setAdding(false); }}>Cancel</Button><Button size="md" variant="primary" type="submit" disabled={busy !== null || !name.trim() || !endpoint.trim()}>Add</Button></div>
         </form>

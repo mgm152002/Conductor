@@ -88,7 +88,7 @@ function ProjectGitHub({ project }: { project: Workspace }): React.JSX.Element {
                   onChange={(event) => { void run(() => window.conductor.github.setAutoPr({ workspaceId: project.id, enabled: event.target.checked })); }}
                   className="size-3.5 accent-primary"
                 />
-                Open a pull request automatically when an agent finishes a thread
+                Open a pull request automatically when an agent finishes a change (questions and explanations never open one)
               </label>
               <form
                 className="flex flex-wrap items-center gap-2"

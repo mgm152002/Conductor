@@ -21,13 +21,12 @@ export function SkillUsageHistory({ usages, skills }: SkillUsageHistoryProps): R
     <section className="space-y-3" aria-labelledby="skill-usage-heading">
       <div>
         <h2 id="skill-usage-heading" className="text-sm font-semibold text-foreground">Usage history</h2>
-        <p className="mt-0.5 text-2xs text-muted-foreground">Recent applications and skips remain here even after a binding is removed.</p>
       </div>
 
       {recent.length === 0 ? (
         <EmptyState
           title="No automation usage yet"
-          description="Applications, skips, and their eventual outcomes will appear after an incoming task matches a vendor binding."
+          description="Nothing yet."
         />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border">

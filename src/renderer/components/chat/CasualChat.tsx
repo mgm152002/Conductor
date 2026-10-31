@@ -13,7 +13,10 @@ import { PendingQuestionPanel } from './PendingQuestionPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { RenameChatDialog } from '../threads/RenameChatDialog';
 import { SpaceNameDialog } from '../threads/SpaceDialogs';
-import { ArrowUpIcon, PencilIcon, StopIcon, TrashIcon } from '../ui/icons';
+import { ArrowUpIcon, MessageIcon, PencilIcon, PlusIcon, StopIcon, TrashIcon } from '../ui/icons';
+import { EntityIcon } from '../ui/EntityIcon';
+import { ProviderAvatar, agentBrand } from '../ui/BrandMarks';
+import { MenuSelect } from '../ui/MenuSelect';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
@@ -161,22 +164,21 @@ export function CasualChat(): React.JSX.Element {
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <label htmlFor="chat-space" className="sr-only">Space for this chat</label>
-          <select
-            id="chat-space"
+          <MenuSelect
+            label="Space for this chat"
             value={currentSpaceId ?? ''}
-            title={currentSpace !== null ? `In Space "${currentSpace.name}" — chats in this space share context` : 'Put this chat in a space to share context with other chats'}
-            onChange={(event) => {
-              const value = event.target.value;
+            title={currentSpace !== null ? `In Space "${currentSpace.name}"` : 'Put this chat in a space to share context'}
+            onChange={(value) => {
               if (value === '__new__') { setCreatingSpace(true); return; }
               void assignSpace(value === '' ? null : value);
             }}
-            className="max-w-40 truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="">No space</option>
-            {spaces.map((space: ChatSpace) => <option key={space.id} value={space.id}>Space: {space.name}</option>)}
-            <option value="__new__">New space…</option>
-          </select>
+            className="max-w-44"
+            options={[
+              { value: '', label: 'No space', mark: <MessageIcon size={13} /> },
+              ...spaces.map((space: ChatSpace) => ({ value: space.id, label: `Space: ${space.name}`, mark: <EntityIcon icon={space.icon ?? null} name={space.name} kind="space" size={16} /> })),
+              { value: '__new__', label: 'New space…', mark: <PlusIcon size={13} /> },
+            ]}
+          />
           <span className="hidden shrink-0 text-2xs text-muted-foreground sm:inline">Personal conversation</span>
         </div>
       </header>
@@ -230,8 +232,8 @@ export function CasualChat(): React.JSX.Element {
           </div>
         ) : (
           <div className="flex h-full min-h-44 flex-col items-center justify-center gap-3 px-6 text-center">
-            <h2 className="text-3xl font-semibold tracking-tight">What’s on your mind?</h2>
-            <p className="max-w-sm text-sm text-muted-foreground">Ask a question, explore an idea, or just chat.</p>
+            <h2 className="font-display text-3xl font-semibold tracking-tight">What’s on your mind?</h2>
+            <p className="max-w-sm text-[13px] text-muted-foreground">Ask anything.</p>
           </div>
         )}
       </div>
@@ -260,15 +262,27 @@ export function CasualChat(): React.JSX.Element {
           </div>
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-              <label htmlFor="chat-agent" className="sr-only">Chat agent</label>
-              <select id="chat-agent" value={selectedAgent} disabled={busy} title="Switch CLI for the next message in this conversation" onChange={(event) => { setAgentId(event.target.value); }} className="max-w-full truncate rounded-md bg-transparent px-1 py-1 text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-70">
-                {!selectedAgent ? <option value="">Choose an agent</option> : null}
-                {selectedAgent && !agents.some((agent) => agent.id === selectedAgent) ? <option value={selectedAgent}>{selectedAgent} (unavailable)</option> : null}
-                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-              </select>
+              <MenuSelect
+                label="Chat agent"
+                value={selectedAgent}
+                disabled={busy}
+                title="Agent for the next message"
+                onChange={(next) => { setAgentId(next); }}
+                options={[
+                  ...(!selectedAgent ? [{ value: '', label: 'Choose an agent' }] : []),
+                  ...(selectedAgent && !agents.some((agent) => agent.id === selectedAgent)
+                    ? [{ value: selectedAgent, label: selectedAgent, hint: 'Unavailable' }]
+                    : []),
+                  ...agents.map((agent) => ({
+                    value: agent.id,
+                    label: agent.name,
+                    mark: <ProviderAvatar brand={agentBrand(agent.id)} label={agent.name} size={13} />,
+                  })),
+                ]}
+              />
               {selectedAgent ? <ModelEffortPicker agentId={selectedAgent} value={runChoice} onChange={(choice) => { setChatChoice(selectedAgent, choice); }} /> : null}
             </div>
-            {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background disabled:cursor-default disabled:opacity-30"><ArrowUpIcon size={17} /></button>}
+            {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--shadow-hard-color)] transition-transform duration-150 active:scale-90 disabled:cursor-default disabled:opacity-30 disabled:shadow-none"><ArrowUpIcon size={17} /></button>}
           </div>
         </form>
         <p className="mt-2 text-center text-3xs text-muted-foreground">{currentSpace !== null ? `Sharing context with ${spaceSiblingCount} other ${spaceSiblingCount === 1 ? 'chat' : 'chats'} in Space "${currentSpace.name}" · No project context` : 'No project context · Use Work for project threads'}</p>

@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useChatStore } from '../stores/chat-store';
 import { useThreadNavigation } from '../hooks/useThreadNavigation';
 import { cn } from '../lib/cn';
-import { ListChecksIcon, SquarePenIcon } from './ui/icons';
+import { MessageIcon, TicketIcon } from './ui/icons';
 
 /**
  * Separate project work from personal, project-free conversations.
@@ -29,8 +29,8 @@ export function SurfaceTabs(): React.JSX.Element {
   return (
     <div aria-label="Workspace views" className="seg-control mx-3 mb-3 grid grid-cols-2">
       {[
-        { to: '/work' as const, label: 'Work', Icon: ListChecksIcon, active: pathname !== '/home' },
-        { to: '/home' as const, label: 'Chat', Icon: SquarePenIcon, active: pathname === '/home' },
+        { to: '/work' as const, label: 'Work', Icon: TicketIcon, active: pathname !== '/home' },
+        { to: '/home' as const, label: 'Chat', Icon: MessageIcon, active: pathname === '/home' },
       ].map(({ to, label, Icon, active }) => (
         <button
           key={to}

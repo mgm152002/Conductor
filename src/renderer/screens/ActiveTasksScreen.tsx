@@ -1,16 +1,22 @@
 import { ResumeCenter } from '../components/resume';
 import { ScreenScaffold } from './ScreenScaffold';
 import { TaskList } from '../components/workspace/TaskList';
+import { TicketIcon } from '../components/ui/icons';
 
 export function ActiveTasksScreen(): React.JSX.Element {
   return (
     <ScreenScaffold
       title="Active tasks"
-      description="Monitor in-flight tasks, their execution plans, and live agent and tool activity."
+      screen="active-tasks"
+      layout="dashboard"
+      icon={<TicketIcon size={14} />}
     >
-      <div className="flex flex-col gap-8">
+      {/* Ops wall: the live ticket feed takes the desk, resumptions wait in a rail. */}
+      <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
         <TaskList />
-        <ResumeCenter />
+        <div className="lg:sticky lg:top-5">
+          <ResumeCenter />
+        </div>
       </div>
     </ScreenScaffold>
   );

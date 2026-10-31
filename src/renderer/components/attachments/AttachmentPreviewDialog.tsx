@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { ATTACHMENT_KIND_LABELS, formatAttachmentSize, type AttachmentPreview, type AttachmentSummary, type PdfAttachmentPreview } from '@shared/attachments';
-import { Markdown } from '../chat/Markdown';
+
+// Loaded on demand with the chat timeline's markdown chunk, never at startup.
+const Markdown = lazy(() => import('../chat/Markdown').then((m) => ({ default: m.Markdown })));
 import { Alert, Button, Dialog } from '../ui/primitives';
 
 export interface AttachmentPreviewDialogProps {
@@ -82,7 +84,7 @@ export function AttachmentPreviewDialog({ attachment, onClose }: AttachmentPrevi
       {preview?.format === 'image' && (imageError === attachment?.id || !preview.dataUrl.startsWith('data:image/')
         ? <Alert>This image cannot be displayed.</Alert>
         : <img src={preview.dataUrl} alt={attachment?.name ?? 'Attachment'} className="mx-auto max-h-[60vh] max-w-full object-contain" onError={() => setImageError(attachment?.id ?? null)} />)}
-      {preview?.format === 'markdown' && <Markdown text={preview.markdown} />}
+      {preview?.format === 'markdown' && <Suspense fallback={<pre className="text-sm break-words whitespace-pre-wrap">{preview.markdown}</pre>}><Markdown text={preview.markdown} /></Suspense>}
       {preview?.format === 'text' && <pre className="whitespace-pre-wrap break-words text-sm">{preview.text || 'No text was found in this file.'}</pre>}
       {preview?.format === 'pdf' && <PdfPreview preview={preview} />}
       {preview?.format === 'unsupported' && <Alert tone="warning">{preview.message || 'A preview is not available for this file type.'}</Alert>}

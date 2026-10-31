@@ -11,6 +11,7 @@ import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
 import { CheckIcon, ClockIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
 import { RenameThreadDialog } from '../threads/RenameThreadDialog';
+import { EntityIcon } from '../ui/EntityIcon';
 
 // The 52px thread header: project / thread breadcrumb, a status pill, the
 // recovery actions that apply to the current state, and the details toggle.
@@ -94,7 +95,7 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
         {project !== undefined ? (
           <span className="flex min-w-0 max-w-[40%] items-center gap-1.5 text-muted-foreground" title={project.rootPath}>
-            <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/20 text-3xs font-bold text-primary">{project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}</span>
+            <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" size={20} active />
             <span className="max-w-40 truncate">{project.name}</span>
           </span>
         ) : null}

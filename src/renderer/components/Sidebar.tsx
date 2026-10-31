@@ -17,12 +17,13 @@ import {
 } from '../lib/thread-tiers';
 import { prNumberFromUrl, prPath } from '../lib/pull-request';
 import { cn } from '../lib/cn';
-import { Kbd } from './ui/primitives';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import {
-  BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, LayersIcon, ListChecksIcon, PencilIcon, PlugIcon,
-  PlusIcon, PullRequestIcon, RotateIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TrashIcon, UsageIcon, WorkflowIcon,
+  BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, FolderIcon, GradCapIcon, HomeIcon, ImageIcon, PencilIcon, PlugIcon,
+  PlusIcon, PullRequestIcon, RotateIcon, SettingsIcon, SparklesIcon, SquarePenIcon, TicketIcon, TrashIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
+import { EntityIcon } from './ui/EntityIcon';
+import { IconPickerDialog } from './icons/IconPickerDialog';
 import { SnoozePickerDialog } from './threads/SnoozePickerDialog';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
 import { ProjectPullRequestsDialog } from './projects/ProjectPullRequestsDialog';
@@ -34,14 +35,17 @@ import { RenameThreadDialog } from './threads/RenameThreadDialog';
 import { SurfaceTabs } from './SurfaceTabs';
 import { useChatStore } from '../stores/chat-store';
 
-// The left sidebar, laid out like T3 Code: a draggable title-bar strip, a
-// "New thread" action, projects as collapsible groups with their threads
-// (tasks) and live status pills, and the secondary destinations at the bottom.
+// The left sidebar, the dispatch board: a draggable title-bar strip with
+// the serif wordmark and its punch mark, a stamped "New thread" action,
+// projects as collapsible groups with their threads (tasks) and live status
+// pills, and the secondary destinations at the bottom. The row you are on
+// is marked with a punch-red bar at its left edge, like a stamped ticket.
 
 const NAV_ICONS: Partial<Record<NavEntryId, (p: { size?: number }) => React.JSX.Element>> = {
-  projects: LayersIcon,
-  'active-tasks': ListChecksIcon,
-  learning: BrainIcon,
+  home: HomeIcon,
+  projects: FolderIcon,
+  'active-tasks': TicketIcon,
+  learning: GradCapIcon,
   workflows: WorkflowIcon,
   skills: SparklesIcon,
   'connected-apps': PlugIcon,
@@ -92,7 +96,7 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
       className={cn(
         'group/thread relative flex items-center rounded-lg transition-colors',
         'focus-within:bg-sidebar-row-hover',
-        selected ? 'bg-sidebar-row-active text-sidebar-foreground shadow-xs dark:shadow-none' : 'text-sidebar-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
+        selected ? 'bg-sidebar-row-active text-sidebar-foreground shadow-[inset_3px_0_0_var(--primary)] dark:shadow-[inset_3px_0_0_var(--primary)]' : 'text-sidebar-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
       )}
     >
       <button
@@ -222,6 +226,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   const previousTierByThread = useRef<Map<string, ThreadTierId> | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [deleting, setDeleting] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
   const [prsOpen, setPrsOpen] = useState(false);
   const [prCount, setPrCount] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ThreadView | null>(null);
@@ -328,7 +333,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
           title={project.rootPath}
         >
           <ChevronRightIcon size={12} className={cn('shrink-0 text-sidebar-muted-foreground transition-transform duration-150', !collapsed && 'rotate-90')} />
-          <span aria-hidden="true" className={cn('flex size-5 shrink-0 items-center justify-center rounded-md text-3xs font-bold tracking-wide', active ? 'bg-primary/20 text-primary' : 'bg-sidebar-row-active text-sidebar-muted-foreground')}>{project.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}</span>
+          <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" active={active} />
           <span className={cn('min-w-0 flex-1 truncate font-medium', active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/85')}>{project.name}</span>
           {needsAttention > 0 ? <span title={`${needsAttention} need${needsAttention === 1 ? 's' : ''} attention`} className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-3xs font-medium text-amber-600 tabular-nums dark:text-amber-300">{needsAttention}</span> : null}
           {working > 0 ? <span title={`${working} working`} className="shrink-0 rounded-full bg-sky-500/12 px-1.5 text-3xs font-medium text-sky-600 tabular-nums dark:text-sky-300">{working}</span> : null}
@@ -354,6 +359,15 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
         </button>
         <button
           type="button"
+          onClick={() => { setIconOpen(true); }}
+          aria-label={`Icon for ${project.name}`}
+          title="Project icon — generate with a model or upload"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <ImageIcon size={13} />
+        </button>
+        <button
+          type="button"
           onClick={() => { setDeleting(true); }}
           aria-label={`Delete ${project.name}`}
           title="Delete project"
@@ -363,6 +377,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
         </button>
       </div>
       <DeleteProjectDialog project={project} open={deleting} onClose={() => { setDeleting(false); }} />
+      {iconOpen ? <IconPickerDialog target={{ kind: 'project', id: project.id, name: project.name, icon: project.icon ?? null }} open onClose={() => { setIconOpen(false); }} /> : null}
       {prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
       {deletingThread !== null ? <DeleteThreadDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameThreadDialog key={renamingThread.key} threadId={renamingThread.key} currentTitle={threadTitle(renamingThread.root)} open onClose={() => { setRenamingThread(null); }} /> : null}
@@ -457,6 +472,9 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
   const [creatingSpace, setCreatingSpace] = useState(false);
   const [renamingSpace, setRenamingSpace] = useState<ChatSpace | null>(null);
   const [deletingSpace, setDeletingSpace] = useState<ChatSpace | null>(null);
+  const collapsedSpaces = useUiStore((state) => state.collapsedSpaces);
+  const toggleSpace = useUiStore((state) => state.toggleSpace);
+  const [iconSpace, setIconSpace] = useState<ChatSpace | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
@@ -519,7 +537,7 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
       key={thread.id}
       data-chat-thread-id={thread.id}
       draggable={movingId === null}
-      title="Drag into a space to share context, or drag to Chats to remove it from its space"
+      title="Drag to a space, or to Chats to remove"
       onDragStart={(event) => {
         setDraggedId(thread.id);
         setMoveError(null);
@@ -528,7 +546,7 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
         event.dataTransfer.setData('text/plain', thread.id);
       }}
       onDragEnd={() => { setDraggedId(null); setDropTarget(null); }}
-      className={cn('group/chat relative flex h-8 cursor-grab items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover active:cursor-grabbing', selectedId === thread.id ? 'bg-sidebar-row-active' : 'hover:bg-sidebar-row-hover', draggedId === thread.id && 'opacity-50')}
+      className={cn('group/chat relative flex h-8 cursor-grab items-center rounded-md transition-colors focus-within:bg-sidebar-row-hover active:cursor-grabbing', selectedId === thread.id ? 'bg-sidebar-row-active shadow-[inset_3px_0_0_var(--primary)]' : 'hover:bg-sidebar-row-hover', draggedId === thread.id && 'opacity-50')}
     >
       <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-md px-2 text-left text-[13px] transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
@@ -566,24 +584,32 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
     </div>
     {moveError ? <p role="alert" className="px-2 pb-2 text-xs text-destructive-foreground">{moveError}</p> : null}
     {spaces.length === 0
-      ? <p className="px-2 pb-2 text-xs text-sidebar-muted-foreground">Group chats in a space so they share context with each other.</p>
+      ? <p className="px-2 pb-2 text-xs text-sidebar-muted-foreground">Chats in a space share context.</p>
       : spaces.map((space) => {
         const members = threads.filter((thread) => thread.spaceId === space.id);
         if (query !== '' && members.length === 0) return null;
+        // Spaces collapse like project groups; searching always reveals matches.
+        const spaceCollapsed = query === '' && collapsedSpaces[space.id] === true;
         return (
           <section
             key={space.id}
             aria-label={`Space: ${space.name}`}
             data-chat-space-id={space.id}
-            onDragOver={(event) => { onDragOverTarget(event, space.id, acceptsSpace(space.id)); }}
+            onDragOver={(event) => { if (spaceCollapsed && acceptsSpace(space.id)) toggleSpace(space.id); onDragOverTarget(event, space.id, acceptsSpace(space.id)); }}
             onDragLeave={(event) => { onDragLeaveTarget(event, space.id); }}
             onDrop={(event) => { if (acceptsSpace(space.id)) onDropTarget(event, space.id); }}
             className={cn('rounded-md pb-1 transition-colors', dropTarget === space.id && 'bg-sidebar-row-hover ring-1 ring-ring/60 ring-inset')}
           >
             <div className="group/space flex h-7 items-center gap-1 px-1.5">
-              <LayersIcon size={12} className="shrink-0 text-sidebar-muted-foreground" />
+              <button type="button" onClick={() => { toggleSpace(space.id); }} aria-expanded={!spaceCollapsed} aria-label={`${spaceCollapsed ? 'Expand' : 'Collapse'} space: ${space.name}`} title={spaceCollapsed ? 'Expand space' : 'Collapse space'} className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                <ChevronRightIcon size={11} className={cn('transition-transform duration-150', !spaceCollapsed && 'rotate-90')} />
+              </button>
+              <EntityIcon icon={space.icon ?? null} name={space.name} kind="space" />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={space.name}>{space.name}</span>
               <span className="shrink-0 text-2xs text-sidebar-muted-foreground">{members.length}</span>
+              <button type="button" onClick={() => { setIconSpace(space); }} aria-label={`Icon for space: ${space.name}`} title="Space icon — generate with a model or upload" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
+                <ImageIcon size={12} />
+              </button>
               <button type="button" onClick={() => { setRenamingSpace(space); }} aria-label={`Rename space: ${space.name}`} title="Rename space" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
                 <PencilIcon size={12} />
               </button>
@@ -591,10 +617,12 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
                 <TrashIcon size={12} />
               </button>
             </div>
+            {spaceCollapsed ? null : (<>
             {dropTarget === space.id ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Drop to add this chat to the space</p> : null}
             {members.length === 0
-              ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Drop chats here, or open a chat and put it in this space, to share context.</p>
+              ? <p className="px-2 pb-1 pl-7 text-2xs text-sidebar-muted-foreground">Drop chats here to share context.</p>
               : <ul className="flex flex-col gap-1 pl-3">{members.map(renderThread)}</ul>}
+            </>)}
           </section>
         );
       })}
@@ -608,13 +636,14 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
       <h2 className="px-1.5 py-2 text-2xs font-medium tracking-wide text-sidebar-muted-foreground uppercase">Chats</h2>
       {acceptsUngrouped ? <p className="px-2 pb-1 text-2xs text-sidebar-muted-foreground">{dropTarget === UNGROUPED_DROP_TARGET ? 'Drop to remove from its space — its context will no longer be shared' : 'Drag a chat here to remove it from its space'}</p> : null}
       {error ? <p role="alert" className="px-2 text-xs text-destructive-foreground">{error} <button type="button" className="underline" onClick={load}>Retry</button></p> : null}
-      {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">Your conversations will appear here.</p> : ungrouped.length === 0 && spaces.length > 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">All your chats are in spaces.</p> : <ul className="flex flex-col gap-1">{ungrouped.map(renderThread)}</ul>}
+      {threads.length === 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">No chats yet.</p> : ungrouped.length === 0 && spaces.length > 0 ? <p className="px-2 py-2 text-xs text-sidebar-muted-foreground">All chats are in spaces.</p> : <ul className="flex flex-col gap-1">{ungrouped.map(renderThread)}</ul>}
     </div>
     {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={closeDelete} /> : null}
     {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
     {creatingSpace ? <SpaceNameDialog space={null} open onClose={() => { setCreatingSpace(false); }} /> : null}
     {renamingSpace !== null ? <SpaceNameDialog key={renamingSpace.id} space={renamingSpace} open onClose={() => { setRenamingSpace(null); }} /> : null}
     {deletingSpace !== null ? <DeleteSpaceDialog space={deletingSpace} open onClose={() => { setDeletingSpace(null); }} /> : null}
+    {iconSpace !== null ? <IconPickerDialog key={iconSpace.id} target={{ kind: 'space', id: iconSpace.id, name: iconSpace.name, icon: iconSpace.icon ?? null }} open onClose={() => { setIconSpace(null); }} /> : null}
   </>;
 }
 
@@ -666,10 +695,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const [query, setQuery] = useState('');
 
   return (
-    <nav aria-label="Primary" className="flex h-full w-[268px] shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    <nav aria-label="Primary" className="flex h-full w-[268px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       {/* Title-bar strip: leaves room for the macOS traffic lights. */}
       <div className="app-drag flex h-(--topbar-height) shrink-0 items-center justify-between pr-2 pl-20">
-        <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground/90">Conductor</span>
+        <span className="flex items-baseline gap-1.5 font-display text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+          Conductor
+          <span aria-hidden="true" className="size-1.5 translate-y-[-1px] rounded-full bg-primary" />
+        </span>
         <SuggestionsInbox />
       </div>
 
@@ -689,14 +721,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
           type="button"
           onClick={() => { if (onHome) useChatStore.getState().select(null); else void newThread(); onNavigate?.(); }}
           className={cn(
-            'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
-            'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-            (onHome ? selectedChat === null : location.pathname === '/work' && draft) && 'bg-sidebar-row-active',
+            'flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-[13px] font-medium text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-[0.98]',
+            'bg-primary shadow-[2px_2px_0_0_var(--shadow-hard-color)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+            (onHome ? selectedChat === null : location.pathname === '/work' && draft) && 'brightness-95',
           )}
         >
-          <SquarePenIcon size={14} className="text-sidebar-muted-foreground" />
+          <SquarePenIcon size={14} />
           <span className="flex-1 text-left">{onHome ? 'New chat' : 'New thread'}</span>
-          <Kbd>⌘N</Kbd>
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-sm border border-primary-foreground/40 px-1 text-3xs text-primary-foreground/85">⌘N</span>
         </button>
       </div>
 
@@ -740,7 +772,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
       </div>
 
       <ul className="flex shrink-0 flex-col gap-px p-2">
-        {NAV_ENTRIES.filter((entry) => entry.id !== 'home' && (!onHome || entry.id === 'settings' || entry.id === 'connected-apps')).map((entry) => {
+        {/* Workflows and Skills are hidden from the sidebar for now; their
+            routes stay mounted in NAV_ENTRIES so they can return as-is. */}
+        {NAV_ENTRIES.filter((entry) => entry.id !== 'home' && entry.id !== 'workflows' && entry.id !== 'skills' && (!onHome || entry.id === 'settings' || entry.id === 'connected-apps')).map((entry) => {
           const Icon = NAV_ICONS[entry.id];
           return (
             <li key={entry.id}>
@@ -748,9 +782,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
                 to={entry.path}
                 onClick={onNavigate}
                 className={({ isActive }) => cn(
-                  'flex h-7 items-center gap-2 rounded-md px-2 text-[13px] transition-colors',
+                  'flex h-7 items-center gap-2 rounded-md px-2 text-[13px] transition-[color,background-color,box-shadow,transform] duration-150 hover:translate-x-0.5 active:scale-[0.98]',
                   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-                  isActive ? 'bg-sidebar-row-active text-sidebar-foreground' : 'text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
+                  isActive ? 'bg-sidebar-row-active text-sidebar-foreground shadow-[inset_3px_0_0_var(--primary)]' : 'text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
                 )}
               >
                 {Icon !== undefined ? <Icon size={14} /> : null}

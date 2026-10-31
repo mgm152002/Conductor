@@ -17,7 +17,7 @@ Check the following interactions:
    and appear in the Chats history. No Projects, Plan, Checks or inspector appears.
 2. Switch to Work. Only project threads appear in the sidebar. Open a thread,
    then start a new one. Both actions must stay in Work.
-3. Enable Plan, open Sub-agents and Checks, and select the long model name.
+3. Enable Plan, open Sub-agents, and select the long model name.
    All options should wrap inside the composer and the send button should remain reachable.
 4. Open an existing project's details inspector. At 960 pixels it should overlay the conversation,
    stay within the main surface, and close using its close button or Escape.

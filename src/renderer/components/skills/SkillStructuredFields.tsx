@@ -99,7 +99,7 @@ export function IoFieldRows({ label, description, fields, onChange }: {
   return (
     <EditorSection title={label} description={description}>
       {fields.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-3 py-2 text-2xs text-muted-foreground">No fields yet. Add one for each value this contract accepts or returns.</p>
+        <p className="rounded-lg border border-dashed border-border px-3 py-2 text-2xs text-muted-foreground">No fields yet.</p>
       ) : (
         <ol className="space-y-2">
           {fields.map((field, index) => (

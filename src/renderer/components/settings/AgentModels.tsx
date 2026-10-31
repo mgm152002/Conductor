@@ -5,6 +5,7 @@ import { useAgents } from '../../hooks/useAgents';
 import { loadAgentModels, useAgentModels } from '../../hooks/useAgentModels';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 import { Button, inputClassName } from '../ui/primitives';
+import { BrandMark, agentBrand, modelBrand } from '../ui/BrandMarks';
 
 // Default model and reasoning effort per agent. "Auto" lets Conductor choose
 // by how demanding each request is: quick questions run on the agent's
@@ -41,7 +42,10 @@ function AgentRow({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
       <div className="flex items-center gap-2">
-        <span className="w-32 shrink-0 text-xs font-medium text-foreground">{name}</span>
+        <span className="flex w-32 shrink-0 items-center gap-1.5 text-xs font-medium text-foreground">
+          <BrandMark brand={agentBrand(id)} size={13} className="shrink-0 text-foreground/80" />
+          <span className="truncate">{name}</span>
+        </span>
         <span className="text-2xs text-muted-foreground">Default</span>
       </div>
       <div className="flex items-center gap-2 pl-32">
@@ -49,6 +53,7 @@ function AgentRow({
           <ModelEffortPicker variant="box" agentId={id} label={`${name} default`} value={values.default} onChange={onDefaultChange} />
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <BrandMark brand={modelBrand(values.default.model)} size={14} className="shrink-0 text-foreground/80" />
             <label htmlFor={inputId} className="sr-only">{name} model</label>
             <input
               id={inputId}
@@ -86,6 +91,7 @@ function AgentRow({
           />
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <BrandMark brand={modelBrand(fallbackValue.model)} size={14} className="shrink-0 text-foreground/80" />
             <label htmlFor={`${inputId}-fallback`} className="sr-only">{name} fallback model</label>
             <input
               id={`${inputId}-fallback`}
@@ -174,9 +180,7 @@ export function AgentModels(): React.JSX.Element {
         <div className="flex-1">
           <h2 className="text-sm font-semibold text-foreground">Default and fallback models</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Auto picks each agent’s model and reasoning effort by how demanding the request is: quick questions use a cheaper model at low effort, large builds the most capable one.
-            Set a default model/effort to use every time; if the default hits a quota or model limit, Conductor will retry once with the fallback model for the same agent before switching CLIs.
-            The composer can override these for one message.
+            Fallback runs once if the default hits a limit. The composer can override per message.
           </p>
         </div>
         <Button

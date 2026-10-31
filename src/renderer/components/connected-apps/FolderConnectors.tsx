@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { MenuSelect } from '../ui/MenuSelect';
 import type { ConnectorView, IngestedItemView } from '@shared/connector';
 import type { DataControlSettings } from '@shared/domain';
 import { useNavigate } from 'react-router-dom';
@@ -9,7 +10,7 @@ import { cn } from '../../lib/cn';
 import { reportMemoryCleanup } from '../../lib/memory-cleanup';
 import { Badge, Button, Dialog, EmptyState, Switch, inputClassName } from '../ui/primitives';
 import { CalendarIcon, ChevronRightIcon, DatabaseIcon, FileTextIcon, FolderIcon, FolderOpenIcon, MailIcon, MessageIcon, PlusIcon, RotateIcon, Spinner, TrashIcon } from '../ui/icons';
-import { AddAccountDialog, type AccountKind } from './AddAccountDialog';
+// Email/Calendar/Slack connection options are removed for now; AddAccountDialog is kept for when they return.
 
 // Local folder connectors: index a folder's text files into searchable memory
 // and attach relevant passages to a project's tasks. Indexing is local; the
@@ -195,11 +196,11 @@ function AddFolderDialog({ open, onClose }: { open: boolean; onClose: () => void
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor={projectId} className="text-xs font-medium">Use as context for</label>
-          <select id={projectId} className={inputClassName} value={workspaceId} onChange={(e) => { setWorkspaceId(e.target.value); }}>
-            <option value="">No project (search only)</option>
-            {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-          </select>
-          <p className="text-3xs text-muted-foreground">Tasks in this project receive the most relevant indexed passages as untrusted reference data.</p>
+          <MenuSelect variant="box" label="Use as context for" value={workspaceId} onChange={setWorkspaceId} options={[
+            { value: '', label: 'No project (search only)' },
+            ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
+          ]} />
+          <p className="text-3xs text-muted-foreground">Added to tasks as reference data.</p>
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         <div className="mt-2 flex justify-end gap-2">
@@ -225,40 +226,35 @@ export function FolderConnectors(): React.JSX.Element {
   }
 
   const folders = connectors;
-  const [account, setAccount] = useState<AccountKind | null>(null);
 
   return (
     <section aria-label="Indexed folders" className="flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><DatabaseIcon size={15} className="text-muted-foreground" />Sources</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Folders, email, calendars and Slack that Conductor indexes locally and attaches as task context.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Indexed locally for task context.</p>
         </div>
         <div className="flex gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => { setAccount('email'); }}><MailIcon size={13} />Email</Button>
-          <Button size="sm" variant="outline" onClick={() => { setAccount('calendar'); }}><CalendarIcon size={13} />Calendar</Button>
-          <Button size="sm" variant="outline" onClick={() => { setAccount('slack'); }}><MessageIcon size={13} />Slack</Button>
           <Button size="sm" variant="primary" onClick={() => { setAdding(true); }}><PlusIcon size={13} />Folder</Button>
         </div>
       </header>
       <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
         <div>
           <p className="text-xs font-medium text-foreground">Keep sources in sync</p>
-          <p className="text-2xs text-muted-foreground">Re-index folders when files change, and every source every 15 minutes. Off: only “Sync now” updates the index.</p>
+          <p className="text-2xs text-muted-foreground">Off: only “Sync now” updates the index.</p>
         </div>
         <Switch label="Keep sources in sync" checked={settings?.syncEnabled === true} disabled={settings === null} onChange={(value) => { void setAutoSync(value); }} />
       </div>
       {loadError !== null ? <p role="alert" className="text-xs text-destructive-foreground">{loadError}</p> : null}
       {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
       {loading ? <p role="status" className="text-xs text-muted-foreground">Loading connectors…</p> : folders.length === 0 ? (
-        <EmptyState icon={<FolderIcon size={20} />} title="No sources yet" description="Add a folder, mailbox, calendar feed or Slack workspace to make it searchable and available as context.">
+        <EmptyState icon={<FolderIcon size={20} />} title="No sources yet" description="Add a folder to make it searchable and available as context.">
           <Button size="sm" variant="outline" onClick={() => { setAdding(true); }}><PlusIcon size={13} />Add folder</Button>
         </EmptyState>
       ) : (
         <ul className="flex flex-col gap-2">{folders.map((connector) => <ConnectorRow key={connector.id} connector={connector} onError={setError} />)}</ul>
       )}
       <AddFolderDialog open={adding} onClose={() => { setAdding(false); }} />
-      <AddAccountDialog kind={account} onClose={() => { setAccount(null); }} />
     </section>
   );
 }
