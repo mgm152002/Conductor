@@ -99,19 +99,6 @@ export function betweenTurnHandoff(
   };
 }
 
-const STATE_LABELS: Record<string, string> = {
-  CONTEXT_LOADING: 'Loading context',
-  PLANNING: 'Planning',
-  WAITING_FOR_APPROVAL: 'Waiting for approval',
-  RUNNING: 'Running',
-  VERIFYING: 'Verifying results',
-  COMPLETED: 'Completed',
-  FAILED: 'Failed',
-  BLOCKED: 'Blocked',
-  CANCELLED: 'Stopped',
-  RECOVERABLE_INTERRUPTION: 'Interrupted',
-};
-
 /** A compact one-line label for reasoning and other free-form activity. */
 function firstLine(text: string, limit = 120): string {
   const line = text.trim().split('\n').find((entry) => entry.trim() !== '') ?? '';
@@ -355,21 +342,20 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     }
     switch (event.kind) {
       case 'transition': {
-        const to = str(payload?.['to']);
+        // Lifecycle phases (Loading context, Planning, Running, Verifying)
+        // are not conversation content: the live status line already says
+        // what the agent is doing, so they never become timeline rows.
         if (str(payload?.['reason']) === 'retry') {
           // Errors from earlier attempts are history, not the current problem.
           flushProse();
           flushWork();
           for (const item of items) if (item.kind === 'error') item.stale = true;
         }
-        if (to === undefined || to === 'CREATED' || to === 'COMPLETED') break;
-        const reason = str(payload?.['reason']);
-        const tone: WorkTone = to === 'FAILED' || to === 'BLOCKED' ? 'error' : 'neutral';
-        addWork({ id: event.id, icon: 'state', label: STATE_LABELS[to] ?? to.toLowerCase(), ...(reason !== undefined && reason !== 'created' ? { detail: reason } : {}), tone, at: event.createdAt });
         break;
       }
       case 'artifact':
-        addWork({ id: event.id, icon: 'artifact', label: 'Saved output', tone: 'neutral', at: event.createdAt });
+        // Artifacts are handed back in the chat as document cards (Turn in
+        // ChatView), not as work-log rows.
         break;
       case 'approval': {
         const summary = str(payload?.['summary']) ?? 'Approval requested';
@@ -424,15 +410,7 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
       addError(event.id, str(error?.['message']) ?? str(parsed['message']) ?? 'The agent reported an error', event.createdAt);
       return;
     }
-    if (type === 'turn.completed') {
-      const usage = obj(parsed['usage']);
-      const input = typeof usage?.['input_tokens'] === 'number' ? usage['input_tokens'] : undefined;
-      const output = typeof usage?.['output_tokens'] === 'number' ? usage['output_tokens'] : undefined;
-      if (input !== undefined || output !== undefined) {
-        addWork({ id: event.id, icon: 'state', label: 'Turn finished', detail: `${(input ?? 0).toLocaleString()} input · ${(output ?? 0).toLocaleString()} output tokens`, tone: 'neutral', at: event.createdAt });
-      }
-      return;
-    }
+    if (type === 'turn.completed') return; // token totals live in the turn's stats line
     if (!type.startsWith('item.')) return; // thread.started, turn.started, …
     const item = obj(parsed['item']);
     if (item === null) return;

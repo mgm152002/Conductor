@@ -3,6 +3,9 @@ import type { Element } from 'hast';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../lib/cn';
+import { splitVisualBlocks } from '../../lib/visuals';
+import { HtmlVisual } from './HtmlVisual';
+import { MermaidDiagram } from './MermaidDiagram';
 
 /** Context to signal whether inline code is inside a `<pre>` code block. */
 const InPreContext = createContext(false);
@@ -282,16 +285,27 @@ export interface MarkdownProps {
  */
 export function Markdown({ text, children, className }: MarkdownProps): React.JSX.Element {
   const content = typeof text === 'string' ? text : typeof children === 'string' ? children : '';
+  // ```html blocks (diagrams/charts the user asked for) become live visuals
+  // and ```mermaid blocks become rendered diagrams; the prose around them
+  // stays markdown.
+  const segments = splitVisualBlocks(content);
 
   return (
     <div className={cn('flex flex-col gap-3 text-sm leading-relaxed break-words text-foreground', className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml={true}
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      {segments.map((segment, index) => segment.type === 'html'
+        ? <HtmlVisual key={index} code={segment.code} complete={segment.complete} />
+        : segment.type === 'mermaid'
+          ? <MermaidDiagram key={index} code={segment.code} complete={segment.complete} />
+          : (
+          <ReactMarkdown
+            key={index}
+            remarkPlugins={[remarkGfm]}
+            skipHtml={true}
+            components={components}
+          >
+            {segment.text}
+          </ReactMarkdown>
+        ))}
     </div>
   );
 }

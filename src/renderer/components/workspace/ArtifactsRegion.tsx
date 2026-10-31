@@ -4,7 +4,9 @@ import type { ArtifactPreview, ArtifactSummary, TaskDetails } from '@shared/task
 import { FileTextIcon } from '../ui/icons';
 import { RegionCard } from './RegionCard';
 
-function ArtifactRow({ taskId, artifact }: { taskId: string; artifact: ArtifactSummary }): React.JSX.Element {
+/** An output the agent produced, handed back in the chat as a document
+ *  card: what it is, when, and its contents on Open. */
+export function ArtifactRow({ taskId, artifact }: { taskId: string; artifact: ArtifactSummary }): React.JSX.Element {
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -20,20 +22,22 @@ function ArtifactRow({ taskId, artifact }: { taskId: string; artifact: ArtifactS
     finally { setLoading(false); }
   }
   return (
-    <li className="rounded-lg border border-border">
-      <div className="flex items-start gap-2 px-2.5 py-2">
-        <FileTextIcon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+    <li className="bar-card">
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
+          <FileTextIcon size={17} />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium break-all text-foreground">{artifact.name ?? artifact.id}</p>
-          <p className="mt-0.5 text-3xs text-muted-foreground">{artifact.mimeType ?? 'Stored output'}{artifact.sizeBytes === undefined ? '' : ` · ${artifact.sizeBytes.toLocaleString()} bytes`} · <time dateTime={artifact.createdAt}>{new Date(artifact.createdAt).toLocaleString()}</time></p>
+          <p className="truncate text-[13px] font-medium text-foreground" title={artifact.name ?? artifact.id}>{artifact.name ?? 'Document'}</p>
+          <p className="mt-0.5 truncate text-3xs text-muted-foreground">{artifact.mimeType ?? 'Document'}{artifact.sizeBytes === undefined ? '' : ` · ${artifact.sizeBytes.toLocaleString()} bytes`} · <time dateTime={artifact.createdAt}>{new Date(artifact.createdAt).toLocaleString()}</time></p>
         </div>
-        <button type="button" onClick={() => { void inspect(); }} disabled={loading} aria-expanded={expanded} className="shrink-0 cursor-pointer text-2xs font-medium text-primary hover:underline disabled:opacity-50">{loading ? 'Loading preview…' : expanded ? 'Hide preview' : 'Inspect output'}</button>
+        <button type="button" onClick={() => { void inspect(); }} disabled={loading} aria-expanded={expanded} className="shrink-0 cursor-pointer rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">{loading ? 'Opening…' : expanded ? 'Close' : 'Open'}</button>
       </div>
-      {expanded && error !== null ? <p role="alert" className="px-2.5 pb-2 text-2xs text-destructive-foreground">{error}</p> : null}
+      {expanded && error !== null ? <p role="alert" className="px-3 pb-2.5 text-2xs text-destructive-foreground">{error}</p> : null}
       {expanded && preview !== null ? (
         <div className="border-t border-border">
-          <pre className="max-h-72 overflow-auto bg-code px-2.5 py-2 font-mono text-2xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">{preview.text || '(Empty artifact)'}</pre>
-          {preview.truncated ? <p className="px-2.5 py-1 text-3xs text-muted-foreground">Preview truncated.</p> : null}
+          <pre className="max-h-72 overflow-auto bg-code px-3 py-2.5 font-mono text-2xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">{preview.text || '(Empty artifact)'}</pre>
+          {preview.truncated ? <p className="px-3 py-1.5 text-3xs text-muted-foreground">Preview truncated.</p> : null}
         </div>
       ) : null}
     </li>

@@ -8,9 +8,10 @@ import { useTaskDetails } from '../../hooks/useTaskDetails';
 import { betweenTurnHandoff, buildTimeline, isAgentFallbackEvent, isModelFallbackEvent, latestActivity, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
-import { cn } from '../../lib/cn';
 import { Alert, Button } from '../ui/primitives';
-import { CheckIcon, FolderIcon, ListChecksIcon, PlusIcon, XIcon } from '../ui/icons';
+import { FolderIcon, PlusIcon } from '../ui/icons';
+import { ArtifactRow } from '../workspace/ArtifactsRegion';
+import { requestsArtifact } from '../../lib/artifacts';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
 import { DetailsPanel } from './DetailsPanel';
@@ -75,31 +76,10 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
     );
   }
   if (task.state === 'WAITING_FOR_APPROVAL') return <p className="px-1 text-xs text-warning">Waiting for your approval below.</p>;
-  if (task.state === 'COMPLETED' || task.state === 'FAILED') {
-    const verification = details?.verification;
-    const criteria = task.acceptanceCriteria;
-    const passed = verification?.criteria.filter((c) => c.satisfied).length ?? 0;
-    return <VerificationSummary task={task} passed={passed} total={criteria.length} recorded={verification != null} verified={verification?.verified === true} />;
-  }
+  // Completed and failed turns speak through their reply, errors, artifacts
+  // and the stats line — no separate verification banner.
   if (task.state === 'CANCELLED') return <p className="px-1 text-xs text-muted-foreground">Stopped.</p>;
   return null;
-}
-
-function VerificationSummary({ task, passed, total, recorded, verified }: { task: Task; passed: number; total: number; recorded: boolean; verified: boolean }): React.JSX.Element {
-  const openDetails = useUiStore((s) => s.openDetails);
-  const tone = !recorded ? 'text-muted-foreground' : verified ? 'text-success' : 'text-destructive-foreground';
-  return (
-    <button type="button" onClick={() => { openDetails('checks'); }} className="flex w-full cursor-pointer items-center gap-2 rounded-xl border border-border px-3 py-2 text-left text-xs hover:bg-accent">
-      <span className={cn('flex size-5 items-center justify-center rounded-full', !recorded ? 'bg-accent' : verified ? 'bg-success/15' : 'bg-destructive/15', tone)} aria-hidden="true">
-        {!recorded ? <ListChecksIcon size={11} /> : verified ? <CheckIcon size={11} /> : <XIcon size={11} />}
-      </span>
-      <span className={cn('font-medium', tone)}>
-        {!recorded ? 'No verification recorded' : verified ? 'Verified' : task.state === 'FAILED' ? 'Failed verification' : 'Verification did not pass'}
-      </span>
-      {recorded ? <span className="text-muted-foreground">· {passed}/{total} checks passed</span> : null}
-      <span className="ml-auto text-muted-foreground">View checks</span>
-    </button>
-  );
 }
 
 /** One message in the thread: the user's request, the agent's work and reply, and its status. */
@@ -138,6 +118,11 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
     <section aria-label={`Message: ${task.objective.slice(0, 60)}`} className="group/turn flex flex-col gap-5">
       {error !== null ? <Alert action={<Button size="xs" variant="ghost" onClick={refresh}>Retry details</Button>}>{error}</Alert> : null}
       <MessagesTimeline items={items} live={live} />
+      {details !== null && details.artifacts.length > 0 && requestsArtifact(task.objective) ? (
+        <ul className="flex flex-col gap-2" aria-label="Documents from the agent">
+          {details.artifacts.map((artifact) => <ArtifactRow key={artifact.id} taskId={task.id} artifact={artifact} />)}
+        </ul>
+      ) : null}
       {details !== null && planned ? <PlanResults task={task} details={details} /> : null}
       {loading && details === null ? <p role="status" className="px-1 text-xs text-muted-foreground">Loading task details…</p> : null}
       <StatusLine task={task} details={details} items={items} />
@@ -208,9 +193,12 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
 
   return (
     <div className="thread-layout relative flex min-h-0 min-w-0 flex-1">
-      {!detailsOpen ? <EnvironmentCard task={latest} project={project} /> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <ChatHeader project={project} task={latest} title={turns[0] ?? latest} />
+        {/* Inside the column so the compact (narrow-window) variant is in
+            flow under the header; the floating variant positions itself
+            against .thread-layout from here. */}
+        {!detailsOpen ? <EnvironmentCard task={latest} project={project} /> : null}
         <div
           ref={scroller}
           onScroll={(event) => {
@@ -226,7 +214,7 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
                 task={turn}
                 isLatest={index === turns.length - 1}
                 onLoaded={follow}
-                onDetails={() => { useTaskStore.getState().focus(turn.id); openDetails('plan'); }}
+                onDetails={() => { useTaskStore.getState().focus(turn.id); openDetails('files'); }}
                 previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined}
                 onRun={reportRun}
               />

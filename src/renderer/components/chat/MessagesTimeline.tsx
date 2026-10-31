@@ -1,7 +1,19 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import type { TimelineItem, WorkEntry } from '../../lib/timeline';
 import { cn } from '../../lib/cn';
-import { Markdown } from './Markdown';
+
+// The markdown engine is the heaviest renderer dependency and no first
+// paint needs it: replies stream in as plain text, then swap to rendered
+// markdown when the chunk arrives (and it is cached for the session).
+const Markdown = lazy(() => import('./Markdown').then((m) => ({ default: m.Markdown })));
+
+function MarkdownText({ text }: { text: string }): React.JSX.Element {
+  return (
+    <Suspense fallback={<p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{text}</p>}>
+      <Markdown text={text} />
+    </Suspense>
+  );
+}
 import { WorkIcon } from './WorkIcon';
 import {
   AlertCircleIcon, CheckIcon, ChevronRightIcon, ListChecksIcon, SparklesIcon, Spinner, TerminalIcon, XIcon,
@@ -56,8 +68,8 @@ function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JS
         : null;
   const content = (
     <>
-      <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-muted-foreground" />
-      {entry.source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{entry.source}</span> : null}
+      <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-primary" />
+      {entry.source !== undefined ? <span className="shrink-0 rounded border border-border-strong bg-accent px-1 py-px text-3xs font-medium text-foreground/80">{entry.source}</span> : null}
       <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'running' && live ? 'text-shimmer' : entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
       {toneIcon}
       {expandable ? <ChevronRightIcon size={12} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} /> : null}
@@ -94,7 +106,7 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
   // Short groups and the live group stay expanded, like T3 Code's work log.
   const expanded = open || live || entries.length <= 3;
   return (
-    <div className="group-card">
+    <div className="bg-transparent">
       {entries.length > 3 && !live ? (
         <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded} className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           <ChevronRightIcon size={12} className={cn('transition-transform', expanded && 'rotate-90')} />
@@ -112,7 +124,7 @@ function Diagnostics({ text }: { text: string }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const lines = text.split('\n').length;
   return (
-    <div className="rounded-xl border border-border/70">
+    <div className="bg-transparent">
       <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={open} className="flex h-8 w-full cursor-pointer items-center gap-2 px-2.5 text-left text-xs text-muted-foreground hover:text-foreground">
         <ChevronRightIcon size={12} className={cn('transition-transform', open && 'rotate-90')} />
         <TerminalIcon size={13} />
@@ -143,14 +155,14 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
             />
           ) : null}
           {item.kind === 'notice' ? (
-            <div role="status" className="flex items-start gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <div role="status" className="flex items-start gap-2 bg-transparent px-1 py-2 text-xs text-muted-foreground">
               <SparklesIcon size={13} className="mt-0.5 shrink-0 text-primary" />
               <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{item.text}</p>
             </div>
           ) : null}
           {item.kind === 'assistant' ? (
             <div className="px-1">
-              <Markdown text={item.text} />
+              <MarkdownText text={item.text} />
               {live && index === items.length - 1 ? <span aria-hidden="true" className="animate-status-pulse ml-0.5 inline-block h-3.5 w-[7px] translate-y-0.5 rounded-[2px] bg-primary/70" /> : null}
             </div>
           ) : null}
