@@ -77,9 +77,10 @@ jobs:
         # No Developer ID certificate is provisioned in CI, so identity
         # auto-discovery is disabled: the DMG is unsigned/not notarized
         # and Gatekeeper will warn on first launch.
-        # GH_TOKEN is deliberately NOT set here: with a token present,
-        # electron-builder auto-publishes a draft Release on tag builds.
-        # Publishing is handled explicitly by the step below instead.
+        # No GH_TOKEN here and `dist:mac` passes --publish never:
+        # electron-builder would otherwise implicitly publish a draft
+        # Release on tag builds (and fail without a token). Publishing is
+        # handled explicitly by the step below instead.
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm run dist:mac
