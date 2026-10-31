@@ -1412,6 +1412,36 @@ const migration032: Migration = {
   },
 };
 
+// Migration 33 — steer/queue: messages sent while a task in the thread is
+// still working. `steer` interrupts the anchor task and dispatches next;
+// `queue` dispatches FIFO once the anchor settles. The row survives restarts
+// until it is dispatched, cancelled, or fails to dispatch.
+const migration033: Migration = {
+  version: 33,
+  name: 'task_message_queue',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE task_message_queue (
+        id                 TEXT PRIMARY KEY NOT NULL,
+        anchor_task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        thread_id          TEXT NOT NULL,
+        workspace_id       TEXT NOT NULL,
+        objective          TEXT NOT NULL,
+        acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+        agent_id           TEXT,
+        run_options        TEXT,
+        attachment_ids     TEXT NOT NULL DEFAULT '[]',
+        mode               TEXT NOT NULL CHECK (mode IN ('steer', 'queue')),
+        status             TEXT NOT NULL CHECK (status IN ('pending', 'dispatching', 'dispatched', 'cancelled', 'failed')),
+        dispatched_task_id TEXT,
+        created_at         TEXT NOT NULL,
+        updated_at         TEXT NOT NULL
+      );
+      CREATE INDEX idx_task_message_queue_thread ON task_message_queue (thread_id, status, created_at);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1446,4 +1476,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration030,
   migration031,
   migration032,
+  migration033,
 ];

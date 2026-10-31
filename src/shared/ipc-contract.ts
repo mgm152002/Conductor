@@ -90,6 +90,22 @@ export const TaskCreateRequest = z.object({
   attachmentIds: AttachmentIdsSchema.optional(),
 });
 export const TaskCancelRequest = z.object({ id: z.string().uuid() });
+export const TaskEnqueueRequest = z.object({
+  /** Task currently working in the thread the message belongs to. */
+  taskId: z.string().uuid(),
+  objective: z.string().trim().min(1).max(10_000),
+  /** steer: interrupt the working task and run this next. queue: run after it finishes. */
+  mode: z.enum(['steer', 'queue']),
+  acceptanceCriteria: z.array(z.string().trim().min(1).max(1000)).max(50).optional(),
+  agentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
+  runOptions: z.object({
+    main: RunChoiceSchema.optional(),
+    agents: z.record(z.string().regex(/^[\w:.-]{1,200}$/), RunChoiceSchema).optional(),
+  }).optional(),
+  attachmentIds: AttachmentIdsSchema.optional(),
+});
+export const TaskQueueListRequest = z.object({ threadId: z.string().uuid() });
+export const TaskQueueCancelRequest = z.object({ id: z.string().uuid() });
 export const TaskGetRequest = z.object({ id: z.string().uuid() });
 export const TaskListActiveRequest = z.void();
 export const ThreadDeleteRequest = z.object({
@@ -197,6 +213,9 @@ export const INVOKE_SCHEMAS = {
   'settings.get': SettingsGetRequest,
   'settings.set': SettingsSetRequest,
   'task.create': TaskCreateRequest,
+  'task.enqueue': TaskEnqueueRequest,
+  'task.queueList': TaskQueueListRequest,
+  'task.queueCancel': TaskQueueCancelRequest,
   'task.cancel': TaskCancelRequest,
   'task.get': TaskGetRequest,
   'task.listActive': TaskListActiveRequest,

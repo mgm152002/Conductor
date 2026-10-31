@@ -34,6 +34,8 @@ import type { ArtifactPreview, ChangedFileDiff, TaskDetails, WorkspaceChanges } 
 import type { AgentQuestionAnswers, AgentQuestionRequest, ApprovalRequest, AuditEvent, PermissionProfile } from '@shared/domain';
 import type { CatalogEntryView, InstallOutcome } from '@shared/catalog';
 import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
+import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
+import type { IconBridge } from '@shared/icon-contract';
 import type { GitHubBridge } from '@shared/github-contract';
 
 // The preload bridge exposes exactly one namespaced object, `window.conductor`.
@@ -251,6 +253,13 @@ const conductor = {
       runOptions?: RunOptions;
     }): Promise<Task> => invoke('task.create', input),
     cancel: (id: string): Promise<void> => invoke('task.cancel', { id }),
+    /** Send a message while this task is working: steer it or queue behind it. */
+    enqueue: (input: {
+      taskId: string; objective: string; mode: QueuedMessageMode;
+      acceptanceCriteria?: string[]; agentId?: string; runOptions?: RunOptions; attachmentIds?: string[];
+    }): Promise<QueuedMessage> => invoke('task.enqueue', input),
+    queueList: (threadId: string): Promise<QueuedMessage[]> => invoke('task.queueList', { threadId }),
+    queueCancel: (id: string): Promise<void> => invoke('task.queueCancel', { id }),
     get: (id: string): Promise<Task> => invoke('task.get', { id }),
     listActive: (): Promise<Task[]> => invoke('task.listActive'),
   },

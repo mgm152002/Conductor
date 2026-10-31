@@ -16,6 +16,7 @@ import type { AuditLog } from '../domain/audit-log';
 import type { TaskEventEmitter } from './event-emitter';
 import type { PlanDecomposition } from './planner';
 import type { Task, DagWorkflow } from '@shared/domain';
+import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 
 interface TaskRunnerDeps {
   attachments?: AttachmentService;
@@ -217,6 +218,7 @@ export class TaskRunner {
       const settled = orchestrator.getTask(taskId);
       emitter.emit('task.updated', settled);
       if (settled !== undefined) this.notify(settled);
+      if (settled !== undefined) await this.dispatchAfterSettle(settled);
     }).catch((err: unknown) => this.fail(taskId, err)).finally(() => this.running.delete(taskId));
     this.running.set(taskId, promise);
   }
@@ -224,6 +226,136 @@ export class TaskRunner {
   isRunning(taskId:string):boolean { return this.running.has(taskId); }
 
   async waitForIdle(taskId: string): Promise<void> { await this.running.get(taskId); }
+
+  // ---- Steer & queue: messages sent while a task is working ----
+
+  /**
+   * Accept a message for a thread whose latest task is still working.
+   * `queue` stores it durably; it dispatches FIFO as a follow-up once the
+   * working task settles. `steer` stores it, cancels the working task, waits
+   * for its drive loop to exit, then dispatches it ahead of queued messages.
+   * Adapters have no mid-run input channel, so steering is interrupt+resume:
+   * the follow-up continues the thread (provider session resumed when the
+   * same agent continues, earlier turns passed as reference otherwise).
+   */
+  async enqueueMessage(input: {
+    taskId: string; objective: string; mode: QueuedMessageMode;
+    acceptanceCriteria?: readonly string[]; agentId?: string;
+    runOptions?: RunOptions; attachmentIds?: readonly string[];
+  }): Promise<QueuedMessage> {
+    const anchor = this.deps.orchestrator.getTask(input.taskId);
+    if (anchor === undefined) throw new Error('The working task was not found.');
+    if (isTerminal(anchor.state)) throw new Error('That task already finished. Send the message as a normal reply.');
+    const objective = input.objective.trim();
+    if (objective.length < 1 || objective.length > 10_000) throw new Error('Message must be 1–10,000 characters.');
+    if (input.agentId !== undefined && !this.agentAvailable(input.agentId)) {
+      throw new Error(`The selected agent (${input.agentId}) is not available. Check Connections, or choose Auto.`);
+    }
+    const attachmentIds = [...(input.attachmentIds ?? [])];
+    if (attachmentIds.length > 0 && !this.deps.attachments) throw new Error('Attachments are not available. Remove the files and try again.');
+    this.deps.attachments?.validate(attachmentIds);
+    const entry: QueuedMessage = {
+      id: randomUUID(), anchorTaskId: anchor.id, threadId: anchor.threadId ?? anchor.id,
+      objective, mode: input.mode, status: 'pending', createdAt: new Date().toISOString(),
+    };
+    this.deps.store.db.prepare(
+      `INSERT INTO task_message_queue (id, anchor_task_id, thread_id, workspace_id, objective, acceptance_criteria, agent_id, run_options, attachment_ids, mode, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    ).run(entry.id, entry.anchorTaskId, entry.threadId, anchor.workspaceId, objective,
+      JSON.stringify([...(input.acceptanceCriteria ?? [])]),
+      input.agentId ?? null,
+      input.runOptions !== undefined ? JSON.stringify(input.runOptions) : null,
+      JSON.stringify(attachmentIds), entry.mode, entry.createdAt, entry.createdAt);
+    this.emitQueue(entry.threadId);
+    if (entry.mode === 'steer') void this.steer(entry).catch(() => undefined);
+    return entry;
+  }
+
+  /** Pending (and currently dispatching) messages for a thread, in dispatch order. */
+  listQueuedMessages(threadId: string): QueuedMessage[] {
+    const rows = this.deps.store.db.prepare(
+      `SELECT id, anchor_task_id, thread_id, objective, mode, status, dispatched_task_id, created_at
+       FROM task_message_queue WHERE thread_id = ? AND status IN ('pending', 'dispatching')
+       ORDER BY (mode = 'steer') DESC, created_at ASC, rowid ASC`,
+    ).all(threadId) as QueueRow[];
+    return rows.map(rowToQueuedMessage);
+  }
+
+  async cancelQueuedMessage(id: string): Promise<void> {
+    const row = this.deps.store.db.prepare('SELECT thread_id FROM task_message_queue WHERE id = ? AND status = \'pending\'').get(id) as { thread_id: string } | undefined;
+    if (row === undefined) throw new Error('That queued message is no longer waiting.');
+    this.deps.store.db.prepare("UPDATE task_message_queue SET status = 'cancelled', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+    this.emitQueue(row.thread_id);
+  }
+
+  private async steer(entry: QueuedMessage): Promise<void> {
+    await this.deps.orchestrator.cancelTask(entry.anchorTaskId);
+    await this.waitForIdle(entry.anchorTaskId);
+    await this.dispatchQueued(entry.threadId);
+  }
+
+  /** Dispatch after a drive settles; blocked/interrupted work keeps its queue waiting. */
+  private async dispatchAfterSettle(settled: Task): Promise<void> {
+    if (settled.state === 'BLOCKED' || settled.state === 'RECOVERABLE_INTERRUPTION' || settled.state === 'WAITING_FOR_APPROVAL') return;
+    await this.dispatchQueued(settled.threadId ?? settled.id);
+  }
+
+  private readonly dispatchingThreads = new Set<string>();
+
+  /**
+   * Dispatch the next waiting message of a thread as a follow-up task, at
+   * most one at a time. Steer entries go first; after cancellation only a
+   * steer entry may dispatch (a plain Stop must not unleash queued work).
+   */
+  async dispatchQueued(threadId: string): Promise<void> {
+    if (this.dispatchingThreads.has(threadId)) return;
+    this.dispatchingThreads.add(threadId);
+    try {
+      for (;;) {
+        const next = this.listQueuedMessages(threadId).find((m) => m.status === 'pending');
+        if (next === undefined) return;
+        const newest = this.deps.store.db.prepare(
+          'SELECT id, state FROM tasks WHERE thread_id = ? OR id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
+        ).get(threadId, threadId) as { id: string; state: Task['state'] } | undefined;
+        if (newest === undefined) return;
+        if (!isTerminal(newest.state)) return; // something in the thread is still working
+        if (newest.state === 'CANCELLED' && next.mode !== 'steer') return;
+        const claimed = this.deps.store.db.prepare(
+          "UPDATE task_message_queue SET status = 'dispatching', updated_at = ? WHERE id = ? AND status = 'pending'",
+        ).run(new Date().toISOString(), next.id);
+        if (claimed.changes === 0) continue;
+        this.emitQueue(threadId);
+        const row = this.deps.store.db.prepare(
+          'SELECT workspace_id, objective, acceptance_criteria, agent_id, run_options, attachment_ids, mode FROM task_message_queue WHERE id = ?',
+        ).get(next.id) as { workspace_id: string; objective: string; acceptance_criteria: string; agent_id: string | null; run_options: string | null; attachment_ids: string; mode: QueuedMessageMode };
+        try {
+          const created = await this.create({
+            workspaceId: row.workspace_id,
+            objective: row.objective,
+            acceptanceCriteria: JSON.parse(row.acceptance_criteria) as string[],
+            parentTaskId: newest.id,
+            ...(row.agent_id !== null ? { agentId: row.agent_id } : {}),
+            ...(row.run_options !== null ? { runOptions: JSON.parse(row.run_options) as RunOptions } : {}),
+            attachmentIds: JSON.parse(row.attachment_ids) as string[],
+          });
+          this.deps.store.db.prepare("UPDATE task_message_queue SET status = 'dispatched', dispatched_task_id = ?, updated_at = ? WHERE id = ?")
+            .run(created.id, new Date().toISOString(), next.id);
+          this.emitQueue(threadId);
+          return; // the follow-up is now the working task; the rest wait for it
+        } catch {
+          this.deps.store.db.prepare("UPDATE task_message_queue SET status = 'failed', updated_at = ? WHERE id = ?")
+            .run(new Date().toISOString(), next.id);
+          this.emitQueue(threadId);
+        }
+      }
+    } finally {
+      this.dispatchingThreads.delete(threadId);
+    }
+  }
+
+  private emitQueue(threadId: string): void {
+    try { this.deps.emitter.emit('task.queue.updated', { threadId, queue: this.listQueuedMessages(threadId) }); } catch { /* renderer is optional */ }
+  }
 
   async resolveApproval(input: {approvalId:string;decision:'approved'|'denied';remember?:boolean}): Promise<void> {
     // A tool call from a running agent: answer it; the task keeps running.
@@ -266,4 +398,23 @@ export class TaskRunner {
       else if (task.state === 'BLOCKED' || task.state === 'RECOVERABLE_INTERRUPTION') this.deps.onStuck?.(task);
     } catch { /* ignored */ }
   }
+}
+
+interface QueueRow {
+  id: string;
+  anchor_task_id: string;
+  thread_id: string;
+  objective: string;
+  mode: QueuedMessageMode;
+  status: QueuedMessage['status'];
+  dispatched_task_id: string | null;
+  created_at: string;
+}
+
+function rowToQueuedMessage(row: QueueRow): QueuedMessage {
+  return {
+    id: row.id, anchorTaskId: row.anchor_task_id, threadId: row.thread_id,
+    objective: row.objective, mode: row.mode, status: row.status, createdAt: row.created_at,
+    ...(row.dispatched_task_id !== null ? { dispatchedTaskId: row.dispatched_task_id } : {}),
+  };
 }

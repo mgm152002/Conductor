@@ -11,6 +11,7 @@ export const EVENT_CHANNELS = [
   'chat.updated',
   'task.updated',
   'task.stream',
+  'task.queue.updated',
   'approval.requested',
   'question.requested',
   'resume.snapshot',

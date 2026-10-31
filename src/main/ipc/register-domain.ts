@@ -23,6 +23,9 @@ import {
   SettingsSetRequest,
   TaskCancelRequest,
   TaskCreateRequest,
+  TaskEnqueueRequest,
+  TaskQueueCancelRequest,
+  TaskQueueListRequest,
   TaskGetRequest,
   TaskListActiveRequest,
   ThreadDeleteRequest,
@@ -270,6 +273,18 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
       return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(input.parentTaskId ? {parentTaskId:input.parentTaskId}:{}),...(input.agentId ? {agentId:input.agentId}:{}),...(input.plan === true ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{})});
     },
   );
+
+  // A message sent while the thread's task is working: steer (interrupt and
+  // run next) or queue (run after it finishes). Stored durably in main.
+  router.handle('task.enqueue', TaskEnqueueRequest, async (_event, input) => deps.runner.enqueueMessage({
+    taskId: input.taskId, objective: input.objective, mode: input.mode,
+    ...(input.acceptanceCriteria ? { acceptanceCriteria: input.acceptanceCriteria } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
+    ...(input.runOptions ? { runOptions: parseRunOptions(input.runOptions) } : {}),
+    ...(input.attachmentIds ? { attachmentIds: input.attachmentIds } : {}),
+  }));
+  router.handle('task.queueList', TaskQueueListRequest, (_event, input) => deps.runner.listQueuedMessages(input.threadId));
+  router.handle('task.queueCancel', TaskQueueCancelRequest, async (_event, input): Promise<void> => { await deps.runner.cancelQueuedMessage(input.id); });
 
   router.handle(
     'task.cancel',
