@@ -53,6 +53,52 @@ export function isAgentFallbackEvent(event: TaskEvent): boolean {
   return event.kind === 'log' && obj(event.payload)?.['agentFallback'] === true;
 }
 
+/** A log event that announces a retry on the same agent with its fallback model. */
+export function isModelFallbackEvent(event: TaskEvent): boolean {
+  return event.kind === 'log' && obj(event.payload)?.['modelFallback'] === true;
+}
+
+/** The CLI/model one Work turn ran with (single-step turns only), for between-turn handoffs. */
+export interface TurnRun { agentId: string; model?: string }
+
+export function turnRun(details: TaskDetails | null): TurnRun | undefined {
+  if (details === null || details.steps.length !== 1) return undefined;
+  const step = details.steps[0]!;
+  if (step.assignedAdapterId === undefined) return undefined;
+  return {
+    agentId: step.assignedAdapterId,
+    ...(step.run?.model !== undefined ? { model: step.run.model } : {}),
+  };
+}
+
+/**
+ * The handoff divider between two Work turns when the replying CLI or model
+ * changed — the same derivation chat threads use between replies. Returns
+ * null when nothing changed, or when this turn already shows an inline
+ * handoff for a switch that happened while it ran.
+ */
+export function betweenTurnHandoff(
+  id: string,
+  previous: TurnRun | undefined,
+  current: TurnRun | undefined,
+  agentName: (agentId: string) => string,
+  currentItems: readonly TimelineItem[],
+  at: string,
+): TimelineItem | null {
+  if (previous === undefined || current === undefined) return null;
+  const changed = previous.agentId !== current.agentId
+    || (previous.model !== undefined && current.model !== undefined && previous.model !== current.model);
+  if (!changed) return null;
+  if (currentItems.some((item) => item.kind === 'handoff')) return null;
+  return {
+    kind: 'handoff', id, toAgentId: current.agentId, toAgent: agentName(current.agentId), at,
+    fromAgent: agentName(previous.agentId),
+    ...(previous.model !== undefined ? { fromModel: previous.model } : {}),
+    ...(current.model !== undefined ? { toModel: current.model } : {}),
+    reason: 'You switched CLI or model',
+  };
+}
+
 const STATE_LABELS: Record<string, string> = {
   CONTEXT_LOADING: 'Loading context',
   PLANNING: 'Planning',
@@ -164,6 +210,24 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
     flushWork();
     items.push({ kind: 'notice', id, text, at });
   };
+  const addHandoff = (id: string, handoff: Json, at: string): void => {
+    const toAgentId = str(handoff['toAgentId']);
+    const toAgent = str(handoff['toAgent']);
+    if (toAgentId === undefined || toAgent === undefined) return;
+    flushProse();
+    flushWork();
+    const fromAgent = str(handoff['fromAgent']);
+    const fromModel = str(handoff['fromModel']);
+    const toModel = str(handoff['toModel']);
+    const reason = str(handoff['reason']);
+    items.push({
+      kind: 'handoff', id, toAgentId, toAgent, at,
+      ...(fromAgent !== undefined ? { fromAgent } : {}),
+      ...(fromModel !== undefined ? { fromModel } : {}),
+      ...(toModel !== undefined ? { toModel } : {}),
+      ...(reason !== undefined ? { reason } : {}),
+    });
+  };
   const addReply = (id: string, text: string, at: string): void => {
     flushProse();
     flushWork();
@@ -185,8 +249,13 @@ export function buildTimeline(task: Task, details: TaskDetails | null): Timeline
    */
   const handleLogPayload = (event: TaskEvent, logPayload: Json): void => {
     const text = str(logPayload['message']) ?? str(logPayload['text']);
-    if (isAgentFallbackEvent(event)) {
-      if (text !== undefined) addNotice(event.id, text, event.createdAt);
+    if (isAgentFallbackEvent(event) || isModelFallbackEvent(event)) {
+      // A CLI/model switch is shown as a handoff divider in the answer space,
+      // like chat threads — not buried in the work log. Older events without
+      // the structured switch keep the plain notice.
+      const handoff = obj(logPayload['handoff']);
+      if (handoff !== null) addHandoff(event.id, handoff, event.createdAt);
+      else if (text !== undefined) addNotice(event.id, text, event.createdAt);
       return;
     }
     const detail = str(logPayload['detail']);

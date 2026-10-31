@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task, TaskEvent } from '../../src/shared/domain';
 import type { TaskDetails } from '../../src/shared/task-view';
-import { buildChatMessageTimeline, buildTimeline, latestActivity, messageShowsCurrentHandoff, recentActivities } from '../../src/renderer/lib/timeline';
+import { betweenTurnHandoff, buildChatMessageTimeline, buildTimeline, latestActivity, messageShowsCurrentHandoff, recentActivities, turnRun } from '../../src/renderer/lib/timeline';
 import type { ChatMessage } from '../../src/shared/chat-contract';
 
 const task: Task = { id: 't', workspaceId: 'w', objective: 'Add a test', state: 'COMPLETED', acceptanceCriteria: ['response: nonempty'], contextRefs: [], createdAt: '2026-10-24T00:00:00Z', updatedAt: '2026-10-24T00:00:00Z' };
@@ -189,6 +189,50 @@ describe('chat timeline', () => {
       kind: 'notice',
       text: 'OpenCode is out of capacity, so Codex CLI is taking over this step.',
     });
+  });
+
+  it('renders structured agent/model switches as handoff dividers, like chat threads', () => {
+    const items = buildTimeline(task, details([
+      stdout('Working on it'),
+      {
+        id: 'm', taskId: 't', kind: 'log', createdAt: '2026-10-24T00:00:01Z',
+        payload: {
+          message: 'Retrying OpenCode with its fallback model.', modelFallback: true, agentId: 'opencode', model: 'deepseek-v4',
+          handoff: { fromAgentId: 'opencode', fromAgent: 'OpenCode', fromModel: 'muse', toAgentId: 'opencode', toAgent: 'OpenCode', toModel: 'deepseek-v4', reason: 'OpenCode is out of capacity' },
+        },
+      },
+      {
+        id: 'f', taskId: 't', kind: 'log', createdAt: '2026-10-24T00:00:02Z',
+        payload: {
+          message: 'OpenCode is out of capacity, so Codex CLI is taking over this step.', agentFallback: true,
+          handoff: { fromAgentId: 'opencode', fromAgent: 'OpenCode', toAgentId: 'codex', toAgent: 'Codex CLI', reason: 'OpenCode is out of capacity' },
+        },
+      },
+      stdout('Finished'),
+    ]));
+    expect(items.map((i) => i.kind)).toEqual(['user', 'assistant', 'handoff', 'handoff', 'assistant']);
+    expect(items[2]).toMatchObject({ kind: 'handoff', fromModel: 'muse', toAgentId: 'opencode', toModel: 'deepseek-v4' });
+    expect(items[3]).toMatchObject({ kind: 'handoff', fromAgent: 'OpenCode', toAgentId: 'codex', toAgent: 'Codex CLI' });
+  });
+
+  it('derives a between-turn handoff when the user switched CLI or model, like chat threads', () => {
+    const name = (id: string): string => ({ opencode: 'OpenCode', codex: 'Codex CLI' })[id] ?? id;
+    const switched = betweenTurnHandoff('h1',
+      { agentId: 'opencode', model: 'opencode/muse' },
+      { agentId: 'opencode', model: 'opencode/deepseek-v4' },
+      name, [], '2026-10-24T00:01:00Z');
+    expect(switched).toMatchObject({
+      kind: 'handoff', fromAgent: 'OpenCode', fromModel: 'opencode/muse',
+      toAgentId: 'opencode', toModel: 'opencode/deepseek-v4', reason: 'You switched CLI or model',
+    });
+    // No change, or a switch already shown inline while the turn ran: no divider.
+    expect(betweenTurnHandoff('h2', { agentId: 'opencode' }, { agentId: 'opencode' }, name, [], '2026-10-24T00:01:00Z')).toBeNull();
+    expect(betweenTurnHandoff('h3', { agentId: 'opencode' }, { agentId: 'codex' }, name,
+      [{ kind: 'handoff', id: 'x', toAgentId: 'codex', toAgent: 'Codex CLI', at: '2026-10-24T00:00:30Z' }], '2026-10-24T00:01:00Z')).toBeNull();
+    // turnRun reads the single step's agent/model and ignores plan turns.
+    expect(turnRun({ ...details([]), steps: [{ id: 's', taskId: 't', ordinal: 0, description: 'd', dependsOn: [], status: 'succeeded', assignedAdapterId: 'opencode', run: { model: 'opencode/muse', source: 'composer' } }] }))
+      .toEqual({ agentId: 'opencode', model: 'opencode/muse' });
+    expect(turnRun(details([]))).toBeUndefined();
   });
 
   it('surfaces error events and agent failures as errors', () => {

@@ -48,19 +48,27 @@ export function HandoffDivider({ fromAgent, fromModel, toAgentId, toAgent, toMod
     : fromModel !== undefined && toModel !== undefined && fromModel !== toModel
       ? `${fromModel.split('/').pop()} → `
       : '';
+  // Why the switch happened, shown under the pill in small text — except the
+  // generic between-reply labels, which the pill already says. Long provider
+  // errors are clipped to one line; the full text stays in the tooltip.
+  const showReason = reason !== undefined && reason.trim() !== ''
+    && !/changed between replies|You switched CLI or model/.test(reason);
   return (
-    <div role="note" aria-label={`Handoff: ${from}${toAgent}${modelName !== undefined ? `, model ${modelName}` : ''}`} className="flex items-center gap-3 py-1" title={reason}>
-      <span className="h-px min-w-6 flex-1 bg-border" aria-hidden="true" />
-      <span className="flex max-w-full min-w-0 items-center gap-2 rounded-full border border-border bg-card py-1 pr-3 pl-1.5 text-xs text-muted-foreground shadow-xs">
-        <AgentMark agentId={toAgentId} name={toAgent} size={20} />
-        <span className="min-w-0 truncate">
-          {from !== '' ? <span className="text-muted-foreground/80">{from}</span> : null}
-          <span className="font-medium text-foreground">{toAgent}</span>
-          {modelName !== undefined ? <span title={toModel}> · {modelName}</span> : null}
-          <span className="text-muted-foreground/80"> took over</span>
+    <div role="note" aria-label={`Handoff: ${from}${toAgent}${modelName !== undefined ? `, model ${modelName}` : ''}`} className="flex flex-col items-center gap-1 py-1" title={reason}>
+      <div className="flex w-full items-center gap-3">
+        <span className="h-px min-w-6 flex-1 bg-border" aria-hidden="true" />
+        <span className="flex max-w-full min-w-0 items-center gap-2 rounded-full border border-border bg-card py-1 pr-3 pl-1.5 text-xs text-muted-foreground shadow-xs">
+          <AgentMark agentId={toAgentId} name={toAgent} size={20} />
+          <span className="min-w-0 truncate">
+            {from !== '' ? <span className="text-muted-foreground/80">{from}</span> : null}
+            <span className="font-medium text-foreground">{toAgent}</span>
+            {modelName !== undefined ? <span title={toModel}> · {modelName}</span> : null}
+            <span className="text-muted-foreground/80"> took over</span>
+          </span>
         </span>
-      </span>
-      <span className="h-px min-w-6 flex-1 bg-border" aria-hidden="true" />
+        <span className="h-px min-w-6 flex-1 bg-border" aria-hidden="true" />
+      </div>
+      {showReason ? <p className="max-w-full truncate px-2 text-2xs text-muted-foreground/80">{reason}</p> : null}
     </div>
   );
 }

@@ -611,12 +611,17 @@ export class StepExecutor {
         // task fail (Property 3 still holds — only verification completes a
         // task). Any other failure, or no alternate, ends the step as failed.
         const failure = result.status === 'failed' ? classifyFailure(result, tailLines(errorSink)) : 'other';
+        // Fallback stays, like chat threads: retry the same agent on its
+        // fallback model, then hand the step to the next available CLI —
+        // each switch is recorded as a structured handoff (with why) so the
+        // timeline shows a clean divider instead of raw provider errors.
+        const failureDetail = result.error ?? tailLines(errorSink);
         if (retryableOnAnotherAgent(failure)
-          && this.retryWithFallbackModel(task, step, failure, fallbackModelTried)) {
+          && this.retryWithFallbackModel(task, step, failure, fallbackModelTried, failureDetail)) {
           return this.runStep(task, this.stepRow(step.id) ?? step, tried, fallbackModelTried);
         }
         if (retryableOnAnotherAgent(failure)
-          && await this.repointToFallback(task, step, tried, failure)) {
+          && await this.repointToFallback(task, step, tried, failure, failureDetail)) {
           return this.runStep(task, this.stepRow(step.id) ?? step, tried, fallbackModelTried);
         }
         this.markStep(step.id, result.status === 'cancelled' ? 'cancelled' : 'failed');
@@ -958,6 +963,44 @@ export class StepExecutor {
     return row === undefined ? undefined : rowToStep(row);
   }
 
+  /** Display name for an agent id, falling back to the id itself. */
+  private agentName(agentId: string | undefined): string {
+    if (agentId === undefined) return 'The previous agent';
+    return this.registry.has(agentId) ? this.registry.resolve(agentId).record.name : agentId;
+  }
+
+  /** The model a step's execution input records for one agent, if any. */
+  private stepModel(step: TaskStep, agentId: string): string | undefined {
+    const row = this.store.db.prepare('SELECT execution_input FROM task_steps WHERE id = ?')
+      .get(step.id) as { execution_input: string | null } | undefined;
+    if (row?.execution_input == null) return undefined;
+    try {
+      const input = JSON.parse(row.execution_input) as {
+        runs?: Record<string, { model?: string }>;
+        models?: Record<string, string>;
+      };
+      const key = agentId.startsWith('remote:') ? 'codex' : agentId;
+      return input.runs?.[key]?.model ?? input.models?.[key];
+    } catch { return undefined; }
+  }
+
+  /**
+   * A short, clean "why" for a fallback handoff: the failure kind in plain
+   * words plus the first meaningful line of the provider's error — never raw
+   * JSON blobs (e.g. AGY_ERROR payloads) or multi-line dumps.
+   */
+  private cleanReason(kind: FailureKind, agentName: string, detail: string | undefined): string {
+    const base = kind === 'quota_exhausted'
+      ? `${agentName} is out of capacity`
+      : `${agentName} couldn't run the selected model`;
+    const line = (detail ?? '').split('\n')
+      .map((entry) => entry.trim())
+      .find((entry) => entry !== '' && !entry.startsWith('{') && !entry.startsWith('}') && !/AGY_ERROR|error_code|"_/.test(entry));
+    if (line === undefined || base.toLowerCase().includes(line.toLowerCase())) return base;
+    const clipped = line.length > 140 ? `${line.slice(0, 139)}…` : line;
+    return `${base}: ${clipped}`;
+  }
+
   /**
    * Re-point a step to a different available agent that can fulfil the same
    * objective, when the current one is out of usage/quota or cannot run the
@@ -966,7 +1009,7 @@ export class StepExecutor {
    * returns true if an alternate was chosen. Returns false when no untried,
    * available alternate exists.
    */
-  private async repointToFallback(task: Task, step: TaskStep, tried: ReadonlySet<string>, kind: FailureKind): Promise<boolean> {
+  private async repointToFallback(task: Task, step: TaskStep, tried: ReadonlySet<string>, kind: FailureKind, detail?: string): Promise<boolean> {
     const row = this.store.db.prepare('SELECT required_capability FROM task_steps WHERE id = ?').get(step.id) as { required_capability: string | null } | undefined;
     const capability = row?.required_capability ?? undefined;
     // Only objective-fulfilment steps carry a per-agent alternate; other
@@ -984,14 +1027,25 @@ export class StepExecutor {
       actor: 'orchestrator', action: 'task.step.agent_fallback', target: task.id,
       redactedPayload: { stepId: step.id, from: step.assignedAdapterId ?? null, to: next.id, reason: kind },
     });
-    const previous = step.assignedAdapterId !== undefined && this.registry.has(step.assignedAdapterId)
-      ? this.registry.resolve(step.assignedAdapterId).record.name
-      : 'The previous agent';
+    const previous = this.agentName(step.assignedAdapterId);
     const message = kind === 'quota_exhausted'
       ? `${previous} is out of capacity, so ${next.name} is taking over this step.`
       : `${previous} couldn't run the selected model, so ${next.name} is taking over this step.`;
+    const fromModel = step.assignedAdapterId !== undefined ? this.stepModel(step, step.assignedAdapterId) : undefined;
+    const toModel = this.stepModel(step, next.id);
     this.store.db.prepare("INSERT INTO task_events (id, task_id, step_id, kind, payload, created_at) VALUES (?, ?, ?, 'log', ?, ?)")
-      .run(randomUUID(), task.id, step.id, JSON.stringify({ message, phase: 'execution', agentFallback: true }), new Date().toISOString());
+      .run(randomUUID(), task.id, step.id, JSON.stringify({
+        message, phase: 'execution', agentFallback: true,
+        // Structured switch, rendered as a handoff divider like chat threads.
+        handoff: {
+          ...(step.assignedAdapterId !== undefined ? { fromAgentId: step.assignedAdapterId } : {}),
+          fromAgent: previous,
+          ...(fromModel !== undefined ? { fromModel } : {}),
+          toAgentId: next.id, toAgent: next.name,
+          ...(toModel !== undefined ? { toModel } : {}),
+          reason: this.cleanReason(kind, previous, detail),
+        },
+      }), new Date().toISOString());
     this.emitTaskUpdated(task.id);
     return true;
   }
@@ -1006,6 +1060,7 @@ export class StepExecutor {
     step: TaskStep,
     kind: FailureKind,
     tried: Set<string>,
+    detail?: string,
   ): boolean {
     const agentId = step.assignedAdapterId;
     if (agentId === undefined || tried.has(agentId)) return false;
@@ -1032,14 +1087,23 @@ export class StepExecutor {
       actor: 'orchestrator', action: 'task.step.model_fallback', target: task.id,
       redactedPayload: { stepId: step.id, agentId, model, reason: kind },
     });
+    const agentName = this.agentName(agentId);
+    const fromModel = typeof currentModels[agentId] === 'string' ? currentModels[agentId] : this.stepModel(step, agentId);
     this.store.db.prepare("INSERT INTO task_events (id, task_id, step_id, kind, payload, created_at) VALUES (?, ?, ?, 'log', ?, ?)")
       .run(randomUUID(), task.id, step.id, JSON.stringify({
-        message: `Retrying ${agentId} with its fallback model.`,
+        message: `Retrying ${agentName} with its fallback model.`,
         phase: 'execution',
         modelFallback: true,
         agentId,
         model,
         reason: kind,
+        // Same-agent model switch, rendered as a handoff divider like chat.
+        handoff: {
+          fromAgentId: agentId, fromAgent: agentName,
+          ...(fromModel !== undefined ? { fromModel } : {}),
+          toAgentId: agentId, toAgent: agentName, toModel: model,
+          reason: this.cleanReason(kind, agentName, detail),
+        },
       }), new Date().toISOString());
     this.emitTaskUpdated(task.id);
     return true;

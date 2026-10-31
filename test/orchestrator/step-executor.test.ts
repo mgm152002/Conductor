@@ -533,6 +533,71 @@ describe('Orchestrator.runSteps — agent fallback', () => {
       .map((row) => JSON.parse(row.payload) as { message?: string; agentFallback?: boolean })
       .find((payload) => payload.agentFallback === true);
     expect(fallback?.message).toBe('OpenCode is out of capacity, so Codex CLI is taking over this step.');
+    expect(fallback).toMatchObject({
+      handoff: { fromAgentId: 'opencode', fromAgent: 'OpenCode', toAgentId: 'codex', toAgent: 'Codex CLI' },
+    });
+  });
+
+  it('still falls back to the next CLI when the user chose the model, with the reason recorded', async () => {
+    // Fallback is a feature, like chat threads: OpenCode + a chosen model
+    // failed, so Codex takes over — as a structured handoff saying why, and
+    // running its own model, not the foreign model id chosen for OpenCode.
+    const { registry, opencode, codex } = fallbackRegistry();
+    const { orchestrator } = buildOrchestrator({
+      registry,
+      maxStepRetries: 0,
+      fallbackModel: () => undefined,
+    });
+    const taskId = await createAgentStep(orchestrator);
+    store.db.prepare('UPDATE tasks SET run_options = ? WHERE id = ?')
+      .run(JSON.stringify({ main: { model: 'opencode/deepseek-v4' }, mainAgentId: 'opencode' }), taskId);
+
+    const result = await orchestrator.runSteps(taskId);
+
+    expect(result.outcome).toBe('verifying');
+    expect(opencode.calls.started).toHaveLength(1);
+    expect(codex.calls.started).toHaveLength(1);
+    expect(codex.calls.started[0]).toMatchObject({ models: { codex: 'codex-default' } });
+    expect(stepStatuses(taskId)).toEqual(['succeeded']);
+
+    const logs = store.db
+      .prepare("SELECT payload FROM task_events WHERE task_id = ? AND kind = 'log' ORDER BY rowid ASC")
+      .all(taskId) as { payload: string }[];
+    const fallback = logs.map((row) => JSON.parse(row.payload) as Record<string, unknown>)
+      .find((payload) => payload['agentFallback'] === true);
+    expect(fallback).toMatchObject({
+      handoff: {
+        fromAgentId: 'opencode', toAgentId: 'codex',
+        reason: expect.stringContaining('The selected model is not available for this account'),
+      },
+    });
+  });
+
+  it('records the fallback-model retry as a same-agent handoff with a clean reason', async () => {
+    const { registry, opencode, codex } = fallbackRegistry();
+    const { orchestrator } = buildOrchestrator({
+      registry,
+      maxStepRetries: 0,
+      fallbackModel: (agentId) => agentId === 'opencode' ? 'model-fallback' : undefined,
+    });
+    const taskId = await createAgentStep(orchestrator);
+
+    await orchestrator.runSteps(taskId);
+
+    expect(opencode.calls.started).toHaveLength(2);
+    expect(opencode.calls.started[1]).toMatchObject({ models: { opencode: 'model-fallback' } });
+    expect(codex.calls.started).toHaveLength(1);
+    const logs = store.db
+      .prepare("SELECT payload FROM task_events WHERE task_id = ? AND kind = 'log' ORDER BY rowid ASC")
+      .all(taskId) as { payload: string }[];
+    const modelFallback = logs.map((row) => JSON.parse(row.payload) as Record<string, unknown>)
+      .find((payload) => payload['modelFallback'] === true);
+    expect(modelFallback).toMatchObject({
+      handoff: {
+        fromAgentId: 'opencode', toAgentId: 'opencode', toModel: 'model-fallback',
+        reason: expect.stringContaining("couldn't run the selected model"),
+      },
+    });
   });
 });
 

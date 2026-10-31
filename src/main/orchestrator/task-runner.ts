@@ -85,7 +85,15 @@ export class TaskRunner {
         throw error;
       }
     }
-    if (runOptions !== undefined) this.deps.runOptions?.save(task.id, runOptions, agentId);
+    // Record which agent the message's model choice belongs to — the explicit
+    // pick, or (for a follow-up) the previous turn's agent that will continue
+    // — even when only the model changed, so the choice stays bound to its own
+    // CLI: if the step later falls back to another provider, that provider
+    // runs its own Settings/Auto model instead of a foreign model id.
+    const mainAgentId = plan === true ? agentId : (agentId ?? this.continueAdapterId(task));
+    if (runOptions !== undefined || mainAgentId !== undefined) {
+      this.deps.runOptions?.save(task.id, runOptions ?? {}, mainAgentId);
+    }
     // Auto routing needs the agent's model list; usually cached already.
     if (this.deps.warmModels !== undefined) {
       const agents = agentId !== undefined && plan !== true ? [agentId] : this.deps.registry.listAdapters().map((a) => a.id);
@@ -147,11 +155,16 @@ export class TaskRunner {
    * still available (so Codex can resume its session); otherwise routing picks
    * any compatible agent and the earlier turns are passed as reference.
    */
-  private followUpPlan(task: Task): PlanDecomposition | undefined {
+  /** The previous turn's agent when a follow-up will continue on it, if still available. */
+  private continueAdapterId(task: Task): string | undefined {
     if (task.parentTaskId === undefined) return undefined;
     const adapterId = lastAdapterFor(this.deps.store, task.parentTaskId);
-    if (adapterId === undefined) return undefined;
-    return this.agentAvailable(adapterId) ? this.pinnedPlan(task, adapterId) : undefined;
+    return adapterId !== undefined && this.agentAvailable(adapterId) ? adapterId : undefined;
+  }
+
+  private followUpPlan(task: Task): PlanDecomposition | undefined {
+    const adapterId = this.continueAdapterId(task);
+    return adapterId === undefined ? undefined : this.pinnedPlan(task, adapterId);
   }
 
   async startWorkflow(workflow: DagWorkflow, workspaceId: string): Promise<Task> {

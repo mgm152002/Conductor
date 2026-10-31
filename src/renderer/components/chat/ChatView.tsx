@@ -5,7 +5,7 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { buildTimeline, isAgentFallbackEvent, latestActivity, type TimelineItem } from '../../lib/timeline';
+import { betweenTurnHandoff, buildTimeline, isAgentFallbackEvent, isModelFallbackEvent, latestActivity, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { cn } from '../../lib/cn';
@@ -103,15 +103,30 @@ function VerificationSummary({ task, passed, total, recorded, verified }: { task
 }
 
 /** One message in the thread: the user's request, the agent's work and reply, and its status. */
-function Turn({ task, isLatest, onDetails, onLoaded }: { task: Task; isLatest: boolean; onDetails: () => void; onLoaded: () => void }): React.JSX.Element {
+function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
+  task: Task; isLatest: boolean; onDetails: () => void; onLoaded: () => void;
+  /** The previous turn's CLI/model, so a switch between turns shows a handoff divider like chat. */
+  previousRun?: TurnRun | undefined;
+  onRun?: ((taskId: string, run: TurnRun) => void) | undefined;
+}): React.JSX.Element {
   const { details, loading, error, refresh } = useTaskDetails(task);
   // A plan's tasks run in parallel, so their output is shown per task in the
   // plan card; the main timeline keeps the message, task-level events, and
   // agent-switch notices (which must stay visible in the conversation).
   const planned = details?.plan != null;
-  const items = useMemo(() => buildTimeline(task, details !== null && planned
-    ? { ...details, events: details.events.filter((e) => e.stepId === undefined || e.kind === 'transition' || isAgentFallbackEvent(e)) }
-    : details), [task, details, planned]);
+  const ownRun = useMemo(() => turnRun(details !== null && planned ? null : details), [details, planned]);
+  useEffect(() => {
+    if (ownRun !== undefined) onRun?.(task.id, ownRun);
+  }, [ownRun, onRun, task.id]);
+  const items = useMemo(() => {
+    const built = buildTimeline(task, details !== null && planned
+      ? { ...details, events: details.events.filter((e) => e.stepId === undefined || e.kind === 'transition' || isAgentFallbackEvent(e) || isModelFallbackEvent(e)) }
+      : details);
+    // Between-turn switch (e.g. Muse → DeepSeek in the composer): show the
+    // handoff divider right after the user's message, as chat threads do.
+    const handoff = betweenTurnHandoff(`handoff:${task.id}`, previousRun, ownRun, (id) => agentLabel(id), built, task.createdAt);
+    return handoff === null ? built : [built[0]!, handoff, ...built.slice(1)];
+  }, [task, details, planned, previousRun, ownRun]);
   const live = isWorkingState(task.state);
   const total = details?.usage?.total;
   const startedAt = Date.parse(task.createdAt);
@@ -163,6 +178,16 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
   // The details panel follows the focused message (latest by default).
   const inspected = turns.find((t) => t.id === focused.id) ?? latest;
   const { details: latestDetails } = useTaskDetails(latest);
+  // Each turn reports the CLI/model it ran with once its details load, so the
+  // next turn can show a handoff divider when the user switched between turns.
+  const [turnRuns, setTurnRuns] = useState<ReadonlyMap<string, TurnRun>>(new Map());
+  const reportRun = useCallback((taskId: string, run: TurnRun) => {
+    setTurnRuns((current) => {
+      const existing = current.get(taskId);
+      if (existing?.agentId === run.agentId && existing?.model === run.model) return current;
+      return new Map(current).set(taskId, run);
+    });
+  }, []);
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const openDetails = useUiStore((s) => s.openDetails);
   const scroller = useRef<HTMLDivElement>(null);
@@ -202,6 +227,8 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
                 isLatest={index === turns.length - 1}
                 onLoaded={follow}
                 onDetails={() => { useTaskStore.getState().focus(turn.id); openDetails('plan'); }}
+                previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined}
+                onRun={reportRun}
               />
             ))}
           </div>
