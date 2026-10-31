@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { SqliteStore } from '@main/db/store';
 import { WorkspaceService } from '@main/domain/workspace-service';
-import { GitHubService, parseGitHubRemote, pullRequestState } from '@main/domain/github-service';
+import { GitHubService, isChangeRequest, parseGitHubRemote, pullRequestState } from '@main/domain/github-service';
 import { worktreeBranch } from '@main/domain/worktree';
 import type { Task } from '@shared/domain';
 
@@ -20,6 +20,36 @@ describe('parseGitHubRemote', () => {
     expect(parseGitHubRemote('https://github.com/acme/widgets')).toEqual({ owner: 'acme', name: 'widgets', fullName: 'acme/widgets' });
     expect(parseGitHubRemote('git@gitlab.com:acme/widgets.git')).toBeNull();
     expect(parseGitHubRemote('/local/path')).toBeNull();
+  });
+});
+
+describe('isChangeRequest', () => {
+  it('treats questions and explanations as not change requests', () => {
+    for (const objective of [
+      'How does the auth flow work?',
+      'Explain what this function does',
+      'What files handle billing?',
+      'Can you explain why the build is failing?',
+      'Tell me about this project',
+      'Summarize the changes in the billing module',
+      'Why is the test suite red?',
+      'Walk me through the ingestion pipeline',
+      'Review the new caching code',
+      'I want to understand how retries work',
+    ]) expect(isChangeRequest(objective), objective).toBe(false);
+  });
+
+  it('treats direct change requests and problem statements as change requests', () => {
+    for (const objective of [
+      'Fix the login redirect loop',
+      'Please add a dark mode toggle',
+      'Can you implement caching for this endpoint?',
+      'Update the README with the new setup steps',
+      'Explain the bug and fix it',
+      'Investigate why login fails and fix it',
+      'The export button crashes when clicked',
+      'Tests are failing on CI since yesterday',
+    ]) expect(isChangeRequest(objective), objective).toBe(true);
   });
 });
 
@@ -125,6 +155,33 @@ describe('GitHubService connection', () => {
     const task = { id: taskId, workspaceId: project.id, threadId: taskId, state: 'COMPLETED' } as Task;
     await expect(service.autoPrForCompletedTask(task)).resolves.toBeUndefined();
     expect(service.listPrs(project.id)).toEqual([]);
+  });
+
+  it('does not auto-PR a completed question or explanation, even when opted in', async () => {
+    const { project, taskId, service } = await seed();
+    await service.connect(project.id, 'ghp_test_token');
+    await service.setAutoPr(project.id, true);
+    for (const objective of ['How does the auth flow work?', 'Explain the ingestion pipeline']) {
+      const task = { id: taskId, workspaceId: project.id, threadId: taskId, state: 'COMPLETED', objective } as Task;
+      await service.autoPrForCompletedTask(task);
+    }
+    expect(service.listPrs(project.id)).toEqual([]);
+    // Skipping is silent: it must not surface as a GitHub failure in Settings.
+    const status = await service.status(project.id);
+    expect(status.autoPr).toBe(true);
+    expect(status.lastError).toBeUndefined();
+  });
+
+  it('still attempts an auto-PR for a completed change request when opted in', async () => {
+    const { project, taskId, service } = await seed();
+    await service.connect(project.id, 'ghp_test_token');
+    await service.setAutoPr(project.id, true);
+    const task = { id: taskId, workspaceId: project.id, threadId: taskId, state: 'COMPLETED', objective: 'Fix the login redirect loop' } as Task;
+    await service.autoPrForCompletedTask(task);
+    // The temp project has no worktree, so the attempt fails — which is the
+    // point: unlike a question, it was attempted and the failure is visible.
+    const status = await service.status(project.id);
+    expect(status.lastError).toBeDefined();
   });
 });
 

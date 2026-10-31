@@ -80,6 +80,74 @@ function firstLine(text: string, limit = 120): string {
   return line.length > limit ? `${line.slice(0, limit - 1)}…` : line;
 }
 
+// -- change-intent classification -------------------------------------------
+//
+// Auto-PR must only fire for tasks that asked for a change. A question about
+// the project ("how does auth work?", "explain this file", "why is the build
+// red?") runs the same agent machinery and completes the same way, but
+// opening a pull request for it is always wrong — even if the agent touched
+// files incidentally while answering. Manual PR creation is unaffected.
+//
+// The classifier is deliberately conservative in one direction: it returns
+// true only for change-directed requests. Politeness wrappers are peeled
+// first ("can you fix…" is a change; "can you explain…" is not), an
+// explanation followed by a change clause ("explain the bug and fix it") is
+// a change, and a plain statement of a problem ("the export button crashes")
+// counts as a change request — in a project thread that is a work order.
+// Anything question- or explanation-shaped returns false; the user can
+// still open a PR manually, so a miss costs one click, while a spurious PR
+// costs review noise every time.
+
+const CHANGE_VERBS = new Set([
+  'fix', 'implement', 'add', 'create', 'update', 'change', 'modify', 'remove',
+  'delete', 'refactor', 'rename', 'replace', 'introduce', 'migrate', 'patch',
+  'resolve', 'address', 'enable', 'disable', 'improve', 'optimize', 'optimise',
+  'write', 'build', 'generate', 'convert', 'integrate', 'bump', 'upgrade',
+  'downgrade', 'extract', 'split', 'merge', 'revert', 'restore', 'support',
+  'make', 'adjust', 'tweak', 'configure', 'set', 'install', 'clean',
+]);
+
+const EXPLAIN_VERBS = new Set([
+  'explain', 'describe', 'summarize', 'summarise', 'outline', 'list',
+  'compare', 'review', 'examine', 'investigate', 'explore', 'check',
+  'analyze', 'analyse', 'clarify', 'define', 'find', 'identify',
+]);
+
+const EXPLAIN_PHRASES = [
+  'tell me', 'walk me through', 'walk through', 'give me', 'show me',
+  'help me understand', 'i want to understand', 'i need to understand',
+];
+
+const QUESTION_STARTERS = new Set([
+  'what', 'why', 'how', 'where', 'when', 'which', 'who', 'whom', 'whose',
+  'is', 'are', 'was', 'were', 'do', 'does', 'did', 'have', 'has', 'had', 'should',
+]);
+
+const POLITE_PREFIX = /^(please\s+|can you\s+|could you\s+|would you\s+|will you\s+|i want you to\s+|i need you to\s+|i'd like you to\s+|let's\s+|lets\s+)/;
+const CHANGE_CLAUSE = /\b(?:and|then|and then)\s+(?:also\s+)?(?:please\s+)?(?:fix|implement|add|create|update|change|modify|remove|delete|refactor|rename|replace|resolve|address|patch|enable|disable)\b/;
+
+/** Whether a task's objective asks for a code change (vs. an answer). */
+export function isChangeRequest(objective: string): boolean {
+  const text = objective.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (text === '') return false;
+  let stripped = text;
+  for (;;) {
+    const next = stripped.replace(POLITE_PREFIX, '');
+    if (next === stripped) break;
+    stripped = next;
+  }
+  // "Explain the bug and fix it" — the change clause wins over the framing.
+  if (CHANGE_CLAUSE.test(stripped)) return true;
+  const firstWord = (stripped.split(' ')[0] ?? '').replace(/[^a-z'-]/g, '');
+  if (CHANGE_VERBS.has(firstWord)) return true;
+  if (EXPLAIN_VERBS.has(firstWord)) return false;
+  if (EXPLAIN_PHRASES.some((phrase) => stripped === phrase || stripped.startsWith(`${phrase} `))) return false;
+  if (QUESTION_STARTERS.has(firstWord)) return false;
+  if (text.endsWith('?')) return false;
+  if (/\b(understand|explanation|overview)\b/.test(stripped)) return false;
+  return true;
+}
+
 interface PrRow {
   id: string; workspace_id: string; thread_key: string; root_task_id: string;
   number: number; url: string; title: string; branch: string; state: string;
@@ -543,6 +611,12 @@ export class GitHubService {
     const workspaceId = task.workspaceId;
     if (this.pref(workspaceId, 'autoPr') !== 'true') return;
     if (this.pref(workspaceId, 'secretId') === undefined) return;
+    // Only change requests earn a PR. Questions and explanations about the
+    // project complete as tasks too, but a PR for them is never wanted —
+    // the user can still create one manually for the thread. The git layer
+    // below is the second guard: a change task that produced no diff
+    // returns 'no-changes' and opens nothing.
+    if (!isChangeRequest(task.objective)) return;
     try {
       await this.createPrForThread(workspaceId, task.threadId ?? task.id);
       this.setPref(workspaceId, 'lastError', undefined);
