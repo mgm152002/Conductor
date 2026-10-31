@@ -267,6 +267,8 @@ export async function bootstrap(): Promise<AppServices> {
         ...(effort !== undefined ? { effort } : {}),
       };
     },
+    // Same-agent fallback model before the next CLI, mirroring run fallback.
+    fallbackModel: (agentId) => runResolver.fallbackModel(agentId),
     onError: (message) => { console.warn(message); },
   });
   const threadTitles = new ThreadTitleService({
@@ -484,6 +486,12 @@ export async function bootstrap(): Promise<AppServices> {
     runOptions: runResolver, warmModels: (ids) => modelCatalogs.warm(ids),
     onThreadCreated: (task) => { threadTitles.schedule(task); },
     onFinished: (task) => {
+      // Title generation at creation competes with the just-started work
+      // agent and can lose to a quota/free-limit failure; retry once the
+      // thread settles (still only fills an empty title) instead of leaving
+      // the placeholder until the next app launch's backfill.
+      const root = stateMachine.getTask(task.threadId ?? task.id);
+      if (root !== undefined) threadTitles.schedule(root);
       // Finalize skill usage with the real outcome before learning, then let
       // authoring capture a validated first-time draft from the final response.
       skillOrchestration.onTaskFinished(task);
@@ -492,7 +500,11 @@ export async function bootstrap(): Promise<AppServices> {
       // File a PR for the finished thread when the project opted in.
       void github.autoPrForCompletedTask(task);
     },
-    onStuck: (task) => { void signals.onTaskStuck(task); },
+    onStuck: (task) => {
+      const root = stateMachine.getTask(task.threadId ?? task.id);
+      if (root !== undefined) threadTitles.schedule(root);
+      void signals.onTaskStuck(task);
+    },
   });
   runnerRef = runner;
   // Threads created before auto-titles (or whose generation failed) get named

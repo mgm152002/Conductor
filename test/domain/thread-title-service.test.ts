@@ -89,6 +89,23 @@ describe('AgentTitleGenerator', () => {
     expect(input.description).toBe('Describe a change');
   });
 
+  it('retries the same agent on its Settings fallback model when the primary fails', async () => {
+    const adapter = fake('opencode', { events: [{ kind: 'stdout', data: 'Fix the login loop' }] });
+    const originalAwait = adapter.await.bind(adapter);
+    let awaits = 0;
+    adapter.await = async (handle) => {
+      awaits += 1;
+      return awaits === 1 ? { status: 'failed', error: 'Free usage limit reached' } : originalAwait(handle);
+    };
+    const generator = new AgentTitleGenerator(registryFor([adapter]), sandbox(), undefined, 5_000, {
+      fallbackModel: (agentId) => agentId === 'opencode' ? 'opencode/beam-free' : undefined,
+    });
+    await expect(generator.generate('fix the login loop please')).resolves.toBe('Fix the login loop');
+    expect(adapter.calls.started).toHaveLength(2);
+    const retry = adapter.calls.started[1] as { models?: Record<string, string> };
+    expect(retry.models).toEqual({ opencode: 'opencode/beam-free' });
+  });
+
   it('falls back to the next agent when the first fails, and reports it', async () => {
     const broken = fake('opencode', { crashAt: 'start', crashMessage: 'default model unavailable' });
     const working = fake('codex', { events: [{ kind: 'stdout', data: '{"type":"item.completed","item":{"type":"agent_message","text":"Plan the weekend trip"}}' }] });
@@ -140,6 +157,21 @@ describe('ThreadTitleService', () => {
     const task = insert('some objective here');
     await expect(service.ensure(task)).resolves.toBeUndefined();
     expect(get(task.id).title).toBeUndefined();
+  });
+
+  it('fills the title when scheduled again after an early generation failure', async () => {
+    // Creation-time generation can lose to a quota failure while the work
+    // agent runs; a later schedule (e.g. when the task settles) must retry.
+    let calls = 0;
+    const { service, insert, get } = await seed(async () => { calls += 1; return calls === 1 ? undefined : 'Recovered Title'; });
+    const task = insert('fix the login loop');
+    service.schedule(task);
+    await tick(); await tick();
+    expect(get(task.id).title).toBeUndefined();
+    service.schedule(task);
+    await tick(); await tick();
+    expect(get(task.id).title).toBe('Recovered Title');
+    expect(calls).toBe(2);
   });
 
   it('backfills recent untitled roots only', async () => {

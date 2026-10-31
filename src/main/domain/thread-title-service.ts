@@ -147,6 +147,12 @@ export interface AgentTitleGeneratorOptions {
    * Settings default first, then the catalog's economy pick.
    */
   settingsRunChoice?: (agentId: string) => RunChoice | undefined;
+  /**
+   * The agent's Settings fallback model. When the primary model fails (quota,
+   * free-limit, unavailable), the same agent is retried once on this model
+   * before moving to the next agent — the same order chat/work runs use.
+   */
+  fallbackModel?: (agentId: string) => string | undefined;
   /** Failure reporting; title generation used to fail silently everywhere. */
   onError?: (message: string) => void;
 }
@@ -160,6 +166,7 @@ export interface AgentTitleGeneratorOptions {
  */
 export class AgentTitleGenerator {
   private readonly settingsRunChoice: AgentTitleGeneratorOptions['settingsRunChoice'];
+  private readonly fallbackModel: AgentTitleGeneratorOptions['fallbackModel'];
   private readonly onError: AgentTitleGeneratorOptions['onError'];
 
   constructor(
@@ -170,14 +177,15 @@ export class AgentTitleGenerator {
     options: AgentTitleGeneratorOptions = {},
   ) {
     this.settingsRunChoice = options.settingsRunChoice;
+    this.fallbackModel = options.fallbackModel;
     this.onError = options.onError;
     mkdirSync(sandboxPath, { recursive: true, mode: 0o700 });
     try { chmodSync(sandboxPath, 0o700); } catch { /* best effort */ }
   }
 
   async generate(objective: string): Promise<string | undefined> {
-    return this.generateWith('Thread title generation', async (agentId) => {
-      const text = await this.runWith(agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.');
+    return this.generateWith('Thread title generation', async (agentId, modelOverride) => {
+      const text = await this.runWith(agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.', modelOverride);
       return text !== undefined && cleanGeneratedTitle(text) !== undefined ? text : undefined;
     });
   }
@@ -188,44 +196,59 @@ export class AgentTitleGenerator {
    * Returns the first non-empty reply; cleaning is the caller's job.
    */
   async generateText(prompt: string, description: string): Promise<string | undefined> {
-    return this.generateWith('Agent text generation', async (agentId) => {
-      const text = await this.runWith(agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.');
+    return this.generateWith('Agent text generation', async (agentId, modelOverride) => {
+      const text = await this.runWith(agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.', modelOverride);
       return text !== undefined && text.trim() !== '' ? text : undefined;
     });
   }
 
-  /** Try each available chat-capable CLI agent in preference order until one yields text. */
-  private async generateWith(label: string, attempt: (agentId: string) => Promise<string | undefined>): Promise<string | undefined> {
+  /**
+   * Try each available chat-capable CLI agent in preference order until one
+   * yields text. A failed/unusable first attempt on an agent is retried once
+   * on that agent's Settings fallback model before the next agent is tried —
+   * a free-tier limit on the primary model must not silently kill the call
+   * while a working fallback model is configured.
+   */
+  private async generateWith(label: string, attempt: (agentId: string, modelOverride?: string) => Promise<string | undefined>): Promise<string | undefined> {
     const candidates = this.registry.listAdapters()
       .filter((a) => a.available && a.class === 'local_cli_agent' && a.capabilities.some((c) => c.id === 'objective.fulfill'))
       .sort((a, b) => compareAgentPreference(a.id, b.id));
     for (const candidate of candidates) {
-      try {
-        const text = await attempt(candidate.id);
-        if (text !== undefined) return text;
-        this.onError?.(`${label}: ${candidate.id} returned nothing usable`);
-      } catch (error) {
-        this.onError?.(`${label} via ${candidate.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+      const fallback = this.fallbackModel?.(candidate.id);
+      const overrides: (string | undefined)[] = fallback !== undefined ? [undefined, fallback] : [undefined];
+      for (const override of overrides) {
+        try {
+          const text = await attempt(candidate.id, override);
+          if (text !== undefined) return text;
+          this.onError?.(`${label}: ${candidate.id}${override !== undefined ? ` on fallback model ${override}` : ''} returned nothing usable`);
+        } catch (error) {
+          this.onError?.(`${label} via ${candidate.id}${override !== undefined ? ` on fallback model ${override}` : ''} failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
     return undefined;
   }
 
-  private async runWith(agentId: string, prompt: string, description: string, guidance: string): Promise<string | undefined> {
+  private async runWith(agentId: string, prompt: string, description: string, guidance: string, modelOverride?: string): Promise<string | undefined> {
     const adapter = this.registry.resolve(agentId);
-    // Warm the catalog (bounded) so Auto can pick a working economy model
-    // instead of leaving the CLI on its own default.
-    let catalog = this.catalogs?.cached(agentId);
-    if (catalog === undefined && this.catalogs !== undefined) {
-      catalog = await Promise.race([
-        this.catalogs.get(agentId).catch(() => undefined),
-        new Promise<undefined>((resolve) => { setTimeout(() => { resolve(undefined); }, 6_000); }),
-      ]) ?? this.catalogs.cached(agentId);
-    }
     const settingsChoice = this.settingsRunChoice?.(agentId);
-    const run = settingsChoice?.model !== undefined || settingsChoice?.effort !== undefined
-      ? settingsChoice
-      : chooseRun({ catalog, difficulty: 'simple', ...(settingsChoice !== undefined ? { settings: settingsChoice } : {}) });
+    let run: RunChoice;
+    if (modelOverride !== undefined) {
+      run = { model: modelOverride, ...(settingsChoice?.effort !== undefined ? { effort: settingsChoice.effort } : {}) };
+    } else {
+      // Warm the catalog (bounded) so Auto can pick a working economy model
+      // instead of leaving the CLI on its own default.
+      let catalog = this.catalogs?.cached(agentId);
+      if (catalog === undefined && this.catalogs !== undefined) {
+        catalog = await Promise.race([
+          this.catalogs.get(agentId).catch(() => undefined),
+          new Promise<undefined>((resolve) => { setTimeout(() => { resolve(undefined); }, 6_000); }),
+        ]) ?? this.catalogs.cached(agentId);
+      }
+      run = settingsChoice?.model !== undefined || settingsChoice?.effort !== undefined
+        ? settingsChoice
+        : chooseRun({ catalog, difficulty: 'simple', ...(settingsChoice !== undefined ? { settings: settingsChoice } : {}) });
+    }
     const handle = await adapter.start({
       objective: prompt,
       description,
