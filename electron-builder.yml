@@ -1,0 +1,28 @@
+# Packaging for the macOS DMG built by `npm run dist:mac` and the
+# build-macos-dmg job in .github/workflows/quality.yml.
+# Builds are unsigned and not notarized: no signing certificate is
+# available in CI (CSC_IDENTITY_AUTO_DISCOVERY=false there), so Gatekeeper
+# will warn on first launch. Add a Developer ID certificate + notarization
+# credentials before distributing outside local evaluation.
+appId: com.conductor.app
+productName: Conductor
+copyright: Copyright © 2026 Conductor
+
+directories:
+  output: release
+
+# electron-vite emits main/preload/renderer into out/; production
+# dependencies from package.json are packed alongside it automatically.
+files:
+  - out/**
+  - package.json
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
