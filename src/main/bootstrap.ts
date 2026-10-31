@@ -252,9 +252,10 @@ export async function bootstrap(): Promise<AppServices> {
   // for context and resolves its model/effort from the composer, Settings or
   // Auto. It shares the one memory engine and model-catalog instances so a
   // Mem0 health check and the chat picker reflect the same services.
-  // Auto thread titles: a fast economy-model call names each new thread from
-  // its first message, replacing the first-characters placeholder in the
-  // background. Shared by Work threads, casual chats, and PR creation.
+  // Auto thread titles: a background call names each new thread from its
+  // first message, replacing the first-characters placeholder. Active threads
+  // are named by the model they are running on; backfill of old threads may
+  // use any model. Shared by Work threads, casual chats, and PR creation.
   const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs, TITLE_TIMEOUT_MS, {
     // Pin the same Settings default model the user's chats run on; a bare
     // session would otherwise start on the CLI's own (possibly broken) default.
@@ -278,7 +279,22 @@ export async function bootstrap(): Promise<AppServices> {
     store,
     getTask: (taskId) => stateMachine.getTask(taskId),
     onTaskUpdated: (task) => { taskEvents.emit('task.updated', task); },
-    generate: (objective) => titleGenerator.generate(objective),
+    generate: (objective, pin) => titleGenerator.generate(objective, pin),
+    // An active work thread is named by the model it is running on: the
+    // composer's agent pick (saved in run_options before titles are
+    // scheduled) with its resolved model/effort. Auto threads have no
+    // selected agent yet at creation, so they stay unpinned. Backfill
+    // (scheduleRecent) never asks for a pin — any model may name old threads.
+    pinFor: (task) => {
+      const { mainAgentId } = runResolver.options(task.id);
+      if (mainAgentId === undefined) return undefined;
+      const run = runResolver.resolve(task, { role: 'main', agents: [mainAgentId] }).runs[mainAgentId];
+      return {
+        agentId: mainAgentId,
+        ...(run?.model !== undefined ? { model: run.model } : {}),
+        ...(run?.effort !== undefined ? { effort: run.effort } : {}),
+      };
+    },
   });
 
   const chat = new ChatService(
@@ -286,7 +302,7 @@ export async function bootstrap(): Promise<AppServices> {
     (snapshot) => chatEvents.emit(snapshot),
     {
       memory, catalogs: modelCatalogs, settings, attachments,
-      generateTitle: (firstMessage) => threadTitles.generateTitle(firstMessage),
+      generateTitle: (firstMessage, pin) => threadTitles.generateTitle(firstMessage, pin),
     },
   );
   registerChatHandlers(router, chat);

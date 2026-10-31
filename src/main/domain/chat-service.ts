@@ -63,8 +63,18 @@ export interface ChatServiceOptions {
   /**
    * Model-generated title for a new chat thread, from its first message.
    * Runs in the background and only replaces the first-message placeholder.
+   * For a new (active) thread the caller is handed the pin of the run the
+   * thread is starting on, so the title is written by the thread's selected
+   * model; backfill calls omit the pin and any model may answer.
    */
-  generateTitle?: (firstMessage: string) => Promise<string | undefined>;
+  generateTitle?: (firstMessage: string, pin?: ChatTitlePin) => Promise<string | undefined>;
+}
+
+/** The agent/model a chat thread's current run is on, for title generation. */
+export interface ChatTitlePin {
+  agentId: string;
+  model?: string;
+  effort?: string;
 }
 
 /** Untrusted context supplied with a message: recalled memories and/or shared Space turns. */
@@ -376,9 +386,12 @@ export class ChatService {
     const snapshot = this.get(threadId);
     this.emit(threadId);
     if (previous === undefined && this.generateTitle !== undefined) {
-      // Name the new chat in the background; replace only the placeholder, so
-      // a rename typed while the model works always wins.
-      void this.generateTitle(input.content).then((title) => {
+      // Name the new chat in the background, with the selected agent/model
+      // this first reply will run on — resolved exactly as the reply itself
+      // resolves it below. Replace only the placeholder, so a rename typed
+      // while the model works always wins.
+      const titlePin: ChatTitlePin = { agentId: selected.id, ...this.resolveRun(selected.id, input.runOptions, input.content) };
+      void this.generateTitle(input.content, titlePin).then((title) => {
         if (title === undefined) return;
         const changed = this.store.db.prepare('UPDATE chat_threads SET title=? WHERE id=? AND title=?')
           .run(title, threadId, placeholderTitle);
@@ -448,7 +461,8 @@ export class ChatService {
    * (created before title generation, or whose generation failed). A title
    * counts as a placeholder only when it exactly equals the truncated first
    * user message; anything else is treated as a user's rename and left alone.
-   * Runs sequentially so it never spawns parallel agent sessions.
+   * Runs sequentially so it never spawns parallel agent sessions. No title
+   * pin is passed: these threads are not running, so any model may name them.
    */
   async backfillTitles(limit = 10): Promise<void> {
     if (this.generateTitle === undefined) return;

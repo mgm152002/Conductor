@@ -13,7 +13,10 @@ import type { Task } from '@shared/domain';
 let store: SqliteStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
-async function seed(generate: (objective: string) => Promise<string | undefined>) {
+async function seed(
+  generate: (objective: string, pin?: { agentId: string; model?: string }) => Promise<string | undefined>,
+  pinFor?: (task: Task) => { agentId: string; model?: string } | undefined,
+) {
   store = new SqliteStore(':memory:');
   await store.migrate();
   const s = store;
@@ -40,6 +43,7 @@ async function seed(generate: (objective: string) => Promise<string | undefined>
   const updated: Task[] = [];
   const service = new ThreadTitleService({
     store: s, getTask: get, onTaskUpdated: (task) => { updated.push(task); }, generate,
+    ...(pinFor !== undefined ? { pinFor } : {}),
   });
   return { s, project, service, insert, get, updated };
 }
@@ -104,6 +108,40 @@ describe('AgentTitleGenerator', () => {
     expect(adapter.calls.started).toHaveLength(2);
     const retry = adapter.calls.started[1] as { models?: Record<string, string> };
     expect(retry.models).toEqual({ opencode: 'opencode/beam-free' });
+  });
+
+  it('pinned generation asks only the thread\'s selected agent and model', async () => {
+    const preferred = fake('opencode', { events: [{ kind: 'stdout', data: 'Title From Wrong Provider' }] });
+    const selected = fake('claude-code', { events: [{ kind: 'stdout', data: 'Title From Selected Model' }] });
+    const generator = new AgentTitleGenerator(registryFor([preferred, selected]), sandbox(), undefined, 5_000, {
+      // Even a configured fallback model must not be used for a pinned call.
+      fallbackModel: () => 'some-fallback-model',
+    });
+    await expect(generator.generate('fix the login loop', { agentId: 'claude-code', model: 'claude-sonnet-x' }))
+      .resolves.toBe('Title From Selected Model');
+    expect(preferred.calls.started).toHaveLength(0);
+    expect(selected.calls.started).toHaveLength(1);
+    const input = selected.calls.started[0] as { models?: Record<string, string> };
+    expect(input.models).toEqual({ 'claude-code': 'claude-sonnet-x' });
+  });
+
+  it('pinned generation never falls back when the selected model fails', async () => {
+    const preferred = fake('opencode', { events: [{ kind: 'stdout', data: 'Title From Wrong Provider' }] });
+    const selected = fake('claude-code', { crashAt: 'start', crashMessage: 'Free usage limit reached' });
+    const errors: string[] = [];
+    const generator = new AgentTitleGenerator(registryFor([preferred, selected]), sandbox(), undefined, 5_000, {
+      fallbackModel: () => 'some-fallback-model',
+      onError: (message) => { errors.push(message); },
+    });
+    await expect(generator.generate('fix the login loop', { agentId: 'claude-code', model: 'claude-sonnet-x' }))
+      .resolves.toBeUndefined();
+    // One attempt only (the fake crashes before it can record the start):
+    // a fallback-model retry would have produced a second error, and the
+    // next provider would have recorded a start.
+    expect(preferred.calls.started).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('claude-code');
+    expect(errors[0]).toContain('selected model claude-sonnet-x');
   });
 
   it('falls back to the next agent when the first fails, and reports it', async () => {
@@ -183,5 +221,26 @@ describe('ThreadTitleService', () => {
     await tick(); await tick();
     expect(get(a.id).title).toBe('Backfilled Title');
     expect(get(b.id).title).toBe('Backfilled Title');
+  });
+
+  it('names an active thread with its selected-model pin, but backfills unpinned', async () => {
+    const pins: ({ agentId: string; model?: string } | undefined)[] = [];
+    const pin = { agentId: 'claude-code', model: 'claude-sonnet-x' };
+    const { service, insert, get } = await seed(
+      async (_objective, seenPin) => { pins.push(seenPin); return 'Generated Title'; },
+      () => pin,
+    );
+    const active = insert('active thread objective');
+    await service.ensure(active);
+    expect(get(active.id).title).toBe('Generated Title');
+    expect(pins).toEqual([pin]);
+
+    // Backfill of an old thread must not use the pin: any model may name it.
+    pins.length = 0;
+    const old = insert('old thread objective');
+    service.scheduleRecent(10);
+    await tick(); await tick();
+    expect(get(old.id).title).toBe('Generated Title');
+    expect(pins).toEqual([undefined]);
   });
 });

@@ -90,6 +90,28 @@ describe('standalone casual chat', () => {
     expect(service.get(sent.thread.id).thread.title).toBe('Weekend plan ideas');
   });
 
+  it('titles a new chat with the thread\'s selected model, and backfills with no pin', async () => {
+    const { root, store, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'reply' }] } });
+    const calls: { first: string; pin?: { agentId: string; model?: string } }[] = [];
+    const service = new ChatService(store, registry, join(root, 'chat-sandbox'), () => {}, {
+      generateTitle: async (first, pin) => { calls.push({ first, ...(pin !== undefined ? { pin } : {}) }); return 'Generated title'; },
+    });
+    const sent = await service.send({ content: 'help me plan a weekend trip', agentId: 'chat-agent', runOptions: { model: 'model-a' } });
+    await expect.poll(() => service.get(sent.thread.id).thread.title).toBe('Generated title');
+    await settled(service, sent.thread.id);
+    // Active thread: exactly the agent/model the first reply runs on.
+    expect(calls[0]?.pin).toEqual({ agentId: 'chat-agent', model: 'model-a' });
+
+    // Backfill (old thread, not running): no pin — any model may name it.
+    store.db.prepare('UPDATE chat_threads SET title=? WHERE id=?')
+      .run('help me plan a weekend trip', sent.thread.id);
+    calls.length = 0;
+    await service.backfillTitles(10);
+    expect(service.get(sent.thread.id).thread.title).toBe('Generated title');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.pin).toBeUndefined();
+  });
+
   it('records the CLI and model on each reply and shows a handoff when the user switches', async () => {
     const { service, registry } = await setup({ script: { events: [{ kind: 'stdout', data: 'first reply' }] } });
     const second = new FakeAdapter({ script: { events: [{ kind: 'stdout', data: 'second reply' }] }, record: {

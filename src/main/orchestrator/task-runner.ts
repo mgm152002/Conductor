@@ -66,11 +66,6 @@ export class TaskRunner {
       ...rest,
       acceptanceCriteria: rest.acceptanceCriteria?.length ? rest.acceptanceCriteria : ['response: nonempty'],
     });
-    // Name the thread from its first message in the background; creation and
-    // execution never wait on the (fast, economy-model) title call.
-    if (task.parentTaskId === undefined) {
-      try { this.deps.onThreadCreated?.(task); } catch { /* titles never block work */ }
-    }
     if (attachmentIds.length > 0) {
       const destination = this.attachmentDirectory(task);
       try {
@@ -93,6 +88,13 @@ export class TaskRunner {
     const mainAgentId = plan === true ? agentId : (agentId ?? this.continueAdapterId(task));
     if (runOptions !== undefined || mainAgentId !== undefined) {
       this.deps.runOptions?.save(task.id, runOptions ?? {}, mainAgentId);
+    }
+    // Name the thread from its first message in the background; creation and
+    // execution never wait on the title call. Scheduled only after the run
+    // options above are saved, so title generation can pin itself to the
+    // model this thread will actually run on.
+    if (task.parentTaskId === undefined) {
+      try { this.deps.onThreadCreated?.(task); } catch { /* titles never block work */ }
     }
     // Auto routing needs the agent's model list; usually cached already.
     if (this.deps.warmModels !== undefined) {

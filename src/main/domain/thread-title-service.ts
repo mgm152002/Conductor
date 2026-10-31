@@ -12,10 +12,20 @@ import { responseText } from '../adapters/objective-cli-adapter';
 // Auto-generated thread titles. A brand-new thread's displayed title is a
 // placeholder — the first characters of its first message — until the model
 // names it. Generation is fire-and-forget at creation time (queued, one call
-// at a time, fast economy model where the catalog offers one, hard timeout),
-// and it only ever fills a still-empty title: a title the user typed, or one
-// generated earlier, is never overwritten. The same title names the thread's
-// pull request, so PR creation first awaits any in-flight generation.
+// at a time, hard timeout), and it only ever fills a still-empty title: a
+// title the user typed, or one generated earlier, is never overwritten. The
+// same title names the thread's pull request, so PR creation first awaits
+// any in-flight generation.
+//
+// Which model names a thread depends on when it is asked:
+// - Active threads (just created, or settling after a run) are named by the
+//   model the thread itself is running on — see TitleRunPin. A quota or
+//   free-tier failure on some *other* provider must never produce error noise
+//   (or a title in another model's voice) for a thread that is happily
+//   running elsewhere, so a pinned attempt is the only attempt.
+// - Backfill (scheduleRecent, chat backfillTitles) names old threads whose
+//   run is long finished; any available model may do it, so it uses the
+//   preference-order candidate walk in AgentTitleGenerator.
 
 export const TITLE_TIMEOUT_MS = 20_000;
 const MAX_TITLE_LENGTH = 60;
@@ -51,12 +61,30 @@ export function buildTitlePrompt(objective: string): string {
   ].join('\n');
 }
 
+/**
+ * The agent/model an active thread is running on. When present, title
+ * generation uses exactly this agent (and this model, when known) and
+ * nothing else — no fallback model, no other provider.
+ */
+export interface TitleRunPin {
+  agentId: string;
+  model?: string;
+  effort?: string;
+}
+
 export interface ThreadTitleDeps {
   store: Store;
   getTask: (taskId: string) => Task | undefined;
   onTaskUpdated?: (task: Task) => void;
   /** Raw model call; resolves to untrusted reply text, or undefined. */
-  generate: (objective: string) => Promise<string | undefined>;
+  generate: (objective: string, pin?: TitleRunPin) => Promise<string | undefined>;
+  /**
+   * The run an active thread is on, if it has a selected agent. Consulted by
+   * schedule/ensure (creation, settle-time retry, PR creation). Backfill via
+   * scheduleRecent deliberately does not consult this: any model may name an
+   * old thread.
+   */
+  pinFor?: (task: Task) => TitleRunPin | undefined;
 }
 
 /** Whether this task is a thread root (follow-ups never retitle a thread). */
@@ -70,9 +98,13 @@ export class ThreadTitleService {
 
   constructor(private readonly deps: ThreadTitleDeps) {}
 
-  /** Generate a title for any objective (used for casual-chat threads too). */
-  async generateTitle(objective: string): Promise<string | undefined> {
-    const raw = await this.deps.generate(objective).catch(() => undefined);
+  /**
+   * Generate a title for any objective (used for casual-chat threads too).
+   * With a pin, only the thread's selected agent/model is asked; without
+   * one, any available model may answer (the backfill behavior).
+   */
+  async generateTitle(objective: string, pin?: TitleRunPin): Promise<string | undefined> {
+    const raw = await this.deps.generate(objective, pin).catch(() => undefined);
     return raw === undefined ? undefined : cleanGeneratedTitle(raw);
   }
 
@@ -89,6 +121,10 @@ export class ThreadTitleService {
    * (its main caller) is never stuck behind a backfill.
    */
   ensure(task: Task): Promise<string | undefined> {
+    return this.ensureWith(task, true);
+  }
+
+  private ensureWith(task: Task, usePin: boolean): Promise<string | undefined> {
     if (!isThreadRoot(task)) return Promise.resolve(task.title);
     const existing = task.title?.trim();
     if (existing) return Promise.resolve(existing);
@@ -101,7 +137,10 @@ export class ThreadTitleService {
         const current = this.deps.getTask(task.id);
         if (current === undefined || !isThreadRoot(current)) return current?.title;
         if (current.title?.trim()) return current.title;
-        const title = await this.generateTitle(current.objective);
+        // Active threads are named by their own selected model; backfill
+        // (usePin=false) leaves the pin off so any model may answer.
+        const pin = usePin ? this.deps.pinFor?.(current) : undefined;
+        const title = await this.generateTitle(current.objective, pin);
         if (title === undefined) return undefined;
         // Fill only a still-empty title — never overwrite a user rename that
         // landed while the model was working.
@@ -125,7 +164,11 @@ export class ThreadTitleService {
     return job;
   }
 
-  /** Backfill titles for the most recently updated untitled thread roots. */
+  /**
+   * Backfill titles for the most recently updated untitled thread roots.
+   * These threads are not actively running, so no pin is applied: any
+   * available model may name them.
+   */
   scheduleRecent(limit = 10): void {
     const rows = this.deps.store.db.prepare(
       `SELECT id FROM tasks WHERE (title IS NULL OR trim(title) = '') AND parent_task_id IS NULL
@@ -133,7 +176,7 @@ export class ThreadTitleService {
     ).all(limit) as { id: string }[];
     for (const row of rows) {
       const task = this.deps.getTask(row.id);
-      if (task !== undefined && isThreadRoot(task)) this.schedule(task);
+      if (task !== undefined && isThreadRoot(task)) void this.ensureWith(task, false).catch(() => undefined);
     }
   }
 }
@@ -158,11 +201,13 @@ export interface AgentTitleGeneratorOptions {
 }
 
 /**
- * The model call behind title generation: available chat-capable local CLI
- * agents in preference order (the next is tried when one fails), read-only in
- * a sandbox, pinned to the user's Settings model or the catalog's economy
- * model at low effort, under a hard timeout with cancellation — a title must
- * be fast and must never stall real work.
+ * The model call behind title generation, read-only in a sandbox under a
+ * hard timeout with cancellation — a title must be fast and must never stall
+ * real work. Unpinned calls walk the available chat-capable local CLI agents
+ * in preference order (the next is tried when one fails). A pinned call —
+ * an active thread being named by the model it is running on — makes exactly
+ * one attempt, on that agent/model: no Settings fallback model, no other
+ * provider, so an unrelated provider's quota failure stays silent.
  */
 export class AgentTitleGenerator {
   private readonly settingsRunChoice: AgentTitleGeneratorOptions['settingsRunChoice'];
@@ -183,11 +228,31 @@ export class AgentTitleGenerator {
     try { chmodSync(sandboxPath, 0o700); } catch { /* best effort */ }
   }
 
-  async generate(objective: string): Promise<string | undefined> {
-    return this.generateWith('Thread title generation', async (agentId, modelOverride) => {
-      const text = await this.runWith(agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.', modelOverride);
+  async generate(objective: string, pin?: TitleRunPin): Promise<string | undefined> {
+    if (pin !== undefined) return this.generatePinned(objective, pin);
+    return this.generateWith('Thread title generation', async (agentId, runOverride) => {
+      const text = await this.runWith(agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.', runOverride);
       return text !== undefined && cleanGeneratedTitle(text) !== undefined ? text : undefined;
     });
+  }
+
+  /**
+   * Name an active thread with its own selected model: one attempt, on that
+   * agent only. If that model is out of quota the title simply stays a
+   * placeholder (a later settle-time retry asks the same model again) —
+   * other providers are never tried, so their limits never surface here.
+   */
+  private async generatePinned(objective: string, pin: TitleRunPin): Promise<string | undefined> {
+    const label = 'Thread title generation';
+    const modelNote = pin.model !== undefined ? ` on selected model ${pin.model}` : '';
+    try {
+      const text = await this.runWith(pin.agentId, buildTitlePrompt(objective), 'Name a work thread from its first message.', 'Read-only. Do not use tools, run commands, or edit files. Reply with the title only.', pin);
+      if (text !== undefined && cleanGeneratedTitle(text) !== undefined) return text;
+      this.onError?.(`${label}: ${pin.agentId}${modelNote} returned nothing usable`);
+    } catch (error) {
+      this.onError?.(`${label} via ${pin.agentId}${modelNote} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return undefined;
   }
 
   /**
@@ -195,9 +260,18 @@ export class AgentTitleGenerator {
    * the same candidate agents, model pinning and timeout as title generation.
    * Returns the first non-empty reply; cleaning is the caller's job.
    */
-  async generateText(prompt: string, description: string): Promise<string | undefined> {
-    return this.generateWith('Agent text generation', async (agentId, modelOverride) => {
-      const text = await this.runWith(agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.', modelOverride);
+  async generateText(prompt: string, description: string, pin?: TitleRunPin): Promise<string | undefined> {
+    if (pin !== undefined) {
+      try {
+        const text = await this.runWith(pin.agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.', pin);
+        return text !== undefined && text.trim() !== '' ? text : undefined;
+      } catch (error) {
+        this.onError?.(`Agent text generation via ${pin.agentId} failed: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      }
+    }
+    return this.generateWith('Agent text generation', async (agentId, runOverride) => {
+      const text = await this.runWith(agentId, prompt, description, 'Read-only. Do not use tools, run commands, or edit files. Reply with the requested text only.', runOverride);
       return text !== undefined && text.trim() !== '' ? text : undefined;
     });
   }
@@ -209,32 +283,40 @@ export class AgentTitleGenerator {
    * a free-tier limit on the primary model must not silently kill the call
    * while a working fallback model is configured.
    */
-  private async generateWith(label: string, attempt: (agentId: string, modelOverride?: string) => Promise<string | undefined>): Promise<string | undefined> {
+  private async generateWith(label: string, attempt: (agentId: string, runOverride?: RunChoice) => Promise<string | undefined>): Promise<string | undefined> {
     const candidates = this.registry.listAdapters()
       .filter((a) => a.available && a.class === 'local_cli_agent' && a.capabilities.some((c) => c.id === 'objective.fulfill'))
       .sort((a, b) => compareAgentPreference(a.id, b.id));
     for (const candidate of candidates) {
       const fallback = this.fallbackModel?.(candidate.id);
-      const overrides: (string | undefined)[] = fallback !== undefined ? [undefined, fallback] : [undefined];
+      const overrides: (RunChoice | undefined)[] = fallback !== undefined ? [undefined, { model: fallback }] : [undefined];
       for (const override of overrides) {
         try {
           const text = await attempt(candidate.id, override);
           if (text !== undefined) return text;
-          this.onError?.(`${label}: ${candidate.id}${override !== undefined ? ` on fallback model ${override}` : ''} returned nothing usable`);
+          this.onError?.(`${label}: ${candidate.id}${override?.model !== undefined ? ` on fallback model ${override.model}` : ''} returned nothing usable`);
         } catch (error) {
-          this.onError?.(`${label} via ${candidate.id}${override !== undefined ? ` on fallback model ${override}` : ''} failed: ${error instanceof Error ? error.message : String(error)}`);
+          this.onError?.(`${label} via ${candidate.id}${override?.model !== undefined ? ` on fallback model ${override.model}` : ''} failed: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }
     return undefined;
   }
 
-  private async runWith(agentId: string, prompt: string, description: string, guidance: string, modelOverride?: string): Promise<string | undefined> {
+  private async runWith(agentId: string, prompt: string, description: string, guidance: string, runOverride?: RunChoice): Promise<string | undefined> {
     const adapter = this.registry.resolve(agentId);
     const settingsChoice = this.settingsRunChoice?.(agentId);
     let run: RunChoice;
-    if (modelOverride !== undefined) {
-      run = { model: modelOverride, ...(settingsChoice?.effort !== undefined ? { effort: settingsChoice.effort } : {}) };
+    if (runOverride?.model !== undefined || runOverride?.effort !== undefined) {
+      // An explicit model/effort (selected model, or a Settings fallback
+      // retry). A missing half falls back to the Settings choice, mirroring
+      // how the thread's own run would resolve.
+      const model = runOverride.model ?? settingsChoice?.model;
+      const effort = runOverride.effort ?? settingsChoice?.effort;
+      run = {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { effort } : {}),
+      };
     } else {
       // Warm the catalog (bounded) so Auto can pick a working economy model
       // instead of leaving the CLI on its own default.
