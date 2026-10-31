@@ -98,6 +98,11 @@ installation, linting, type checking, and the test suite for pushes and pull
 requests targeting `main`. Once those pass, it also builds an arm64 macOS
 DMG on a macOS runner and uploads it as the `conductor-macos-dmg` artifact.
 
+To publish the DMG as a permanent GitHub Release, bump `version` in
+`package.json` and push a matching tag (for example, `v0.1.0` for version
+`0.1.0`). The tag build attaches the DMG to a Release of the same name; the
+workflow fails if the tag and `package.json` version do not match.
+
 To build the same DMG locally (Apple Silicon Mac):
 
 ```sh

@@ -3,6 +3,7 @@ name: Quality
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -44,6 +45,9 @@ jobs:
   build-macos-dmg:
     name: Build macOS DMG
     needs: test-and-lint
+    # Only this job may write: it creates/updates the GitHub Release for v* tags.
+    permissions:
+      contents: write
     runs-on: macos-14
     timeout-minutes: 30
 
@@ -56,6 +60,15 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version v$version. Bump the version or fix the tag."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -76,3 +89,19 @@ jobs:
           path: release/*.dmg
           if-no-files-found: error
           retention-days: 14
+
+      # Pushing a v* tag (e.g. v0.1.0, matching package.json) also publishes
+      # the DMG as a permanent GitHub Release asset. Regular pushes to main
+      # only produce the 14-day Actions artifact above.
+      - name: Publish DMG to GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.dmg --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.dmg \
+              --title "Conductor $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
