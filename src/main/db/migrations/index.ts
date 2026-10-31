@@ -1353,6 +1353,51 @@ const migration030: Migration = {
   },
 };
 
+// Migration 31 — one quota row per labelled model group. Antigravity reports
+// separate weekly quotas for its Gemini and Claude/GPT groups, but the table
+// keyed rows only by (adapter, window kind), so one group overwrote the other.
+// `group_key` is the label (or '' when unlabelled) made part of the primary
+// key; `label` stays nullable so existing unlabelled rows keep their shape.
+// SQLite cannot change a primary key in place, so rebuild and copy.
+const migration031: Migration = {
+  version: 31,
+  name: 'agent_usage_limits_group_key',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_usage_limits_next (
+        adapter_id        TEXT NOT NULL,
+        window_kind       TEXT NOT NULL
+                            CHECK (window_kind IN ('session', 'daily', 'weekly')),
+        group_key         TEXT NOT NULL DEFAULT '',
+        remaining_percent REAL
+                            CHECK (remaining_percent IS NULL
+                              OR (remaining_percent >= 0 AND remaining_percent <= 100)),
+        used_percent      REAL
+                            CHECK (used_percent IS NULL
+                              OR (used_percent >= 0 AND used_percent <= 100)),
+        resets_at         TEXT,
+        reported_at       TEXT NOT NULL,
+        source            TEXT,
+        window_minutes    INTEGER
+                            CHECK (window_minutes IS NULL OR window_minutes >= 0),
+        updated_at        TEXT NOT NULL,
+        label             TEXT,
+        PRIMARY KEY (adapter_id, window_kind, group_key)
+      );
+      INSERT INTO agent_usage_limits_next
+        (adapter_id, window_kind, group_key, remaining_percent, used_percent, resets_at,
+         reported_at, source, window_minutes, updated_at, label)
+        SELECT adapter_id, window_kind, COALESCE(label, ''), remaining_percent, used_percent, resets_at,
+               reported_at, source, window_minutes, updated_at, label
+        FROM agent_usage_limits;
+      DROP TABLE agent_usage_limits;
+      ALTER TABLE agent_usage_limits_next RENAME TO agent_usage_limits;
+      CREATE INDEX idx_agent_usage_limits_reported
+        ON agent_usage_limits (reported_at);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1385,4 +1430,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration028,
   migration029,
   migration030,
+  migration031,
 ];

@@ -74,6 +74,7 @@ import { CONTEXT_BUDGET, capContext } from './agents/context-budget';
 import { UsageRecorder, usageSummary } from './usage/usage';
 import { QuotaRecorder } from './usage/quota';
 import { QuotaPollingService } from './usage/quota-polling';
+import { ModelPricingService } from './usage/pricing';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
@@ -119,6 +120,8 @@ export interface AppServices {
   dataControl: DataControlService;
   /** Background and on-demand provider quota snapshot refreshes. */
   quotaPolling: QuotaPollingService;
+  /** Public model-pricing catalogue used for token-cost estimates. */
+  modelPricing: ModelPricingService;
   router: IpcRouter;
   /** The renderer event emitter the orchestrator streams task progress through. */
   taskEvents: IpcTaskEventEmitter;
@@ -341,6 +344,7 @@ export async function bootstrap(): Promise<AppServices> {
   const usage = new UsageRecorder(store);
   const quota = new QuotaRecorder(store);
   const quotaPolling = new QuotaPollingService({ quota });
+  const modelPricing = new ModelPricingService();
   const agentName = (id: string): string => (registry.has(id) ? registry.resolve(id).record.name : id);
 
   // Plan mode: a chosen agent writes requirements and a task list; each task
@@ -517,7 +521,7 @@ export async function bootstrap(): Promise<AppServices> {
     consentGate.require(RemoteHostService.provider(host.host), host.host);
     consentGate.require('codex', 'Agent CLI provider');
   }, grantConsentOnce);
-  const taskQueries = new TaskQueries(store,orchestrator,permissions,storage,(taskId) => planner.view(taskId),attachments);
+  const taskQueries = new TaskQueries(store,orchestrator,permissions,storage,(taskId) => planner.view(taskId),attachments,modelPricing.priceFor);
 
   // M5 connector framework + ingestion worker (Requirement 14). The service
   // owns durable connector lifecycle state and the ingested-item/proposal
@@ -585,8 +589,10 @@ export async function bootstrap(): Promise<AppServices> {
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
-    refreshUsageLimits: () => quotaPolling.refresh(),
-    usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters() }),
+      generateText: (prompt, description, pin) => titleGenerator.generateText(prompt, description, pin),
+    }).generate(input),
+    refreshUsageLimits: async () => { await Promise.all([quotaPolling.refresh(), modelPricing.refresh()]); },
+    usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters(), pricing: modelPricing.priceFor }),
   });
 
   registerGitHubHandlers(router, github);
@@ -652,6 +658,7 @@ export async function bootstrap(): Promise<AppServices> {
     suggestionEvents,
     dataControl,
     quotaPolling,
+    modelPricing,
     router,
     taskEvents,
     externalFlowEvents,

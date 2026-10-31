@@ -150,7 +150,7 @@ async function storeWithQuota(now: () => Date = () => new Date()): Promise<{ sto
 
 function storedLimits(store: SqliteStore): Array<Record<string, unknown>> {
   return store.db.prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, source, label
-    FROM agent_usage_limits ORDER BY adapter_id, window_kind`).all() as Array<Record<string, unknown>>;
+    FROM agent_usage_limits ORDER BY adapter_id, window_kind, label`).all() as Array<Record<string, unknown>>;
 }
 
 function response(body: unknown, status = 200): Awaited<ReturnType<QuotaFetch>> {
@@ -291,7 +291,7 @@ describe('QuotaPollingService Codex probe', () => {
 });
 
 describe('QuotaPollingService CLI probes', () => {
-  it('reads Antigravity weekly limits and keeps the most constrained model group', async () => {
+  it('reads Antigravity weekly limits for every model group', async () => {
     const { store, quota } = await storeWithQuota(() => NOW);
     const agy = new FakeCliChild({
       stdout: JSON.stringify({
@@ -320,14 +320,24 @@ describe('QuotaPollingService CLI probes', () => {
     await service.refresh();
 
     expect(spawn).toHaveBeenCalledWith('/usr/local/bin/agy', ['-p', '/usage', '--output-format', 'json']);
-    expect(storedLimits(store)).toEqual([{
-      adapter_id: 'antigravity',
-      window_kind: 'weekly',
-      remaining_percent: 10,
-      used_percent: 90,
-      source: 'antigravity',
-      label: 'Claude and GPT models',
-    }]);
+    expect(storedLimits(store)).toEqual([
+      {
+        adapter_id: 'antigravity',
+        window_kind: 'weekly',
+        remaining_percent: 10,
+        used_percent: 90,
+        source: 'antigravity',
+        label: 'Claude and GPT models',
+      },
+      {
+        adapter_id: 'antigravity',
+        window_kind: 'weekly',
+        remaining_percent: 55,
+        used_percent: 45,
+        source: 'antigravity',
+        label: 'Gemini Models',
+      },
+    ]);
   });
 
   it('reads OpenCode Go limits with the key from auth export', async () => {

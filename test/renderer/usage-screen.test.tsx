@@ -62,19 +62,29 @@ function attachedClients(): UsageClient[] {
       limits: [],
     },
     {
-      // Antigravity reports one weekly window per model group; the label keeps
-      // the stored "most constrained" group identifiable.
+      // Antigravity reports one weekly window per model group, so both the
+      // Gemini group and the Claude/GPT group appear.
       key: 'antigravity',
       label: 'Antigravity',
       ...ZERO,
-      limits: [{
-        kind: 'weekly',
-        remainingPercent: 0,
-        usedPercent: 100,
-        resetsAt: new Date(now + 5 * DAY).toISOString(),
-        source: 'antigravity',
-        label: 'Gemini Models',
-      }],
+      limits: [
+        {
+          kind: 'weekly',
+          remainingPercent: 0,
+          usedPercent: 100,
+          resetsAt: new Date(now + 5 * DAY).toISOString(),
+          source: 'antigravity',
+          label: 'Gemini Models',
+        },
+        {
+          kind: 'weekly',
+          remainingPercent: 25,
+          usedPercent: 75,
+          resetsAt: new Date(now + 6 * DAY).toISOString(),
+          source: 'antigravity',
+          label: 'Claude and GPT models',
+        },
+      ],
     },
     {
       // OpenCode's free tier publishes a daily window reset at midnight UTC but
@@ -235,46 +245,49 @@ describe('Usage Limits cards', () => {
     expect(html).toMatch(/1h 3m/);
   });
 
-  it('shows the provider label for a multi-group quota window', () => {
+  it('shows a weekly card for every Antigravity model group', () => {
     const html = renderUsage({ view: 'limits' });
-    const bar = progressbarTag(html, 'Antigravity Gemini Models weekly limit');
+    const gemini = progressbarTag(html, 'Antigravity Gemini Models weekly limit');
+    const claude = progressbarTag(html, 'Antigravity Claude and GPT models weekly limit');
+    const card = /<article aria-label="Antigravity limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
 
     expect(html).toContain('Gemini Models');
-    expect(bar).toContain('aria-valuenow="0"');
-    expect(bar).toContain('aria-valuetext="0% left"');
+    expect(html).toContain('Claude and GPT models');
+    expect(gemini).toContain('aria-valuenow="0"');
+    expect(gemini).toContain('aria-valuetext="0% left"');
+    expect(claude).toContain('aria-valuenow="25"');
+    expect(claude).toContain('aria-valuetext="25% left"');
+    // Both groups are Weekly windows: two weekly cards, no session quota
+    // invented, and no extra card for the unreported weekly group.
+    expect(card.match(/>Weekly</g)).toHaveLength(2);
   });
 
-  it('shows the not-reported state instead of a fabricated percentage', () => {
+  it('renders no bars or cards for CLIs that report no limits', () => {
     const html = renderUsage({ view: 'limits' });
-    const session = progressbarTag(html, 'Claude Code session limit');
-    const weekly = progressbarTag(html, 'Claude Code weekly limit');
 
-    expect(html).toContain('aria-label="Claude Code limits"');
-    expect(html).toContain('Not reported by this CLI');
-
-    for (const bar of [session, weekly]) {
-      expect(bar).toContain('aria-valuemin="0"');
-      expect(bar).toContain('aria-valuemax="100"');
-      expect(bar).toContain('aria-valuetext="Not reported by this CLI"');
-      expect(bar).not.toContain('aria-valuenow');
-    }
+    // Claude Code reports no quota windows: no card, no placeholder bars,
+    // and no "not reported" bar anywhere in the Limits view.
+    expect(html).not.toContain('aria-label="Claude Code limits"');
+    expect(html).not.toContain('Not reported by this CLI');
+    expect(html).not.toContain('No limits');
+    expect(progressbarTag(html, 'Claude Code session limit')).toBe('');
+    expect(progressbarTag(html, 'Claude Code weekly limit')).toBe('');
+    // Only reported windows render bars: Codex session+weekly and the two
+    // Antigravity weekly groups.
+    expect(html.match(/limit-track/g)).toHaveLength(4);
   });
 
-  it('renders a known daily window without fabricating a percentage', () => {
+  it('renders a known daily window as text, without a bar or fabricated percentage', () => {
     const html = renderUsage({ view: 'limits' });
     const card = /<article aria-label="OpenCode limits"[^>]*>([\s\S]*?)<\/article>/.exec(html)?.[1] ?? '';
-    const bar = progressbarTag(card, 'OpenCode Free models daily limit');
 
     expect(card).toContain('>Daily');
     expect(card).toContain('Free models');
     expect(card).toContain('Remaining percentage not reported');
-    expect(card).toMatch(/12h 0m/);
+    expect(card).toContain('Resets in 12h 0m');
     expect(card).not.toContain('% left');
-    expect(card).toContain('limit-track');
-    expect(bar).toContain('aria-valuemin="0"');
-    expect(bar).toContain('aria-valuemax="100"');
-    expect(bar).toContain('aria-valuetext="Remaining percentage not reported"');
-    expect(bar).not.toContain('aria-valuenow');
+    expect(card).not.toContain('limit-track');
+    expect(card).not.toContain('role="progressbar"');
   });
 
   it('keeps the two-window layout for a CLI without a daily window', () => {

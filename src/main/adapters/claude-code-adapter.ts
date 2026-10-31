@@ -295,10 +295,11 @@ export function claudeUsage(envelope: Json, pinned?: string): Record<string, unk
   const output = n(usage['output_tokens']);
   const models = Object.keys(obj(envelope['modelUsage']) ?? {});
   const model = models[0] ?? pinned;
+  // `total_cost_usd` is deliberately not forwarded: cost is estimated from
+  // these tokens at public prices, never taken from the harness report.
   return {
     inputTokens: input, cachedInputTokens: cacheRead, outputTokens: output,
     reasoningTokens: n(obj(usage['output_tokens_details'])?.['thinking_tokens']), totalTokens: input + output,
-    ...(typeof envelope['total_cost_usd'] === 'number' ? { costUsd: envelope['total_cost_usd'] } : {}),
     ...(model ? { model } : {}),
   };
 }

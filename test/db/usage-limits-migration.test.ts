@@ -81,3 +81,54 @@ describe('migration 26 — daily quota windows', () => {
     }
   });
 });
+
+describe('migration 31 — labelled model groups', () => {
+  it('preserves snapshots and stores one weekly row per model group', async () => {
+    const store = new SqliteStore(':memory:', { migrations: MIGRATIONS.slice(0, 30) });
+    await store.migrate();
+    try {
+      const insert = store.db.prepare(INSERT_LIMIT);
+      insert.run(
+        'antigravity', 'weekly', 'Gemini Models', 10, 90, '2026-11-02T12:00:00.000Z',
+        '2026-10-27T12:00:00.000Z', 'antigravity', null, '2026-10-27T12:00:00.000Z',
+      );
+      insert.run(
+        'codex', 'session', null, 58, 42, '2026-10-27T13:00:00.000Z',
+        '2026-10-27T12:00:00.000Z', 'codex', 300, '2026-10-27T12:00:00.000Z',
+      );
+
+      MIGRATIONS[30]!.up({ db: store.db });
+
+      expect(store.db.prepare(`
+        SELECT adapter_id, window_kind, group_key, label FROM agent_usage_limits
+        ORDER BY adapter_id
+      `).all()).toEqual([
+        { adapter_id: 'antigravity', window_kind: 'weekly', group_key: 'Gemini Models', label: 'Gemini Models' },
+        { adapter_id: 'codex', window_kind: 'session', group_key: '', label: null },
+      ]);
+
+      // The other Antigravity model group now coexists with the first, while
+      // an unlabelled window still upserts onto its single row.
+      const upsert = store.db.prepare(`INSERT INTO agent_usage_limits
+        (adapter_id, window_kind, group_key, label, remaining_percent, used_percent, resets_at,
+         reported_at, source, window_minutes, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(adapter_id, window_kind, group_key) DO UPDATE SET remaining_percent = excluded.remaining_percent`);
+      upsert.run('antigravity', 'weekly', 'Claude and GPT models', 'Claude and GPT models', 0, 100,
+        '2026-11-03T12:00:00.000Z', '2026-10-27T12:00:00.000Z', 'antigravity', null, '2026-10-27T12:00:00.000Z');
+      upsert.run('codex', 'session', '', null, 50, 50, '2026-10-27T13:00:00.000Z',
+        '2026-10-27T12:00:00.000Z', 'codex', 300, '2026-10-27T12:00:00.000Z');
+
+      expect(store.db.prepare(`
+        SELECT adapter_id, label, remaining_percent FROM agent_usage_limits
+        ORDER BY adapter_id, label
+      `).all()).toEqual([
+        { adapter_id: 'antigravity', label: 'Claude and GPT models', remaining_percent: 0 },
+        { adapter_id: 'antigravity', label: 'Gemini Models', remaining_percent: 10 },
+        { adapter_id: 'codex', label: null, remaining_percent: 50 },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+});

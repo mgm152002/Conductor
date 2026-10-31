@@ -3,6 +3,7 @@ import { clientLabel, compactNumber, formatCost } from '../../lib/usage-format';
 import { cn } from '../../lib/cn';
 import { Badge } from '../ui/primitives';
 import { UsageBarGroup } from './UsageBars';
+import { BrandMark, ProviderAvatar, agentBrand, modelBrand } from '../ui/BrandMarks';
 
 // The by-agent / by-project / by-model breakdowns shared by the Cost and Tokens
 // views. Rendered as grouped bar lists rather than tables: same values, far
@@ -26,6 +27,11 @@ export function UsageBreakdownTable({
       rows={rows.map((row) => ({
         key: row.key,
         label: row.label,
+        ...(title === 'By agent'
+          ? { mark: <ProviderAvatar brand={agentBrand(row.key)} label={row.label} size={13} /> }
+          : title === 'By model'
+            ? { mark: <ProviderAvatar brand={modelBrand(row.key) ?? modelBrand(row.label)} label={row.label} size={13} /> }
+            : {}),
         value: row.totalTokens,
         display: compactNumber(row.totalTokens),
         ...(anyCost && row.costUsd !== undefined ? { cost: formatCost(row.costUsd) } : {}),
@@ -65,7 +71,9 @@ export function UsageClientCard({
       className="flex flex-col gap-2 border-b border-border py-3.5 last:border-b-0"
     >
       <header className="flex items-center gap-2">
-        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary/80" />
+        {agentBrand(client.key) !== null
+          ? <BrandMark brand={agentBrand(client.key)} size={14} className="shrink-0 text-foreground/85" />
+          : <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary/80" />}
         <h4 className="truncate text-sm font-medium text-foreground">{clientLabel(client)}</h4>
         <span className="text-3xs text-muted-foreground">{client.sessions} session{client.sessions === 1 ? '' : 's'}</span>
         {empty ? <Badge className="ml-auto">No usage</Badge> : null}

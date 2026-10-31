@@ -81,12 +81,14 @@ app.whenReady().then(async () => {
   services.suggestionEvents.setWebContentsResolver(getWebContents);
   services.mcp.startHealthChecks();
   services.quotaPolling.start();
+  services.modelPricing.start();
   services.learningCron.start();
   app.on('before-quit', () => {
     void services.chat.stop();
     services.connectorRuntime.stop();
     services.learningCron.stop();
     services.quotaPolling.stop();
+    services.modelPricing.stop();
     void services.mcp.stop();
   });
 

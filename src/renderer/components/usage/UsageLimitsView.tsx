@@ -1,51 +1,33 @@
-import type { SVGProps } from 'react';
 import type {
   UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageSummary,
 } from '@shared/usage';
 import { clientLabel, compactNumber, formatCost } from '../../lib/usage-format';
 import { relativeTime } from '../../lib/time';
-import {
-  ActivityIcon,
-  BrainIcon,
-  LayersIcon,
-  SparklesIcon,
-  TerminalIcon,
-} from '../ui/icons';
-import { Alert, Badge, EmptyState } from '../ui/primitives';
+import { TerminalIcon } from '../ui/icons';
+import { BrandMark, agentBrand } from '../ui/BrandMarks';
+import { Alert, EmptyState } from '../ui/primitives';
 import { UsageBarGroup } from './UsageBars';
 import { UsageLimitCard } from './UsageLimitCard';
 
-// The Limits view (Requirements 2.3, 2.4, 4.4). Every attached CLI in
-// `summary.clients` gets a card with its Session and Weekly windows, even when
-// it recorded no sessions or does not report limits at all. A Daily window is
-// added only when the CLI reports one (OpenCode's free tier), so the common
-// two-window layout stays uncluttered. Windows are looked up by kind so a CLI
-// may report any one independently; the missing one renders the explicit
-// not-reported state.
+// The Limits view (Requirements 2.3, 2.4, 4.4). Only windows a CLI actually
+// reported are rendered: CLIs with no reported limits get no card at all, and
+// a kind the CLI did not report gets no placeholder bar. A kind reported for
+// several labelled model groups (Antigravity's Gemini and Claude/GPT weekly
+// quotas) renders one card per group.
 //
 // Quota windows are rare: Codex, Antigravity, OpenCode Go, and OpenCode's free
 // tier report them; most other CLIs only report tokens. The view therefore
-// leads with the usage that *is* available (a bar per CLI) and calls out why
-// some windows are empty, rather than presenting a wall of identical
-// "Not reported" cards.
-
-type CliIconComponent = (props: SVGProps<SVGSVGElement> & { size?: number }) => React.JSX.Element;
-
-const CLI_ICONS: Record<string, CliIconComponent> = {
-  codex: SparklesIcon,
-  'claude-code': BrainIcon,
-  opencode: TerminalIcon,
-  antigravity: ActivityIcon,
-  kiro: LayersIcon,
-};
+// leads with the usage that *is* available (a bar per CLI) and explains, once,
+// why some CLIs have no quota windows below.
 
 function CliIcon({ id }: { id: string }): React.JSX.Element {
-  const Icon = CLI_ICONS[id] ?? TerminalIcon;
-  return <Icon size={13} className="text-muted-foreground" aria-hidden="true" />;
+  const brand = agentBrand(id);
+  if (brand !== null) return <BrandMark brand={brand} size={14} className="shrink-0 text-foreground/85" />;
+  return <TerminalIcon size={13} className="text-muted-foreground" aria-hidden="true" />;
 }
 
-function findLimit(limits: UsageLimitWindow[], kind: UsageLimitWindowKind): UsageLimitWindow | undefined {
-  return limits.find((limit) => limit.kind === kind);
+function findLimits(limits: UsageLimitWindow[], kind: UsageLimitWindowKind): UsageLimitWindow[] {
+  return limits.filter((limit) => limit.kind === kind);
 }
 
 function sessionLabel(sessions: number): string {
@@ -76,7 +58,8 @@ export function UsageLimitsView({
     );
   }
 
-  const reporting = summary.clients.filter((client) => client.limits.length > 0).length;
+  const reportingClients = summary.clients.filter((client) => client.limits.length > 0);
+  const reporting = reportingClients.length;
   const bars = summary.clients.map((client) => ({
     key: client.key,
     label: clientLabel(client),
@@ -121,10 +104,11 @@ export function UsageLimitsView({
         </p>
 
         <div className="flex flex-col gap-3">
-          {summary.clients.map((client) => {
+          {reportingClients.map((client) => {
             const label = clientLabel(client);
-            const hasLimits = client.limits.length > 0;
-            const daily = findLimit(client.limits, 'daily');
+            const daily = findLimits(client.limits, 'daily');
+            const session = findLimits(client.limits, 'session');
+            const weekly = findLimits(client.limits, 'weekly');
             const reportedAt = client.limits.reduce<string | undefined>(
               (latest, limit) => (limit.reportedAt !== undefined && (latest === undefined || limit.reportedAt > latest) ? limit.reportedAt : latest),
               undefined,
@@ -142,30 +126,36 @@ export function UsageLimitsView({
                     {sessionLabel(client.sessions)} · {compactNumber(client.totalTokens)} tokens
                     {reportedAt !== undefined ? <> · limits {relativeTime(reportedAt, typeof now === 'number' ? now : now.getTime())}</> : null}
                   </span>
-                  {hasLimits ? null : <Badge>No limits</Badge>}
                 </header>
 
                 <div className="flex flex-col gap-2">
-                  {daily !== undefined ? (
+                  {daily.map((limit) => (
                     <UsageLimitCard
+                      key={`daily-${limit.label ?? ''}`}
                       title="Daily"
                       clientLabel={label}
-                      limit={daily}
+                      limit={limit}
                       now={now}
                     />
-                  ) : null}
-                  <UsageLimitCard
-                    title="Session"
-                    clientLabel={label}
-                    limit={findLimit(client.limits, 'session')}
-                    now={now}
-                  />
-                  <UsageLimitCard
-                    title="Weekly"
-                    clientLabel={label}
-                    limit={findLimit(client.limits, 'weekly')}
-                    now={now}
-                  />
+                  ))}
+                  {session.map((limit) => (
+                    <UsageLimitCard
+                      key={`session-${limit.label ?? ''}`}
+                      title="Session"
+                      clientLabel={label}
+                      limit={limit}
+                      now={now}
+                    />
+                  ))}
+                  {weekly.map((limit) => (
+                    <UsageLimitCard
+                      key={`weekly-${limit.label ?? ''}`}
+                      title="Weekly"
+                      clientLabel={label}
+                      limit={limit}
+                      now={now}
+                    />
+                  ))}
                 </div>
               </article>
             );

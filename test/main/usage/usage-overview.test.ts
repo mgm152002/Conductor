@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SqliteStore } from '@main/db/store';
 import { usageSummary } from '@main/usage/usage';
+import type { PriceLookup } from '@main/usage/pricing';
 import type { AdapterRecord } from '@shared/domain';
 import type { UsageRange } from '@shared/usage';
 
@@ -122,6 +123,12 @@ function adapter(id: string, name: string, cls: AdapterRecord['class'] = 'local_
 
 const AGENT_NAME = agentName;
 
+/** Public prices (USD per 1M tokens) for the two priced fixture models. */
+const PRICING: PriceLookup = (model) => ({
+  'gpt-5': { inputPerMillion: 10, outputPerMillion: 20, cacheReadPerMillion: 1 },
+  sonnet: { inputPerMillion: 5, outputPerMillion: 25 },
+}[model ?? '']);
+
 /** Five sessions spread across every range, two projects, and four models. */
 async function seedSpread(): Promise<SqliteStore> {
   const store = await freshStore();
@@ -200,7 +207,7 @@ describe('usage ranges', () => {
     }
   });
 
-  it('aggregates input, cached, output, reasoning, and cost for all time', async () => {
+  it('aggregates input, cached, output, and reasoning for all time', async () => {
     const store = await seedSpread();
     const summary = usageSummary(store, { range: 'all' }, AGENT_NAME);
 
@@ -214,7 +221,27 @@ describe('usage ranges', () => {
       reasoningTokens: 15,
       totalTokens: 2250,
     });
-    expect(summary.totals.costUsd).toBeCloseTo(0.3, 10);
+    // The fixture rows carry harness-reported cost in `cost_usd` (0.1 + 0.2);
+    // without public pricing there is no cost at all, never that report.
+    expect(summary.totals.costUsd).toBeUndefined();
+  });
+
+  it('prices tokens from public per-model prices instead of stored cost', async () => {
+    const store = await seedSpread();
+    const summary = usageSummary(store, { range: 'all' }, AGENT_NAME, { pricing: PRICING });
+
+    // gpt-5: (90 uncached × $10 + 10 cached × $1 + 50 out × $20
+    //       + 300 × $10 + 150 × $20) / 1M = $0.00791
+    // sonnet: (200 × $5 + 100 × $25) / 1M = $0.0035 (no cache price published,
+    // so cached input bills at the input price). Unmodelled rows add nothing.
+    expect(summary.totals.costUsd).toBeCloseTo(0.01141, 10);
+    const byModel = Object.fromEntries(summary.byModel.map((row) => [row.label, row]));
+    expect(byModel['Codex · gpt-5']?.costUsd).toBeCloseTo(0.00791, 10);
+    expect(byModel['Claude Code · sonnet']?.costUsd).toBeCloseTo(0.0035, 10);
+    expect(byModel['OpenCode · default model']?.costUsd).toBeUndefined();
+    const byAgent = Object.fromEntries(summary.byAgent.map((row) => [row.label, row]));
+    expect(byAgent['Codex']?.costUsd).toBeCloseTo(0.00791, 10);
+    expect(byAgent['Kiro']?.costUsd).toBeUndefined();
   });
 
   it('scopes the totals to a workspace when one is given', async () => {

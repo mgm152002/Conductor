@@ -4,12 +4,17 @@ import type {
   UsageClient, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
 } from '@shared/usage';
 import type { Store } from '../db/types';
+import { estimateCostUsd, type PriceLookup } from './pricing';
 import { isQuotaWindowCurrent } from './quota';
 
 // Token usage per agent session. Adapters report usage as a `log` stream
 // event whose data is `{ usage: UsageSample }` carrying the session's running
 // totals; `codex exec --json` reports it on its `turn.completed` line. The
 // recorder keeps one row per session and overwrites it with the latest totals.
+//
+// Cost is never taken from a harness report (`total_cost_usd`, ACP `cost`,
+// and friends are dropped here): summaries price the recorded tokens from
+// the public models.dev catalogue instead (see `./pricing`).
 
 export interface UsageSample {
   model?: string;
@@ -18,14 +23,13 @@ export interface UsageSample {
   outputTokens?: number;
   reasoningTokens?: number;
   totalTokens?: number;
-  costUsd?: number;
 }
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
 
-const FIELDS = ['inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'costUsd'] as const;
+const FIELDS = ['inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'totalTokens'] as const;
 
 /** Keep only well-formed, non-negative numbers (and a short model name). */
 export function cleanSample(value: unknown): UsageSample | undefined {
@@ -77,12 +81,14 @@ export class UsageRecorder {
     const row = {
       model: sample.model ?? (existing?.['model'] as string | null | undefined) ?? null,
       input: inputTokens, cached: pick('cachedInputTokens', 'cached_input_tokens') ?? 0, output: outputTokens,
-      reasoning: pick('reasoningTokens', 'reasoning_tokens') ?? 0, total, cost: pick('costUsd', 'cost_usd'),
+      reasoning: pick('reasoningTokens', 'reasoning_tokens') ?? 0, total,
     };
     if (existing !== undefined) {
+      // cost_usd is cleared, not carried: legacy rows hold harness-reported
+      // cost, which summaries no longer use (they price tokens publicly).
       this.store.db.prepare(`UPDATE agent_usage SET model=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, reasoning_tokens=?,
-        total_tokens=?, cost_usd=?, updated_at=? WHERE session_id=?`)
-        .run(row.model, row.input, row.cached, row.output, row.reasoning, row.total, row.cost, now, input.sessionId);
+        total_tokens=?, cost_usd=NULL, updated_at=? WHERE session_id=?`)
+        .run(row.model, row.input, row.cached, row.output, row.reasoning, row.total, now, input.sessionId);
       return;
     }
     const task = this.store.db.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(input.taskId) as { workspace_id: string } | undefined;
@@ -91,25 +97,55 @@ export class UsageRecorder {
       cached_input_tokens, output_tokens, reasoning_tokens, total_tokens, cost_usd, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(input.sessionId, input.taskId, input.stepId ?? null, task.workspace_id, input.adapterId, row.model,
-        row.input, row.cached, row.output, row.reasoning, row.total, row.cost, now, now);
+        row.input, row.cached, row.output, row.reasoning, row.total, null, now, now);
   }
 }
 
 const RANGE_DAYS: Record<UsageRange, number | null> = { '24h': 1, '7d': 7, '30d': 30, '90d': 90, all: null };
 
 interface Aggregate {
-  key: string; sessions: number; input: number; cached: number; output: number; reasoning: number; total: number; cost: number | null;
+  key: string; sessions: number; input: number; cached: number; output: number; reasoning: number; total: number; cost?: number;
 }
 
 const emptyAggregate = (key: string): Aggregate => ({
-  key, sessions: 0, input: 0, cached: 0, output: 0, reasoning: 0, total: 0, cost: null,
+  key, sessions: 0, input: 0, cached: 0, output: 0, reasoning: 0, total: 0,
 });
 
 function toRow(a: Aggregate, label: string): UsageRow {
   return {
     key: a.key, label, sessions: a.sessions, inputTokens: a.input, cachedInputTokens: a.cached, outputTokens: a.output,
-    reasoningTokens: a.reasoning, totalTokens: a.total, ...(a.cost !== null ? { costUsd: a.cost } : {}),
+    reasoningTokens: a.reasoning, totalTokens: a.total, ...(a.cost !== undefined ? { costUsd: a.cost } : {}),
   };
+}
+
+/** One (adapter, project, model) slice of recorded usage, priced in JS. */
+interface UsageGroup {
+  adapter: string;
+  workspace: string;
+  model: string;
+  sessions: number;
+  input: number;
+  cached: number;
+  output: number;
+  reasoning: number;
+  total: number;
+}
+
+function addTo(map: Map<string, Aggregate>, group: UsageGroup, key: string, pricing: UsageSummaryOptions['pricing']): void {
+  const aggregate = map.get(key) ?? emptyAggregate(key);
+  aggregate.sessions += group.sessions;
+  aggregate.input += group.input;
+  aggregate.cached += group.cached;
+  aggregate.output += group.output;
+  aggregate.reasoning += group.reasoning;
+  aggregate.total += group.total;
+  const price = pricing?.(group.model === '' ? undefined : group.model, group.adapter);
+  if (price !== undefined) {
+    aggregate.cost = (aggregate.cost ?? 0) + estimateCostUsd(price, {
+      inputTokens: group.input, cachedInputTokens: group.cached, outputTokens: group.output,
+    });
+  }
+  map.set(key, aggregate);
 }
 
 /** A stored quota window as returned by `agent_usage_limits`. */
@@ -149,10 +185,16 @@ export interface UsageSummaryOptions {
    * selected range or no reported limits.
    */
   adapters?: readonly AdapterRecord[];
+  /**
+   * Public per-model prices (models.dev) used to estimate cost from recorded
+   * tokens. Without a price for a model, that usage contributes tokens but no
+   * cost — harness-reported cost is never used as a fallback.
+   */
+  pricing?: PriceLookup;
 }
 
 const SUMS = `COUNT(*) AS sessions, SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(output_tokens) AS output,
-  SUM(reasoning_tokens) AS reasoning, SUM(total_tokens) AS total, SUM(cost_usd) AS cost`;
+  SUM(reasoning_tokens) AS reasoning, SUM(total_tokens) AS total`;
 
 /** Usage totals for a time range, by agent/project/model and per attached CLI. */
 export function usageSummary(
@@ -167,18 +209,35 @@ export function usageSummary(
   if (days !== null) { where.push('u.created_at >= ?'); params.push(new Date(Date.now() - days * 86_400_000).toISOString()); }
   if (input.workspaceId !== undefined) { where.push('u.workspace_id = ?'); params.push(input.workspaceId); }
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-  const totals = store.db.prepare(`SELECT 'all' AS key, ${SUMS} FROM agent_usage u ${clause}`).get(...params) as Aggregate;
-  const byAgent = store.db.prepare(`SELECT adapter_id AS key, ${SUMS} FROM agent_usage u ${clause} GROUP BY adapter_id ORDER BY total DESC`).all(...params) as Aggregate[];
-  const byProject = store.db.prepare(`SELECT u.workspace_id AS key, w.name AS name, ${SUMS} FROM agent_usage u
-    LEFT JOIN workspaces w ON w.id = u.workspace_id ${clause} GROUP BY u.workspace_id ORDER BY total DESC`).all(...params) as (Aggregate & { name: string | null })[];
-  const byModel = store.db.prepare(`SELECT adapter_id || ' · ' || COALESCE(model, 'default model') AS key, ${SUMS} FROM agent_usage u ${clause}
-    GROUP BY adapter_id, model ORDER BY total DESC LIMIT 20`).all(...params) as Aggregate[];
-  const zero = (a: Aggregate): Aggregate => ({ ...a, sessions: a.sessions ?? 0, input: a.input ?? 0, cached: a.cached ?? 0, output: a.output ?? 0, reasoning: a.reasoning ?? 0, total: a.total ?? 0, cost: a.cost ?? null });
+  // Cost must be priced per model, so aggregate at (adapter, project, model)
+  // granularity and roll the groups up in JS; the stored `cost_usd` column
+  // (legacy harness reports) is deliberately never read.
+  const groups = store.db.prepare(`SELECT adapter_id AS adapter, workspace_id AS workspace,
+      COALESCE(model, '') AS model, ${SUMS} FROM agent_usage u ${clause}
+    GROUP BY adapter_id, workspace_id, model`).all(...params) as UsageGroup[];
+  const totalsMap = new Map<string, Aggregate>();
+  const byAgentMap = new Map<string, Aggregate>();
+  const byProjectMap = new Map<string, Aggregate>();
+  const byModelMap = new Map<string, Aggregate>();
+  for (const group of groups) {
+    addTo(totalsMap, group, 'all', options.pricing);
+    addTo(byAgentMap, group, group.adapter, options.pricing);
+    addTo(byProjectMap, group, group.workspace, options.pricing);
+    addTo(byModelMap, group, `${group.adapter} · ${group.model === '' ? 'default model' : group.model}`, options.pricing);
+  }
+  const totals = totalsMap.get('all') ?? emptyAggregate('all');
+  const byAgent = [...byAgentMap.values()].sort((a, b) => b.total - a.total);
+  const workspaceNames = new Map(
+    (store.db.prepare('SELECT id, name FROM workspaces').all() as Array<{ id: string; name: string }>)
+      .map((row) => [row.id, row.name] as const),
+  );
+  const byProject = [...byProjectMap.values()].sort((a, b) => b.total - a.total);
+  const byModel = [...byModelMap.values()].sort((a, b) => b.total - a.total).slice(0, 20);
 
   const limitsByAdapter = new Map<string, UsageLimitWindow[]>();
   const limitRows = store.db.prepare(`SELECT adapter_id, window_kind, remaining_percent, used_percent, resets_at,
     reported_at, source, window_minutes, label FROM agent_usage_limits
-    ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 WHEN 'daily' THEN 1 ELSE 2 END`).all() as LimitRow[];
+    ORDER BY adapter_id, CASE window_kind WHEN 'session' THEN 0 WHEN 'daily' THEN 1 ELSE 2 END, label`).all() as LimitRow[];
   const now = new Date();
   for (const row of limitRows) {
     const window = toLimitWindow(row);
@@ -189,8 +248,7 @@ export function usageSummary(
     limitsByAdapter.set(row.adapter_id, list);
   }
 
-  const agents = byAgent.map((a) => zero(a));
-  const used = new Map(agents.map((a) => [a.key, a]));
+  const used = new Map(byAgent.map((a) => [a.key, a]));
   const clients = new Map<string, UsageClient>();
   for (const adapter of options.adapters ?? []) {
     if (adapter.class !== 'local_cli_agent') continue;
@@ -201,7 +259,7 @@ export function usageSummary(
     });
   }
   // Keep historical usage from CLIs that are no longer registered visible.
-  for (const aggregate of agents) {
+  for (const aggregate of byAgent) {
     if (clients.has(aggregate.key)) continue;
     clients.set(aggregate.key, { ...toRow(aggregate, agentName(aggregate.key)), limits: limitsByAdapter.get(aggregate.key) ?? [] });
   }
@@ -209,28 +267,34 @@ export function usageSummary(
 
   return {
     range: input.range,
-    totals: toRow(zero(totals), 'All agents'),
-    byAgent: byAgent.map((a) => toRow(zero(a), agentName(a.key))),
-    byProject: byProject.map((a) => toRow(zero(a), a.name ?? 'Deleted project')),
+    totals: toRow(totals, 'All agents'),
+    byAgent: byAgent.map((a) => toRow(a, agentName(a.key))),
+    byProject: byProject.map((a) => toRow(a, workspaceNames.get(a.key) ?? 'Deleted project')),
     byModel: byModel.map((a) => {
       const [agent, model] = a.key.split(' · ');
-      return toRow(zero(a), `${agentName(agent ?? '')} · ${model ?? ''}`);
+      return toRow(a, `${agentName(agent ?? '')} · ${model ?? ''}`);
     }),
     clients: clientList,
   };
 }
 
 /** Token totals for one task, overall and per step (the planner has no step). */
-export function taskUsage(store: Store, taskId: string): { total: UsageRow | null; byStep: Record<string, UsageRow> } {
-  const rows = store.db.prepare(`SELECT COALESCE(step_id, 'planner') AS key, ${SUMS} FROM agent_usage u WHERE task_id = ? GROUP BY step_id`).all(taskId) as Aggregate[];
-  if (rows.length === 0) return { total: null, byStep: {} };
-  const byStep: Record<string, UsageRow> = {};
-  const sum: Aggregate = { key: 'task', sessions: 0, input: 0, cached: 0, output: 0, reasoning: 0, total: 0, cost: null };
-  for (const row of rows) {
-    byStep[row.key] = toRow({ ...row, cost: row.cost ?? null }, row.key);
-    sum.sessions += row.sessions; sum.input += row.input; sum.cached += row.cached; sum.output += row.output;
-    sum.reasoning += row.reasoning; sum.total += row.total;
-    if (row.cost !== null) sum.cost = (sum.cost ?? 0) + row.cost;
+export function taskUsage(
+  store: Store,
+  taskId: string,
+  pricing?: PriceLookup,
+): { total: UsageRow | null; byStep: Record<string, UsageRow> } {
+  const groups = store.db.prepare(`SELECT COALESCE(step_id, 'planner') AS step, adapter_id AS adapter,
+      '' AS workspace, COALESCE(model, '') AS model, ${SUMS} FROM agent_usage u WHERE task_id = ? GROUP BY step_id, adapter_id, model`)
+    .all(taskId) as Array<UsageGroup & { step: string }>;
+  if (groups.length === 0) return { total: null, byStep: {} };
+  const byStepMap = new Map<string, Aggregate>();
+  const totalMap = new Map<string, Aggregate>();
+  for (const group of groups) {
+    addTo(byStepMap, group, group.step, pricing);
+    addTo(totalMap, group, 'task', pricing);
   }
-  return { total: toRow(sum, 'This message'), byStep };
+  const byStep: Record<string, UsageRow> = {};
+  for (const [step, aggregate] of byStepMap) byStep[step] = toRow(aggregate, step);
+  return { total: toRow(totalMap.get('task') ?? emptyAggregate('task'), 'This message'), byStep };
 }

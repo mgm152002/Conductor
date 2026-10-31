@@ -22,10 +22,12 @@ import type { Store } from '../db/types';
 // has already passed is not a current limit. Only these typed fields are ever
 // persisted, so prompts, message text, or secrets can never reach the table.
 //
-// The recorder upserts the latest snapshot per (adapter, window kind); older
-// samples for the same window are overwritten. When one snapshot contains the
-// same kind twice, the most constrained window wins because the table has no
-// room for both.
+// The recorder upserts the latest snapshot per (adapter, window kind, label);
+// older samples for the same labelled window are overwritten. A provider may
+// report the same kind for several labelled groups (Antigravity's Gemini and
+// Claude/GPT model groups are separate weekly quotas), so distinct labels are
+// stored side by side. Only an unlabelled duplicate, or the same label twice,
+// collapses to the most constrained window.
 
 type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
@@ -155,9 +157,10 @@ function normalizeWindow(value: unknown, now: Date): NormalizedQuotaWindow | und
 
 /**
  * Pick the window that better represents the remaining quota when a source
- * reports one kind twice: less remaining first, then the earlier reset. The
- * stored table has one row per kind, so this choice is deterministic rather
- * than depending on provider ordering.
+ * reports the same labelled window twice: less remaining first, then the
+ * earlier reset. Windows with different labels are separate quotas and never
+ * compete, so this choice is deterministic rather than depending on provider
+ * ordering.
  */
 function mostConstrained(
   a: NormalizedQuotaWindow,
@@ -185,17 +188,18 @@ export function normalizeQuotaSample(
   const now = options.now ?? new Date();
   const source = safeSource(raw['source']) ?? safeSource(options.source);
   const windows = Array.isArray(raw['windows']) ? raw['windows'] : [];
-  const byKind = new Map<UsageLimitWindowKind, NormalizedQuotaWindow>();
+  const byWindow = new Map<string, NormalizedQuotaWindow>();
   for (const window of windows) {
     const normalized = normalizeWindow(window, now);
     if (normalized === undefined) continue;
-    const prior = byKind.get(normalized.kind);
-    byKind.set(normalized.kind, prior === undefined ? normalized : mostConstrained(prior, normalized));
+    const key = `${normalized.kind}\0${normalized.label ?? ''}`;
+    const prior = byWindow.get(key);
+    byWindow.set(key, prior === undefined ? normalized : mostConstrained(prior, normalized));
   }
-  if (byKind.size === 0) return undefined;
+  if (byWindow.size === 0) return undefined;
   return {
     ...(source !== undefined ? { source } : {}),
-    windows: [...byKind.values()],
+    windows: [...byWindow.values()],
   };
 }
 
@@ -254,8 +258,9 @@ function percentFromFraction(value: unknown): number | undefined {
 
 /**
  * Map Antigravity's `/usage --output-format json` response onto the generic
- * contract. Each model group has its own buckets; because only one window per
- * kind can be stored, normalization keeps the most constrained group.
+ * contract. Each model group (for example "Gemini Models" and "Claude and GPT
+ * models") has its own buckets and its own weekly quota, so every group is
+ * kept as a separately labelled window.
  */
 export function quotaSampleFromAntigravityUsage(
   value: unknown,
@@ -392,9 +397,9 @@ export function isQuotaWindowCurrent(
 }
 
 const UPSERT = `INSERT INTO agent_usage_limits
-  (adapter_id, window_kind, label, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(adapter_id, window_kind) DO UPDATE SET
+  (adapter_id, window_kind, group_key, label, remaining_percent, used_percent, resets_at, reported_at, source, window_minutes, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(adapter_id, window_kind, group_key) DO UPDATE SET
     label = excluded.label,
     remaining_percent = excluded.remaining_percent,
     used_percent = excluded.used_percent,
@@ -405,8 +410,9 @@ const UPSERT = `INSERT INTO agent_usage_limits
     updated_at = excluded.updated_at`;
 
 /**
- * Stores the latest quota snapshot per adapter and window kind. Samples are
- * normalized first, so malformed or expired windows are never written.
+ * Stores the latest quota snapshot per adapter, window kind, and label.
+ * Samples are normalized first, so malformed or expired windows are never
+ * written.
  */
 export class QuotaRecorder {
   constructor(
@@ -422,10 +428,22 @@ export class QuotaRecorder {
     if (sample === undefined) return;
     const at = now.toISOString();
     const statement = this.store.db.prepare(UPSERT);
+    // A provider reports either labelled groups or a single unlabelled
+    // window for a kind, never both. When it switches shape, the new shape
+    // supersedes the old one instead of leaving a stale sibling row behind.
+    const dropUnlabelled = this.store.db.prepare(
+      `DELETE FROM agent_usage_limits WHERE adapter_id = ? AND window_kind = ? AND group_key = ''`,
+    );
+    const dropLabelled = this.store.db.prepare(
+      `DELETE FROM agent_usage_limits WHERE adapter_id = ? AND window_kind = ? AND group_key <> ''`,
+    );
     for (const window of sample.windows) {
+      if (window.label === undefined) dropLabelled.run(adapterId, window.kind);
+      else dropUnlabelled.run(adapterId, window.kind);
       statement.run(
         adapterId,
         window.kind,
+        window.label ?? '',
         window.label ?? null,
         window.remainingPercent ?? null,
         window.usedPercent ?? null,

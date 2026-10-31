@@ -42,14 +42,19 @@ export interface UsageRow {
   outputTokens: number;
   reasoningTokens: number;
   totalTokens: number;
-  /** Only when the agent reported a cost (Claude Code, some ACP agents). */
+  /**
+   * Estimated cost in USD, priced from the recorded tokens at the model's
+   * public models.dev prices. Absent when no public price is known for the
+   * model(s) used; harness-reported cost is never used.
+   */
   costUsd?: number;
 }
 
 /**
  * One attached agent CLI and its usage for the selected range. The usage
  * fields are flattened (a `UsageRow`) so a zero-usage client is just a row
- * with zeros; `limits` holds at most one entry per window kind.
+ * with zeros; `limits` holds at most one entry per window kind and label, so
+ * a CLI with several model groups (Antigravity) reports one per group.
  */
 export interface UsageClient extends UsageRow {
   /** Latest quota samples; empty when the CLI does not report limits. */

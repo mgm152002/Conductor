@@ -19,6 +19,8 @@ const BAR_FILL: Record<UsageBarTone, string> = {
 export interface UsageBarRow {
   key: string;
   label: string;
+  /** Leading brand mark for agent/model rows. */
+  mark?: React.ReactNode;
   /** Raw value used for the proportional width. */
   value: number;
   /** Formatted value shown at the end of the row. */
@@ -75,7 +77,8 @@ export function UsageBarGroup({
                 key={row.key}
                 className={cn('flex flex-col gap-1.5 py-2.5', index > 0 && 'border-t border-border/60')}
               >
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-center gap-2">
+                  {row.mark !== undefined ? <span className="flex shrink-0 items-center text-foreground/85">{row.mark}</span> : null}
                   <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{row.label}</span>
                   <span className="text-xs font-semibold text-foreground tabular-nums">{row.display}</span>
                   {row.cost !== undefined ? (

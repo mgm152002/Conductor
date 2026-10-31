@@ -7,13 +7,14 @@ import {
   UsageMetric,
 } from './UsageBreakdownTable';
 
-// The Cost view (Requirement 2.2). For the selected range it shows the money
-// reported across sessions, the token mix behind it, one compact card per
-// attached CLI (including CLIs with no usage), and the by-agent / by-project /
-// by-model breakdowns.
+// The Cost view (Requirement 2.2). For the selected range it shows the
+// estimated cost across sessions, the token mix behind it, one compact card
+// per attached CLI (including CLIs with no usage), and the by-agent /
+// by-project / by-model breakdowns.
 //
-// Cost is optional because only some CLIs report it (Claude Code does; Codex
-// does not), so a missing total is shown as "Not reported" rather than $0.
+// Cost is estimated from recorded tokens at each model's public models.dev
+// price; harness-reported cost is never used. A model with no published
+// price has no estimate, shown as "No public pricing" rather than $0.
 
 export interface UsageCostViewProps {
   summary: UsageSummary;
@@ -27,8 +28,8 @@ export function UsageCostView({
   loading = false,
 }: UsageCostViewProps): React.JSX.Element {
   const { totals, clients } = summary;
-  const totalCost = totals.costUsd !== undefined ? formatCost(totals.costUsd) : 'Not reported';
-  const costReported = clients.some((client) => client.costUsd !== undefined);
+  const totalCost = totals.costUsd !== undefined ? formatCost(totals.costUsd) : 'No public pricing';
+  const costPriced = clients.some((client) => client.costUsd !== undefined);
   const costBase = clients.reduce((sum, client) => sum + (client.costUsd ?? 0), 0);
 
   return (
@@ -36,7 +37,7 @@ export function UsageCostView({
       <div>
         <p className="text-4xl font-medium tracking-tight text-foreground tabular-nums">{totalCost}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {totals.sessions} sessions · {rangeLabel(range)}{costReported ? ' · reported by attached CLIs' : ' · no CLI reported cost'}
+          {totals.sessions} sessions · {rangeLabel(range)}{costPriced ? ' · estimated at public models.dev prices' : ' · no public pricing for the models used'}
           {loading ? <span role="status" aria-live="polite"> · Refreshing…</span> : null}
         </p>
       </div>
@@ -53,7 +54,7 @@ export function UsageCostView({
         <header className="flex items-baseline gap-2">
           <h3 className="text-[13px] font-medium text-foreground">By CLI</h3>
           <span className="text-3xs text-muted-foreground/80">
-            {costReported ? 'Share of reported cost' : 'Share of tokens'}
+            {costPriced ? 'Share of estimated cost' : 'Share of tokens'}
           </span>
         </header>
         <div className="flex flex-col">
@@ -62,9 +63,9 @@ export function UsageCostView({
               key={client.key}
               client={client}
               primaryLabel="Cost"
-              primaryValue={client.costUsd !== undefined ? formatCost(client.costUsd) : 'Not reported'}
-              primaryHint={client.costUsd === undefined ? 'Cost not reported by this CLI' : undefined}
-              sharePercent={costReported && costBase > 0
+              primaryValue={client.costUsd !== undefined ? formatCost(client.costUsd) : 'No public pricing'}
+              primaryHint={client.costUsd === undefined && client.totalTokens > 0 ? 'No public pricing for the model used' : undefined}
+              sharePercent={costPriced && costBase > 0
                 ? ((client.costUsd ?? 0) / costBase) * 100
                 : totals.totalTokens > 0
                   ? (client.totalTokens / totals.totalTokens) * 100

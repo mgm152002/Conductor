@@ -103,7 +103,7 @@ describe('Codex rate-limit mapping', () => {
 });
 
 describe('Antigravity usage mapping', () => {
-  it('maps model groups to labelled windows and keeps the most constrained group', () => {
+  it('maps every model group to its own labelled weekly window', () => {
     const sample = quotaSampleFromAntigravityUsage(
       {
         command: {
@@ -126,17 +126,26 @@ describe('Antigravity usage mapping', () => {
 
     expect(sample).toEqual({
       source: 'antigravity',
-      windows: [{
-        kind: 'weekly',
-        remainingPercent: 10,
-        usedPercent: 90,
-        resetsAt: at(6 * DAY),
-        label: 'Claude and GPT models',
-      }],
+      windows: [
+        {
+          kind: 'weekly',
+          remainingPercent: 55,
+          usedPercent: 45,
+          resetsAt: at(5 * DAY),
+          label: 'Gemini Models',
+        },
+        {
+          kind: 'weekly',
+          remainingPercent: 10,
+          usedPercent: 90,
+          resetsAt: at(6 * DAY),
+          label: 'Claude and GPT models',
+        },
+      ],
     });
   });
 
-  it('uses the earlier reset when groups report the same remaining percentage', () => {
+  it('keeps both groups when they report the same remaining percentage', () => {
     const sample = quotaSampleFromAntigravityUsage(
       {
         command: {
@@ -157,13 +166,22 @@ describe('Antigravity usage mapping', () => {
       { now: NOW },
     );
 
-    expect(sample?.windows).toEqual([{
-      kind: 'weekly',
-      remainingPercent: 0,
-      usedPercent: 100,
-      resetsAt: at(5 * DAY),
-      label: 'Gemini Models',
-    }]);
+    expect(sample?.windows).toEqual([
+      {
+        kind: 'weekly',
+        remainingPercent: 0,
+        usedPercent: 100,
+        resetsAt: at(5 * DAY),
+        label: 'Gemini Models',
+      },
+      {
+        kind: 'weekly',
+        remainingPercent: 0,
+        usedPercent: 100,
+        resetsAt: at(6 * DAY),
+        label: 'Claude and GPT models',
+      },
+    ]);
   });
 
   it('ignores unsupported windows and unusable fractions', () => {
@@ -344,7 +362,7 @@ describe('percentage validation', () => {
     expect(sample?.source).toBeUndefined();
   });
 
-  it('keeps the most constrained window when a kind is reported twice', () => {
+  it('keeps separately labelled windows of the same kind side by side', () => {
     const sample = normalizeQuotaSample(
       {
         windows: [
@@ -356,7 +374,27 @@ describe('percentage validation', () => {
     );
 
     expect(sample?.windows).toEqual([
+      { kind: 'weekly', remainingPercent: 40, usedPercent: 60, resetsAt: at(5 * DAY), label: 'Group A' },
       { kind: 'weekly', remainingPercent: 10, usedPercent: 90, resetsAt: at(6 * DAY), label: 'Group B' },
+    ]);
+  });
+
+  it('keeps the most constrained window when the same labelled window is reported twice', () => {
+    const sample = normalizeQuotaSample(
+      {
+        windows: [
+          { kind: 'weekly', remainingPercent: 40, resetsAt: at(5 * DAY), label: 'Group A' },
+          { kind: 'weekly', remainingPercent: 10, resetsAt: at(6 * DAY), label: 'Group A' },
+          { kind: 'session', usedPercent: 20, resetsAt: at(HOUR) },
+          { kind: 'session', usedPercent: 50, resetsAt: at(2 * HOUR) },
+        ],
+      },
+      { now: NOW },
+    );
+
+    expect(sample?.windows).toEqual([
+      { kind: 'weekly', remainingPercent: 10, usedPercent: 90, resetsAt: at(6 * DAY), label: 'Group A' },
+      { kind: 'session', usedPercent: 50, remainingPercent: 50, resetsAt: at(2 * HOUR) },
     ]);
   });
 
@@ -502,6 +540,31 @@ describe('QuotaRecorder latest-snapshot upsert', () => {
       resets_at: at(2 * HOUR),
       reported_at: now.toISOString(),
     });
+  });
+
+  it('stores each labelled model group as its own row', async () => {
+    const store = await freshStore();
+    const recorder = new QuotaRecorder(store, () => NOW);
+
+    recorder.record({
+      adapterId: 'antigravity',
+      sample: {
+        windows: [
+          { kind: 'weekly', remainingPercent: 0, resetsAt: at(DAY), label: 'Gemini Models' },
+          { kind: 'weekly', remainingPercent: 0, resetsAt: at(2 * DAY), label: 'Claude and GPT models' },
+        ],
+      },
+    });
+    // A later snapshot for one group replaces only that group's row.
+    recorder.record({
+      adapterId: 'antigravity',
+      sample: { windows: [{ kind: 'weekly', remainingPercent: 25, resetsAt: at(DAY), label: 'Gemini Models' }] },
+    });
+
+    expect(limitRows(store).map((row) => [row.label, row.remaining_percent, row.resets_at])).toEqual([
+      ['Claude and GPT models', 0, at(2 * DAY)],
+      ['Gemini Models', 25, at(DAY)],
+    ]);
   });
 
   it('writes malformed and stale windows nowhere', async () => {

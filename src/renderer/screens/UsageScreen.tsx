@@ -7,6 +7,7 @@ import { UsageTokensView } from '../components/usage/UsageTokensView';
 import { Alert, Button, EmptyState } from '../components/ui/primitives';
 import { useUsageOverview } from '../hooks/useUsageOverview';
 import { ScreenScaffold } from './ScreenScaffold';
+import { UsageIcon } from '../components/ui/icons';
 
 // The Usage destination (Requirement 2.1). `UsageScreen` owns the selected
 // view/range and the bridge request; `UsageScreenView` is a pure render of that
@@ -73,7 +74,9 @@ export function UsageScreenView({
   return (
     <ScreenScaffold
       title="Usage"
-      description="Cost, token, and limit breakdowns reported by each attached agent CLI."
+      screen="usage"
+      layout="dashboard"
+      icon={<UsageIcon size={14} />}
       actions={(
         <UsageHeader
           view={view}
@@ -106,7 +109,6 @@ export function UsageScreenView({
       ) : error === null ? (
         <EmptyState
           title="No usage recorded yet"
-          description="Usage appears here after an attached agent CLI runs a session."
         />
       ) : null}
     </ScreenScaffold>

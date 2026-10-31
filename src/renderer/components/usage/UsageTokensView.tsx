@@ -40,7 +40,7 @@ export function UsageTokensView({
         <UsageMetric label="Agent sessions" value={String(totals.sessions)} />
         <UsageMetric
           label="Total cost"
-          value={totals.costUsd !== undefined ? formatCost(totals.costUsd) : 'Not reported'}
+          value={totals.costUsd !== undefined ? formatCost(totals.costUsd) : 'No public pricing'}
         />
       </dl>
 
@@ -58,7 +58,7 @@ export function UsageTokensView({
               client={client}
               primaryLabel="Tokens"
               primaryValue={compactNumber(client.totalTokens)}
-              primaryHint={client.costUsd !== undefined ? `${formatCost(client.costUsd)} reported` : undefined}
+              primaryHint={client.costUsd !== undefined ? `${formatCost(client.costUsd)} estimated` : undefined}
               sharePercent={totals.totalTokens > 0 ? (client.totalTokens / totals.totalTokens) * 100 : 0}
             />
           ))}

@@ -144,9 +144,10 @@ describe('trusted automation never asks', () => {
     expect(replyFor(store, task.id)).toContain(reply);
     if (agent === 'claude-code') {
       expect(existsSync(join(root, 'notes.txt'))).toBe(true);
-      // Usage from the JSON result envelope (input includes cache reads and writes).
+      // Usage from the JSON result envelope (input includes cache reads and
+      // writes); the envelope's harness-reported cost is never stored.
       expect(store.db.prepare('SELECT model, input_tokens, cached_input_tokens, output_tokens, total_tokens, cost_usd FROM agent_usage WHERE task_id = ?').get(task.id))
-        .toEqual({ model: 'claude-test-model', input_tokens: 100, cached_input_tokens: 60, output_tokens: 12, total_tokens: 112, cost_usd: 0.0125 });
+        .toEqual({ model: 'claude-test-model', input_tokens: 100, cached_input_tokens: 60, output_tokens: 12, total_tokens: 112, cost_usd: null });
     }
     const asked = store.db.prepare('SELECT COUNT(*) AS n FROM approval_requests WHERE task_id = ?').get(task.id) as { n: number };
     expect(asked.n).toBe(0);

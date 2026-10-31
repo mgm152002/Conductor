@@ -7,6 +7,7 @@ import type { ArtifactPreview, ArtifactSummary, TaskDetails, TaskVerification } 
 import type { Task, TaskEvent, TaskStep } from '@shared/domain';
 import { redact } from '../ipc/redaction';
 import { taskUsage } from '../usage/usage';
+import type { PriceLookup } from '../usage/pricing';
 import type { TaskPlanView } from '@shared/plan';
 
 /** The model/effort a step's agent ran with, from its stored execution input. */
@@ -28,7 +29,9 @@ export class TaskQueries {
     private readonly permissions:PermissionService,private readonly storage:ManagedStorage,
     /** Plan-mode view of a task (null for a single-agent task). */
     private readonly planView?: (taskId: string) => TaskPlanView | null,
-    private readonly attachments?: AttachmentService) {}
+    private readonly attachments?: AttachmentService,
+    /** Public model prices for token-cost estimates in usage totals. */
+    private readonly pricing?: PriceLookup) {}
 
   list(input: {workspaceId?:string;limit?:number} = {}): Task[] {
     const rows = this.store.db.prepare(`SELECT id FROM tasks ${input.workspaceId ? 'WHERE workspace_id = ?' : ''}
@@ -88,7 +91,7 @@ export class TaskQueries {
     const approvals = (this.store.db.prepare('SELECT id FROM approval_requests WHERE task_id=? ORDER BY rowid').all(id) as {id:string}[])
       .map((r)=>this.permissions.getApproval(r.id)!);
     const plan = this.planView?.(id) ?? null;
-    const usage = taskUsage(this.store, id);
+    const usage = taskUsage(this.store, id, this.pricing);
     return redact({task,steps,events,artifacts:[...artifacts.values()],attachments:this.attachments?.listTask(id) ?? [],approvals,verification,plan,usage}) as TaskDetails;
   }
 

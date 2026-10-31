@@ -438,14 +438,11 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
           flushThought();
           live.events.push('log', { message: acpPlanLabel(update), kind: 'plan', source: name });
           break;
-        case 'usage_update': {
-          // Context-window usage, plus the session's cost when the agent knows it.
-          const cost = obj(update['cost']);
-          if (cost !== null && typeof cost['amount'] === 'number' && (cost['currency'] === undefined || cost['currency'] === 'USD')) {
-            live.events.push('log', { usage: { costUsd: cost['amount'], ...(model ? { model } : {}) } });
-          }
+        case 'usage_update':
+          // Context-window usage only. The ACP `cost` amount is deliberately
+          // ignored: cost is estimated from recorded tokens at public prices,
+          // never taken from the harness report.
           break;
-        }
         default:
           break; // thoughts, plans, commands, modes, usage
       }
