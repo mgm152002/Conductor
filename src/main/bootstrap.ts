@@ -80,6 +80,7 @@ import { deleteThread } from './domain/thread-deletion';
 import { ChatService } from './domain/chat-service';
 import { AgentTitleGenerator, ThreadTitleService, TITLE_TIMEOUT_MS } from './domain/thread-title-service';
 import { AgentPrDescriptionGenerator } from './domain/pr-description';
+import { IconService } from './domain/icon-service';
 import { defaultModelKey } from '@shared/model-defaults';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
 import { AgentLearningAnalyzer } from './domain/learning-analyzer';
@@ -605,6 +606,7 @@ export async function bootstrap(): Promise<AppServices> {
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
+    generateIcon: (input) => new IconService({
       generateText: (prompt, description, pin) => titleGenerator.generateText(prompt, description, pin),
     }).generate(input),
     refreshUsageLimits: async () => { await Promise.all([quotaPolling.refresh(), modelPricing.refresh()]); },

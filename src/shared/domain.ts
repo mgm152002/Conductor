@@ -25,6 +25,8 @@ export interface Workspace {
   id: string; // uuid v4
   name: string;
   rootPath: string; // absolute, canonicalized
+  /** Custom icon as a data URL (generated SVG or uploaded image); absent/null shows the name initials. */
+  icon?: string | null;
   createdAt: string; // ISO-8601 UTC
   updatedAt: string;
 }

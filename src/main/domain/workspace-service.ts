@@ -3,6 +3,7 @@ import { statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { Store } from '../db/types';
 import type { Workspace } from '@shared/domain';
+import { isValidIconDataUrl } from '@shared/icon-contract';
 
 // The workspace service owns workspace creation, listing, and selection plus
 // the persisted active-workspace pointer. All validation (name length, path
@@ -30,6 +31,7 @@ interface WorkspaceRow {
   id: string;
   name: string;
   root_path: string;
+  icon: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +41,7 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     id: row.id,
     name: row.name,
     rootPath: row.root_path,
+    icon: row.icon,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -123,7 +126,7 @@ export class WorkspaceService {
   list(): Workspace[] {
     const rows = this.store.db
       .prepare(
-        `SELECT id, name, root_path, created_at, updated_at
+        `SELECT id, name, root_path, icon, created_at, updated_at
          FROM workspaces ORDER BY created_at ASC, rowid ASC`,
       )
       .all() as WorkspaceRow[];
@@ -133,11 +136,22 @@ export class WorkspaceService {
   get(id: string): Workspace | undefined {
     const row = this.store.db
       .prepare(
-        `SELECT id, name, root_path, created_at, updated_at
+        `SELECT id, name, root_path, icon, created_at, updated_at
          FROM workspaces WHERE id = ?`,
       )
       .get(id) as WorkspaceRow | undefined;
     return row === undefined ? undefined : rowToWorkspace(row);
+  }
+
+  /** Set (or clear, with null) the project's custom icon data URL. */
+  setIcon(id: string, icon: string | null): Workspace {
+    if (icon !== null && !isValidIconDataUrl(icon)) {
+      throw new WorkspaceValidationError('name', 'Icon must be a PNG/JPEG/WebP/GIF/SVG data URL under 256 KiB');
+    }
+    if (this.get(id) === undefined) throw new WorkspaceNotFoundError(id);
+    this.store.db.prepare('UPDATE workspaces SET icon=?, updated_at=? WHERE id=?')
+      .run(icon, new Date().toISOString(), id);
+    return this.get(id)!;
   }
 
   /**

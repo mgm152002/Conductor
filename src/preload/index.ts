@@ -140,7 +140,12 @@ const chat: ChatBridge = {
   renameSpace: (spaceId, name) => invoke('chat.renameSpace', { spaceId, name }),
   deleteSpace: (spaceId) => invoke('chat.deleteSpace', { spaceId }),
   setThreadSpace: (threadId, spaceId) => invoke('chat.setThreadSpace', { threadId, spaceId }),
+  setSpaceIcon: (spaceId, icon) => invoke('chat.setSpaceIcon', { spaceId, icon }),
   mem0Health: () => invoke('chat.mem0Health'),
+};
+
+const icon: IconBridge = {
+  generate: (input) => invoke('icon.generate', input),
 };
 
 function on(channel: 'chat.updated', handler: (payload: ChatConversation) => void): () => void;
@@ -184,6 +189,7 @@ const github: GitHubBridge = {
 const conductor = {
   github,
   chat,
+  icon,
   attachment,
   memory, context, workflows, skills, connectors, system, ...integrations,
   permissions: {
@@ -197,6 +203,8 @@ const conductor = {
     create: (input: { name: string; rootPath: string }): Promise<Workspace> =>
       invoke('workspace.create', input),
     select: (id: string): Promise<void> => invoke('workspace.select', { id }),
+    /** Set (or clear, with null) a project's custom icon data URL. */
+    setIcon: (id: string, icon: string | null): Promise<Workspace> => invoke('workspace.setIcon', { id, icon }),
     /** Delete a project and everything Conductor stored for it (not its files). */
     delete: (id: string): Promise<ProjectDeletionResult> => invoke('workspace.delete', { id, confirmed: true }),
     /** Uncommitted files in the project (or thread worktree) working tree. */

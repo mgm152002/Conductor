@@ -30,7 +30,9 @@ import {
   WorkspaceCreateRequest,
   WorkspaceListRequest,
   WorkspaceSelectRequest,
+  WorkspaceSetIconRequest,
 } from '@shared/ipc-contract';
+import { ICON_SCHEMAS, type GenerateIconInput } from '@shared/icon-contract';
 import type {
   DataControlSettings,
   DataDeletionResult,
@@ -109,6 +111,8 @@ export interface DomainHandlerDeps {
   usageSummary?: (input: UsageSummaryQuery) => UsageSummary;
   /** Refresh provider quota snapshots before serving an explicit usage read. */
   refreshUsageLimits?: () => Promise<void>;
+  /** Generate a Space/project icon SVG with a model (see IconService). */
+  generateIcon?: (input: GenerateIconInput) => Promise<string>;
 }
 
 export function registerDomainHandlers(deps: DomainHandlerDeps): void {
@@ -163,6 +167,13 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     WorkspaceCreateRequest,
     (_event, input): Workspace => workspaces.create(input),
   );
+
+  router.handle('workspace.setIcon', WorkspaceSetIconRequest, (_event, input): Workspace => workspaces.setIcon(input.id, input.icon));
+
+  router.handle('icon.generate', ICON_SCHEMAS['icon.generate'], async (_event, input): Promise<string> => {
+    if (deps.generateIcon === undefined) throw new Error('Icon generation is not available.');
+    return deps.generateIcon(input);
+  });
 
   // A thread's changes come from its own worktree when one exists; the
   // project checkout itself is never where the agent wrote.

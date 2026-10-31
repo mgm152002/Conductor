@@ -1398,6 +1398,20 @@ const migration031: Migration = {
   },
 };
 
+// Migration 32 — custom icons for Spaces and projects (workspaces). The
+// icon is a self-contained data URL (sanitized generated SVG or an uploaded
+// image), so no blob/file bookkeeping is needed; NULL shows the default mark.
+const migration032: Migration = {
+  version: 32,
+  name: 'space_and_workspace_icons',
+  up({ db }: Tx): void {
+    db.exec(`
+      ALTER TABLE chat_spaces ADD COLUMN icon TEXT;
+      ALTER TABLE workspaces ADD COLUMN icon TEXT;
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1431,4 +1445,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration029,
   migration030,
   migration031,
+  migration032,
 ];

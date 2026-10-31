@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AttachmentIdsSchema, type AttachmentRef } from './attachments';
+import { IconDataUrl } from './icon-contract';
 
 export interface ChatThread {
   id: string;
@@ -15,6 +16,8 @@ export interface ChatThread {
 export interface ChatSpace {
   id: string;
   name: string;
+  /** Custom icon as a data URL (generated SVG or uploaded image); absent/null shows the default space mark. */
+  icon?: string | null;
   createdAt: string;
   updatedAt: string;
   /** Number of chats currently in the space. */
@@ -122,6 +125,7 @@ export const CHAT_SCHEMAS = {
   'chat.createSpace': z.object({ name: SpaceName }).strict(),
   'chat.renameSpace': z.object({ spaceId: z.string().uuid(), name: SpaceName }).strict(),
   'chat.deleteSpace': z.object({ spaceId: z.string().uuid() }).strict(),
+  'chat.setSpaceIcon': z.object({ spaceId: z.string().uuid(), icon: IconDataUrl.nullable() }).strict(),
   'chat.setThreadSpace': z.object({ threadId: z.string().uuid(), spaceId: z.string().uuid().nullable() }).strict(),
   'chat.mem0Health': z.void(),
 } as const;
@@ -140,6 +144,8 @@ export interface ChatBridge {
   renameSpace(spaceId: string, name: string): Promise<ChatSpace>;
   /** Delete a space; its chats become ungrouped and are not deleted. */
   deleteSpace(spaceId: string): Promise<void>;
+  /** Set (or clear, with null) a space's custom icon data URL. */
+  setSpaceIcon(spaceId: string, icon: string | null): Promise<ChatSpace>;
   /** Move a chat into a space, or out of any space with `null`; resolves to the updated thread. */
   setThreadSpace(threadId: string, spaceId: string | null): Promise<ChatThread>;
   /** Check whether the Mem0 context service is reachable right now. */

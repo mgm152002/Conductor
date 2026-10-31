@@ -14,12 +14,13 @@ import { responseText } from '../adapters/objective-cli-adapter';
 import { assessDifficulty, chooseRun } from '../agents/model-routing';
 import type { ModelCatalogService } from '../agents/model-catalog';
 import { chatFallbackCandidates, classifyFailure, retryableOnAnotherAgent, tailLines, type FailureKind } from '../adapters/failure-classification';
+import { isValidIconDataUrl } from '@shared/icon-contract';
 import type { MemoryEngine } from './memory-engine';
 import type { SettingsService } from './settings-service';
 import { NO_VALUE } from './settings-service';
 
 type ThreadRow = { id: string; title: string; agent_id: string; created_at: string; updated_at: string; space_id: string | null };
-type SpaceRow = { id: string; name: string; created_at: string; updated_at: string; thread_count: number };
+type SpaceRow = { id: string; name: string; icon: string | null; created_at: string; updated_at: string; thread_count: number };
 type MessageRow = { id: string; thread_id: string; role: ChatMessage['role']; content: string; status: ChatMessage['status']; created_at: string; error: string | null; activity_json: string; agent_id: string | null; model: string | null };
 interface Run {
   adapter: AgentAdapter;
@@ -193,7 +194,7 @@ function threadFrom(row: ThreadRow): ChatThread {
 }
 
 function spaceFrom(row: SpaceRow): ChatSpace {
-  return { id: row.id, name: row.name, createdAt: row.created_at, updatedAt: row.updated_at, threadCount: row.thread_count };
+  return { id: row.id, name: row.name, icon: row.icon, createdAt: row.created_at, updatedAt: row.updated_at, threadCount: row.thread_count };
 }
 
 function cleanSpaceName(name: string): string {
@@ -259,6 +260,14 @@ export class ChatService {
     const clean = cleanSpaceName(name);
     this.requireSpace(spaceId);
     this.store.db.prepare('UPDATE chat_spaces SET name=?, updated_at=? WHERE id=?').run(clean, new Date().toISOString(), spaceId);
+    return this.requireSpace(spaceId);
+  }
+
+  /** Set (or clear, with null) a space's custom icon data URL. */
+  setSpaceIcon(spaceId: string, icon: string | null): ChatSpace {
+    if (icon !== null && !isValidIconDataUrl(icon)) throw new Error('Icon must be a PNG/JPEG/WebP/GIF/SVG data URL under 256 KiB');
+    this.requireSpace(spaceId);
+    this.store.db.prepare('UPDATE chat_spaces SET icon=?, updated_at=? WHERE id=?').run(icon, new Date().toISOString(), spaceId);
     return this.requireSpace(spaceId);
   }
 

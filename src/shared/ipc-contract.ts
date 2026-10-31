@@ -5,6 +5,7 @@ import { APPLICATION_SCHEMAS } from './application-contract';
 import { CONNECTOR_SCHEMAS } from './connector-contract';
 import { INTEGRATION_SCHEMAS } from './integrations-contract';
 import { CHAT_SCHEMAS } from './chat-contract';
+import { ICON_SCHEMAS, IconDataUrl } from './icon-contract';
 import { GITHUB_SCHEMAS } from './github-contract';
 import { AttachmentIdsSchema } from './attachments';
 
@@ -44,6 +45,7 @@ export const WorkspaceCreateRequest = z.object({
   rootPath: z.string().min(1),
 });
 export const WorkspaceSelectRequest = z.object({ id: z.string().uuid() });
+export const WorkspaceSetIconRequest = z.object({ id: z.string().uuid(), icon: IconDataUrl.nullable() });
 export const WorkspaceDeleteRequest = z.object({
   id: z.string().uuid(),
   // Required confirmation; the renderer sends it only after the user confirms.
@@ -185,7 +187,9 @@ export const INVOKE_SCHEMAS = {
   ...APPLICATION_SCHEMAS,
   ...CONNECTOR_SCHEMAS,
   ...INTEGRATION_SCHEMAS,
+  ...ICON_SCHEMAS,
   'workspace.list': WorkspaceListRequest,
+  'workspace.setIcon': WorkspaceSetIconRequest,
   'workspace.create': WorkspaceCreateRequest,
   'workspace.select': WorkspaceSelectRequest,
   'workspace.delete': WorkspaceDeleteRequest,
