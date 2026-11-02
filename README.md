@@ -70,6 +70,14 @@ The DMG lands in `release/`.
 > [!NOTE]
 > The DMG is unsigned and not notarized, so Gatekeeper will warn on first launch. It is intended for local evaluation, not distribution.
 
+#### "Conductor is damaged and can't be opened"
+
+Because the app is unsigned, macOS may quarantine it after you drag it into `/Applications`. Clear the quarantine attribute and open it again:
+
+```sh
+xattr -cr /Applications/Conductor.app
+```
+
 ## How it works
 
 ```mermaid
