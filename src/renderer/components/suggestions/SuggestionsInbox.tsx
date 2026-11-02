@@ -4,6 +4,10 @@ import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/primitives';
 import { SparklesIcon, XIcon } from '../ui/icons';
+import { useNeedsAttentionThreads } from '../../hooks/useNeedsAttentionThreads';
+import { useThreadNavigation } from '../../hooks/useThreadNavigation';
+import { useThreadTierStore } from '../../stores';
+import { threadTitle } from '../../lib/thread-status';
 
 // Proactive suggestions: a sidebar inbox and a non-blocking toast when a new
 // one surfaces. Nothing runs without the user's click unless they chose
@@ -65,6 +69,9 @@ export function SuggestionsInbox(): React.JSX.Element {
   const { pending, latest, refresh, clearLatest } = usePendingSuggestions();
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
+  const attention = useNeedsAttentionThreads();
+  const { openThread } = useThreadNavigation();
+  const total = pending.length + attention.length;
 
   useEffect(() => {
     if (latest === null) return;
@@ -87,20 +94,50 @@ export function SuggestionsInbox(): React.JSX.Element {
         type="button"
         onClick={() => { setOpen((v) => !v); refresh(); }}
         aria-expanded={open}
-        aria-label={`Suggestions${pending.length > 0 ? ` (${pending.length})` : ''}`}
+        aria-label={`Suggestions${total > 0 ? ` (${total})` : ''}`}
         title="Suggestions"
         className="relative flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
       >
         <SparklesIcon size={14} />
-        {pending.length > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold text-primary-foreground tabular-nums">{pending.length}</span> : null}
+        {total > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold text-primary-foreground tabular-nums">{total}</span> : null}
       </button>
       {open ? (
         <div role="dialog" aria-label="Suggestions" className="absolute top-9 left-0 z-50 w-80 rounded-2xl border border-border bg-card p-3 shadow-2xl">
           <p className="mb-2 text-xs font-semibold text-foreground">Suggestions</p>
-          {pending.length === 0 ? <p className="py-4 text-center text-2xs text-muted-foreground">Nothing needs your attention.</p> : (
-            <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
-              {pending.map((suggestion) => <li key={suggestion.id}><SuggestionCard suggestion={suggestion} onDone={refresh} /></li>)}
-            </ul>
+          {total === 0 ? <p className="py-4 text-center text-2xs text-muted-foreground">Nothing needs your attention.</p> : (
+            <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+              {attention.length > 0 ? (
+                <section aria-label="Threads that need attention">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-2xs font-medium text-amber-600 dark:text-amber-300/90">
+                    <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500 dark:bg-amber-300/90" />
+                    Needs attention · {attention.length}
+                  </p>
+                  <ul className="flex flex-col gap-1">
+                    {attention.map(({ thread, info }) => (
+                      <li key={thread.key}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (info.attentionReason === 'snooze-woke') useThreadTierStore.getState().clear(thread.key);
+                            setOpen(false);
+                            void openThread(thread.latest);
+                          }}
+                          className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{threadTitle(thread.root)}</span>
+                          <span className="shrink-0 text-3xs font-medium text-amber-600 dark:text-amber-300/90">{info.attentionLabel}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+              {pending.length > 0 ? (
+                <ul className="flex flex-col gap-2">
+                  {pending.map((suggestion) => <li key={suggestion.id}><SuggestionCard suggestion={suggestion} onDone={refresh} /></li>)}
+                </ul>
+              ) : null}
+            </div>
           )}
         </div>
       ) : null}
