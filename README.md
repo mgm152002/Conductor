@@ -1,7 +1,6 @@
 <div align="center">
 
-<img width="1254" height="1254" alt="Neon Infinity Loop Tech Icon" src="https://github.com/user-attachments/assets/ca74df29-6595-4743-a067-ea2af1b2ccf5" />
-
+<img width="200" height="200" alt="Neon Infinity Loop Tech Icon" src="https://github.com/user-attachments/assets/ca74df29-6595-4743-a067-ea2af1b2ccf5" />
 
 # Conductor
 
