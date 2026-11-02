@@ -9,7 +9,7 @@
 [![Quality](https://github.com/mgm152002/Conductor/actions/workflows/quality.yml/badge.svg)](https://github.com/mgm152002/Conductor/actions/workflows/quality.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22-3c873a?style=flat-square)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square)](#requirements)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue?style=flat-square)](package.json)
+[![Version](https://img.shields.io/badge/version-0.3.2-blue?style=flat-square)](package.json)
 
 [Features](#features) • [Getting started](#getting-started) • [How it works](#how-it-works) • [Development](#development) • [Security](#security-model)
 
@@ -58,7 +58,7 @@ See [docs/mem0.md](docs/mem0.md) for the storage model, credentials, migration, 
 
 ### Install from a release
 
-Pushing a tag matching `version` in `package.json` (for example, `v0.2.0`) builds an arm64 macOS DMG in CI and attaches it to a GitHub Release of the same name. To build it locally:
+Pushing a tag matching `version` in `package.json` (for example, `v0.3.2`) builds an arm64 macOS DMG in CI and attaches it to a GitHub Release of the same name. To build it locally:
 
 ```sh
 npm ci
