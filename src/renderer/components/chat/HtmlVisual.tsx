@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildVisualSrcDoc, sanitizeVisualHtml, visualAspectRatio } from '../../lib/visuals';
 import { useThemeStore } from '../../stores';
 import { ChartIcon, DownloadIcon } from '../ui/icons';
@@ -67,6 +67,34 @@ export function HtmlVisual({ code, complete }: { code: string; complete: boolean
   const ratio = visualAspectRatio(code);
   const [pngFailed, setPngFailed] = useState(false);
   const hasSvg = /<svg[\s>]/i.test(code);
+  // The frame has no script permission; allow-same-origin only lets *this*
+  // component read its laid-out height so the whole graphic shows with no
+  // inner scrollbar. Re-measured whenever the content or width changes.
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => { observerRef.current?.disconnect(); }, []);
+  const measure = (): void => {
+    const doc = frameRef.current?.contentDocument;
+    if (doc === null || doc === undefined) return;
+    // Measure the content box, not the document: documentElement.scrollHeight
+    // can never be smaller than the frame itself, so it would never shrink.
+    const root = doc.querySelector('.cv-root');
+    if (root === null) return;
+    const height = Math.ceil(root.getBoundingClientRect().bottom + (doc.defaultView?.scrollY ?? 0));
+    if (height > 0) setContentHeight(height);
+  };
+  const onFrameLoad = (): void => {
+    measure();
+    const doc = frameRef.current?.contentDocument;
+    observerRef.current?.disconnect();
+    if (doc?.body !== undefined && typeof ResizeObserver !== 'undefined') {
+      observerRef.current = new ResizeObserver(measure);
+      observerRef.current.observe(doc.body);
+      const root = doc.querySelector('.cv-root');
+      if (root !== null) observerRef.current.observe(root);
+    }
+  };
 
   const downloadSvg = (): void => {
     const standalone = standaloneSvg(code, dark);
@@ -123,10 +151,15 @@ export function HtmlVisual({ code, complete }: { code: string; complete: boolean
       {complete ? (
         <iframe
           title="Visual produced by the agent"
-          sandbox=""
+          ref={frameRef}
+          sandbox="allow-same-origin"
           srcDoc={srcDoc}
+          onLoad={onFrameLoad}
+          scrolling="no"
           className="block w-full border-0 bg-transparent"
-          style={ratio !== null ? { aspectRatio: String(ratio), maxHeight: 440, background: 'transparent' } : { height: 320, background: 'transparent' }}
+          style={contentHeight !== null
+            ? { height: contentHeight, background: 'transparent' }
+            : ratio !== null ? { aspectRatio: String(ratio), background: 'transparent' } : { height: 320, background: 'transparent' }}
         />
       ) : (
         <Assembling />

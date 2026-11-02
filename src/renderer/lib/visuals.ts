@@ -94,6 +94,8 @@ export function buildVisualSrcDoc(code: string, dark: boolean): string {
   const foreground = dark ? '#e6ede3' : '#1d2822';
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     :root { color-scheme: ${dark ? 'dark' : 'light'}; }
+    html, body { overflow: hidden; }
+    body { margin: 0; }
     body { color: ${foreground}; }
     ${ASSEMBLY_CSS}
   </style></head><body><div class="cv-root">${fragment}</div></body></html>`;
