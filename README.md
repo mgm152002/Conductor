@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="Conductor logo" width="128" height="128">
+
 # Conductor
 
 *Plan, run, and review work across multiple AI coding CLIs — from one local-first macOS app*

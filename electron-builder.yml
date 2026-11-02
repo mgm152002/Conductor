@@ -10,6 +10,8 @@ copyright: Copyright © 2026 Conductor
 
 directories:
   output: release
+  # build/icon.png (1024x1024) is converted to the macOS .icns automatically.
+  buildResources: build
 
 # electron-vite emits main/preload/renderer into out/; production
 # dependencies from package.json are packed alongside it automatically.
@@ -19,6 +21,11 @@ files:
 
 mac:
   category: public.app-category.developer-tools
+  # Ad-hoc sign ("-"). Without any signature, Apple Silicon reports a
+  # downloaded app as "damaged and can't be opened" (no way to override in
+  # the UI). With an ad-hoc signature it's a normal Gatekeeper
+  # "unidentified developer" warning (right-click > Open).
+  identity: "-"
   target:
     - target: dmg
       arch:
