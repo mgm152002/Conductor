@@ -159,7 +159,7 @@ function Inspector({ entry, inspection, busy, onCorrect, onDelete, onClose }: {
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
         <div className="flex flex-wrap items-center gap-1.5"><TrustBadge veracity={entry.veracity} />{'layer' in entry ? <Badge tone="primary"><LayersIcon size={10} />{entry.layer}</Badge> : null}</div>
-        <dl className="grid gap-x-4 gap-y-2.5 text-xs sm:grid-cols-2">
+        <dl className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-2.5 text-xs sm:grid-cols-2 [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere]">
           {facts.map((f) => <div key={f.label}><dt className="text-muted-foreground">{f.label}</dt><dd className="mt-0.5 text-foreground">{f.value}</dd></div>)}
           <div className="sm:col-span-2"><dt className="text-muted-foreground">ID</dt><dd className="mt-0.5 break-all font-mono text-2xs text-foreground/80">{entry.id}</dd></div>
         </dl>
@@ -211,11 +211,11 @@ function ResultCard({ entry, active, disabled, onClick }: { entry: Entry; active
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'w-full space-y-2 rounded-xl border p-3.5 text-left transition-colors disabled:opacity-50',
+        'w-full min-w-0 space-y-2 overflow-hidden rounded-xl border p-3.5 text-left transition-colors disabled:opacity-50',
         active ? 'border-ring bg-accent ring-2 ring-ring/20' : 'border-border hover:border-ring/40 hover:bg-accent/50',
       )}
     >
-      <p className="line-clamp-3 text-sm whitespace-pre-wrap break-words text-foreground">{entry.content}</p>
+      <p className="line-clamp-3 text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-foreground">{entry.content}</p>
       <div className="flex flex-wrap items-center gap-1.5">
         {'layer' in entry ? <Badge tone="primary"><LayersIcon size={10} />{entry.layer}</Badge> : null}
         <Badge>{entry.scope.level}{entry.scope.refId ? `: ${entry.scope.refId.slice(0, 16)}` : ''}</Badge>
@@ -337,7 +337,7 @@ export function MemoryScreen(): React.JSX.Element {
 
   return (
     <ScreenScaffold title="Memory" actions={headerActions} screen="memory" layout="dashboard" icon={<BrainIcon size={14} />}>
-      <div className="space-y-4 text-foreground">
+      <div className="min-w-0 max-w-full space-y-4 text-foreground">
         {/* Segmented view toggle */}
         <div className="inline-flex rounded-lg bg-muted/50 p-0.5" role="tablist" aria-label="Knowledge category">
           {(['memory', 'context'] as const).map((value) => (
@@ -378,7 +378,7 @@ export function MemoryScreen(): React.JSX.Element {
           </div>
 
           {showFilters ? (
-            <div className="grid gap-3 rounded-xl border border-border bg-card/40 p-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-xl border border-border bg-card/40 p-4 sm:grid-cols-2 xl:grid-cols-3">
               {view === 'memory' ? <>
                 <Field title="Layer"><Select title="Layer" value={draft.layer} onChange={(v) => setDraft({ ...draft, layer: v })}><option value="">All layers</option>{layers.map((v) => <option key={v} value={v}>{v}</option>)}</Select></Field>
                 <Field title="Project / workspace ID"><input className={inputClassName} value={draft.projectId} onChange={(e) => setDraft({ ...draft, projectId: e.target.value })} /></Field>
@@ -405,8 +405,8 @@ export function MemoryScreen(): React.JSX.Element {
         {status ? <p role="status" className="flex items-center gap-1.5 text-sm text-success"><CheckDot />{status}</p> : null}
 
         {/* Results + inspector */}
-        <div className="grid items-start gap-5 xl:grid-cols-[1fr_minmax(20rem,24rem)]">
-          <section className="space-y-3" aria-label="Search results" aria-busy={loading}>
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
+          <section className="min-w-0 space-y-3" aria-label="Search results" aria-busy={loading}>
             <p className="text-xs text-muted-foreground">
               Newest first · 100 max
             </p>
