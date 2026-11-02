@@ -89,12 +89,37 @@ export interface McpDiscoveryEntry {
   registrationState: McpRegistrationState;
 }
 
+/** A credential the server needs. Renderer-safe: name and whether a value
+ *  is saved — the value itself lives in the macOS Keychain, main-process only. */
+export interface McpSecretSlot {
+  name: string;
+  set: boolean;
+}
+
+/** Public portion of an OAuth device challenge. The private device code stays in main. */
+export interface McpOAuthChallenge {
+  serverId: string;
+  providerName: string;
+  verificationUrl: string;
+  userCode: string;
+  expiresAt: number;
+}
+
+export interface McpInstallResult {
+  server: McpServer;
+  oauth?: McpOAuthChallenge;
+}
+
 /** A durable, registered MCP server record. */
 export interface McpServer {
   id: string;
   name: string;
   /** Transport endpoint label (URL, command, socket) — never a secret. */
   endpoint: string;
+  /** Credentials this server needs (API keys etc.), names only. */
+  secretSlots?: McpSecretSlot[];
+  /** Renderer-safe authentication state. OAuth tokens never cross IPC. */
+  authentication?: { type: 'oauth'; status: 'sign_in_required' | 'connected' };
   trustStatus: McpTrustStatus;
   registrationState: 'registered';
   enablement: McpEnablementState;
@@ -123,6 +148,9 @@ export interface McpRegistrationInput {
   name: string;
   endpoint: string;
   capabilities?: McpServerCapability[];
+  /** Credentials the server needs: name plus the literal placeholder in the
+   *  endpoint, or no placeholder to pass the value as an env variable. */
+  secretSlots?: { name: string; placeholder?: string; kind?: 'oauth' }[];
 }
 
 // ---------------------------------------------------------------------------

@@ -1442,6 +1442,17 @@ const migration033: Migration = {
   },
 };
 
+// Migration 34 — MCP server credential slots: JSON [{name, placeholder?,
+// secretId?}]. Values themselves live in the macOS Keychain; this column
+// only records which credentials a server needs and their Keychain ids.
+const migration034: Migration = {
+  version: 34,
+  name: 'mcp_server_secret_slots',
+  up({ db }: Tx): void {
+    db.exec(`ALTER TABLE mcp_servers ADD COLUMN secret_slots TEXT NOT NULL DEFAULT '[]';`);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1477,4 +1488,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration031,
   migration032,
   migration033,
+  migration034,
 ];

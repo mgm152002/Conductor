@@ -143,4 +143,28 @@ describe('codex launch arguments', () => {
     expect(launch.args).toContain('mcp_servers.notes_1.args=["-y","server \\"quoted\\""]');
     expect(launch.args!.join(' ')).not.toContain('Bad-Key');
   });
+
+  it('passes OAuth bearer tokens to Codex through its child environment, not argv', () => {
+    const launch = buildObjectiveLaunch('codex', {
+      objective: 'list repositories', rootPath: '/tmp/w',
+      mcpServers: [{ key: 'github_mcp', url: 'https://mcp.example.test', headers: { Authorization: 'Bearer secret-token' } }],
+    });
+
+    expect(launch.args).toContain('mcp_servers.github_mcp.bearer_token_env_var="CONDUCTOR_MCP_TOKEN_GITHUB_MCP"');
+    expect(launch.args?.join(' ')).not.toContain('secret-token');
+    expect(launch.env).toEqual({ CONDUCTOR_MCP_TOKEN_GITHUB_MCP: 'secret-token' });
+  });
+
+  it('prefers an installed media tool, then falls back locally if it fails', () => {
+    const launch = buildObjectiveLaunch('codex', {
+      objective: 'generate a video of flying cars', rootPath: '/tmp/w',
+      mcpServers: [{ key: 'video_generator', url: 'https://mcp.example.test', tools: ['generateAiVideo'] }],
+    });
+
+    expect(launch.stdin).toMatch(/when one of them can fulfill the request[\s\S]*call it and return its result/i);
+    expect(launch.stdin).toMatch(/if (?:a|the) (?:media-generation|generation) (?:MCP )?tool (?:call )?fails/i);
+    expect(launch.stdin).toMatch(/do not retry/i);
+    expect(launch.stdin).toMatch(/do not ask the user/i);
+    expect(launch.stdin).toMatch(/artifact block/i);
+  });
 });

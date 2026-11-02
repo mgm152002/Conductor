@@ -42,9 +42,9 @@ export function CliCatalog(): React.JSX.Element {
           No agent CLIs are available yet.
         </p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {entries.map((entry) => (
-            <li key={entry.id}>
+            <li key={entry.id} className="h-full">
               <CatalogEntryCard
                 entry={entry}
                 installCommand={installCommand}

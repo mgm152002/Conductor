@@ -47,9 +47,12 @@ describe('MCP over the official SDK', () => {
     const result = await mcp.invoke({ id: added.id, tool: 'add', args: { a: 2, b: 3 } });
     expect(result.ok).toBe(true);
     expect(JSON.stringify(result.ok ? result.output : null)).toContain('"text":"5"');
-    expect(mcp.forAgents()).toEqual([{ key: added.id.replace(/-/g, '_'), command: process.execPath, args: [FIXTURE] }]);
+    const forAgents = await mcp.forAgents();
+    expect(forAgents).toHaveLength(1);
+    expect(forAgents[0]).toMatchObject({ key: added.id.replace(/-/g, '_'), command: process.execPath, args: [FIXTURE] });
+    expect(forAgents[0]?.tools).toEqual(expect.arrayContaining(['add', 'echo']));
     await mcp.disable(added.id);
-    expect(mcp.forAgents()).toEqual([]);
+    await expect(mcp.forAgents()).resolves.toEqual([]);
     await mcp.stop();
   }, 30_000);
 

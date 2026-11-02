@@ -37,6 +37,7 @@ import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import type { IconBridge } from '@shared/icon-contract';
 import type { GitHubBridge } from '@shared/github-contract';
+import type { ArtifactImageData, GeneratedArtifactSpec, GeneratedFile } from '@shared/generated-artifacts';
 
 // The preload bridge exposes exactly one namespaced object, `window.conductor`.
 // It is the only surface the sandboxed renderer can reach: typed `invoke`
@@ -103,6 +104,13 @@ const integrations: IntegrationsBridge = {
     approve: (id) => invoke('mcp.approve', { id }), disable: (id) => invoke('mcp.disable', { id }),
     remove: (id) => invoke('mcp.remove', { id }), checkHealth: (id) => invoke('mcp.checkHealth', { id }),
     invoke: (input) => invoke('mcp.invoke', input),
+    marketplace: (search) => invoke('mcp.marketplace', search ? { search } : undefined),
+    install: (entryId) => invoke('mcp.install', { entryId }),
+    startOAuth: (id) => invoke('mcp.oauth.start', { id }),
+    completeOAuth: (id) => invoke('mcp.oauth.complete', { id }),
+    cancelOAuth: (id) => invoke('mcp.oauth.cancel', { id }),
+    setSecret: (input) => invoke('mcp.setSecret', input),
+    clearSecret: (input) => invoke('mcp.clearSecret', input),
   },
   remote: {
     list: () => invoke('remote.list'), add: (input) => invoke('remote.add', input), remove: (id) => invoke('remote.remove', { id }),
@@ -230,6 +238,13 @@ const conductor = {
       value: unknown;
       scope: 'global' | 'workspace';
     }): Promise<void> => invoke('settings.set', input),
+  },
+  artifacts: {
+    /** Render an agent's artifact spec (pdf/document/presentation) into a real downloadable file. */
+    generate: (spec: GeneratedArtifactSpec, images?: Record<string, ArtifactImageData>): Promise<GeneratedFile> =>
+      invoke('artifact.generate', { spec, ...(images !== undefined ? { images } : {}) }),
+    /** Paint an HTML/SVG diagram in an offscreen window; resolves to PNG bytes. */
+    rasterize: (html: string): Promise<ArtifactImageData> => invoke('artifact.rasterize', { html }),
   },
   task: {
     list: (input?:{workspaceId?:string;limit?:number}):Promise<Task[]> => invoke('task.list',input),

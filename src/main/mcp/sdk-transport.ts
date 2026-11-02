@@ -72,8 +72,14 @@ interface Connection { client: Client; close: () => Promise<void> }
 
 export class SdkMcpTransport implements McpTransport {
   private readonly connections = new Map<string, Promise<Connection>>();
+  private serverResolver?: (server: McpServer) => Promise<McpServer & { resolvedEnv?: Record<string, string>; bearerToken?: string }>;
 
   constructor(private readonly configSources: readonly { label: string; path: string }[] = defaultConfigSources()) {}
+
+  /** Substitute credentials (placeholders + env) before any connection. */
+  setServerResolver(resolver: (server: McpServer) => Promise<McpServer & { resolvedEnv?: Record<string, string>; bearerToken?: string }>): void {
+    this.serverResolver = resolver;
+  }
 
   /** Reads MCP server definitions from other tools' config files. Launches nothing. */
   async discover(): Promise<McpDiscoveryEntry[]> {
@@ -137,14 +143,17 @@ export class SdkMcpTransport implements McpTransport {
     const existing = this.connections.get(server.id);
     if (existing !== undefined) return existing;
     const pending = (async (): Promise<Connection> => {
-      const endpoint = parseEndpoint(server.endpoint);
+      const effective: McpServer & { resolvedEnv?: Record<string, string>; bearerToken?: string } = this.serverResolver !== undefined ? await this.serverResolver(server) : server;
+      const endpoint = parseEndpoint(effective.endpoint);
       const client = new Client({ name: 'conductor', version: '0.1.0' });
       const transport = endpoint.kind === 'http'
-        ? new StreamableHTTPClientTransport(endpoint.url!)
+        ? new StreamableHTTPClientTransport(endpoint.url!, effective.bearerToken !== undefined
+          ? { requestInit: { headers: { authorization: `Bearer ${effective.bearerToken}` } } }
+          : undefined)
         : new StdioClientTransport({
           command: endpoint.command!,
           args: endpoint.args ?? [],
-          env: { ...getDefaultEnvironment(), PATH: augmentedPath() },
+          env: { ...getDefaultEnvironment(), PATH: augmentedPath(), ...(effective.resolvedEnv ?? {}) },
           stderr: 'ignore',
         });
       transport.onclose = () => { this.connections.delete(server.id); };

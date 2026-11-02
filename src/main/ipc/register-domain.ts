@@ -66,6 +66,9 @@ import { listWorkspaceChanges, readWorkspaceFileDiff } from '../domain/workspace
 import { worktreeBranch, worktreePathFor } from '../domain/worktree';
 import { existsSync } from 'node:fs';
 import type { AgentQuestionBroker } from '../orchestrator/agent-questions';
+import type { ToolApprovalBroker } from '../orchestrator/tool-approvals';
+import { generateArtifactFile } from '../artifacts/generate-artifact';
+import type { ArtifactImageData } from '@shared/generated-artifacts';
 
 // Wire the workspace, settings, and task-lifecycle services onto the validated
 // IPC router. Every handler goes through `router.handle`, which enforces the
@@ -101,6 +104,8 @@ export interface DomainHandlerDeps {
   dataControl: DataControlService;
   /** Pending agent questions awaiting human review. */
   questions?: AgentQuestionBroker;
+  /** Live tool-approval broker (also serves chat-scoped approvals). */
+  toolApprovals?: ToolApprovalBroker;
   flushMemories?: () => Promise<void>;
   /** Deletes a project and everything stored for it. */
   deleteProject?: (workspaceId: string) => Promise<ProjectDeletionResult>;
@@ -116,6 +121,8 @@ export interface DomainHandlerDeps {
   refreshUsageLimits?: () => Promise<void>;
   /** Generate a Space/project icon SVG with a model (see IconService). */
   generateIcon?: (input: GenerateIconInput) => Promise<string>;
+  /** Paint an agent diagram (HTML/SVG) offscreen; resolves to PNG bytes. */
+  renderVisual?: (html: string) => Promise<ArtifactImageData>;
 }
 
 export function registerDomainHandlers(deps: DomainHandlerDeps): void {
@@ -135,6 +142,13 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
   router.handle('task.list', A['task.list'], (_e, i) => deps.taskQueries.list(i ? {...(i.workspaceId ? {workspaceId:i.workspaceId}:{}),...(i.limit ? {limit:i.limit}:{})} : undefined));
   router.handle('task.details', A['task.details'], (_e, i) => deps.taskQueries.details(i.id));
   router.handle('task.readArtifact', A['task.readArtifact'], (_e, i) => deps.taskQueries.readArtifact(i));
+  // Any agent's artifact spec becomes a real file here (pdf/docx/pptx);
+  // video specs are rendered by the renderer's player instead.
+  router.handle('artifact.generate', A['artifact.generate'], (_e, i) => generateArtifactFile(i.spec, i.images ?? {}));
+  router.handle('artifact.rasterize', A['artifact.rasterize'], async (_e, i) => {
+    if (deps.renderVisual === undefined) throw new Error('Diagram rendering is not available.');
+    return deps.renderVisual(i.html);
+  });
   router.handle('task.thread', A['task.thread'], (_e, i) => deps.taskQueries.thread(i.threadId));
   router.handle('task.retry', A['task.retry'], (_e, i) => {
     const task = orchestrator.getTask(i.id);
@@ -146,7 +160,12 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
   router.handle('registry.listAdapters', RegistryListAdaptersRequest, () => deps.registry.listAdapters());
   router.handle('approval.list', A['approval.list'], () => {
     deps.permissions.expireTimedOut();
-    return orchestrator.listActive().flatMap((t) => deps.permissions.pendingApprovals(t.id));
+    const fromTasks = orchestrator.listActive().flatMap((t) => deps.permissions.pendingApprovals(t.id));
+    // Tool approvals also arise in casual chat (agent MCP/tool calls scoped
+    // to a chat thread, not a Work task) — include the broker's live set.
+    const fromBroker = deps.toolApprovals?.pendingApprovals() ?? [];
+    const seen = new Set(fromTasks.map((a) => a.id));
+    return [...fromTasks, ...fromBroker.filter((a) => !seen.has(a.id))];
   });
   router.handle('approval.resolve', ApprovalResolveRequest, (_e,i) => deps.runner.resolveApproval({approvalId:i.approvalId,decision:i.decision,...(i.remember !== undefined ? {remember:i.remember} : {})}));
   router.handle('permission.getProfile', A['permission.getProfile'], () =>

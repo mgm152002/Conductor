@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { McpDiscoveryEntry, McpInvocationResult, McpServer } from './mcp';
+import type { McpDiscoveryEntry, McpInstallResult, McpInvocationResult, McpOAuthChallenge, McpServer } from './mcp';
+import type { McpMarketplaceEntry } from './mcp-marketplace';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
 import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
@@ -27,6 +28,13 @@ export const INTEGRATION_SCHEMAS = {
   'mcp.remove': z.object({ id }),
   'mcp.checkHealth': z.object({ id }),
   'mcp.invoke': z.object({ id, tool: z.string().trim().min(1).max(200), args: z.record(z.string(), z.unknown()).optional() }),
+  'mcp.marketplace': z.object({ search: z.string().trim().max(100).optional() }).optional(),
+  'mcp.install': z.object({ entryId: z.string().trim().regex(/^[\w][\w./-]{0,199}$/) }),
+  'mcp.oauth.start': z.object({ id }),
+  'mcp.oauth.complete': z.object({ id }),
+  'mcp.oauth.cancel': z.object({ id }),
+  'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), value: z.string().min(1).max(65536) }),
+  'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/) }),
 
   'remote.list': z.void(),
   'remote.add': z.object({
@@ -88,6 +96,17 @@ export interface IntegrationsBridge {
     remove(id: string): Promise<void>;
     checkHealth(id: string): Promise<McpServer>;
     invoke(input: IntegrationRequest<'mcp.invoke'>): Promise<McpInvocationResult>;
+    /** The mcpservers.org catalog (optionally searched). */
+    marketplace(search?: string): Promise<readonly McpMarketplaceEntry[]>;
+    /** One-click install; OAuth-capable servers immediately open sign-in. */
+    install(entryId: string): Promise<McpInstallResult>;
+    startOAuth(id: string): Promise<McpOAuthChallenge>;
+    completeOAuth(id: string): Promise<McpServer>;
+    cancelOAuth(id: string): Promise<void>;
+    /** Save a credential (API key) for a server slot into the Keychain. */
+    setSecret(input: IntegrationRequest<'mcp.setSecret'>): Promise<McpServer>;
+    /** Remove a saved credential from the Keychain. */
+    clearSecret(input: IntegrationRequest<'mcp.clearSecret'>): Promise<McpServer>;
   };
   remote: {
     list(): Promise<RemoteHostView[]>;

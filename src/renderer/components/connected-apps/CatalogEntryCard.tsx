@@ -132,7 +132,7 @@ export function CatalogEntryCard({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+    <div className="flex h-full flex-col gap-3 rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm font-medium text-foreground">

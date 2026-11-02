@@ -26,6 +26,18 @@ type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
 
+/**
+ * Approved MCP servers in ACP's session/new shape, so OpenCode and Kiro get
+ * the same servers Codex and Claude Code do. HTTP servers use the http
+ * variant; command servers the stdio variant. Credentials are passed only to
+ * the selected child agent over its local ACP session.
+ */
+export function acpMcpServers(servers: GatedLive['data']['mcpServers']): Json[] {
+  return (servers ?? []).map((server) => server.url !== undefined
+    ? { name: server.key, type: 'http', url: server.url, headers: Object.entries(server.headers ?? {}).map(([name, value]) => ({ name, value })) }
+    : { name: server.key, command: server.command ?? '', args: server.args ?? [], env: Object.entries(server.env ?? {}).map(([name, value]) => ({ name, value })) });
+}
+
 const RPC_TIMEOUT_MS = 120_000;
 const PROTOCOL_VERSION = 1;
 /** How many times a turn ended by a declined tool is continued. */
@@ -494,7 +506,7 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       const pinned = pinnedModel(data, this.spec.modelKey);
       const effort = pinnedEffort(data, this.spec.modelKey);
       const created = obj(await request('session/new', {
-        cwd: data.rootPath, mcpServers: [],
+        cwd: data.rootPath, mcpServers: acpMcpServers(data.mcpServers),
         ...(pinned !== undefined || effort !== undefined ? { _meta: { kiro: { ...(pinned !== undefined ? { modelId: pinned } : {}), ...(effort !== undefined ? { effortLevel: effort } : {}) } } } : {}),
       }));
       sessionId = str(created?.['sessionId']);

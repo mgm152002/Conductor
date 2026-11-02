@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { ATTACHMENT_SCHEMAS } from './attachments';
+import { ArtifactImageDataSchema, GeneratedArtifactSpecSchema } from './generated-artifacts';
 export const APPLICATION_SCHEMAS = {
   ...ATTACHMENT_SCHEMAS,
+  'artifact.generate': z.object({
+    spec: GeneratedArtifactSpecSchema,
+    images: z.record(z.string().max(64), ArtifactImageDataSchema).optional(),
+  }).strict(),
+  'artifact.rasterize': z.object({ html: z.string().min(1).max(300_000) }).strict(),
   'workspace.active': z.void(),
   'workspace.changes': z.object({workspaceId:z.string().uuid(),taskId:z.string().uuid().optional()}),
   'workspace.fileDiff': z.object({workspaceId:z.string().uuid(),path:z.string().min(1).max(4096),taskId:z.string().uuid().optional()}),

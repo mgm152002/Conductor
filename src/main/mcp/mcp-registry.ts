@@ -98,10 +98,21 @@ export class McpApprovalRequiredError extends Error {
   }
 }
 
+/** Internal credential slot: name, the literal placeholder in the endpoint
+ *  (absent = pass as an environment variable), and its Keychain secret id. */
+export interface McpSecretSlotRecord {
+  name: string;
+  placeholder?: string;
+  secretId?: string;
+  /** Internal bearer credential; hidden from renderer-facing secret slots. */
+  kind?: 'oauth';
+}
+
 interface McpServerRow {
   id: string;
   name: string;
   endpoint: string;
+  secret_slots?: string;
   trust_status: McpServer['trustStatus'];
   registration_state: 'registered';
   enablement: McpServer['enablement'];
@@ -115,10 +126,16 @@ interface McpServerRow {
 }
 
 function rowToServer(row: McpServerRow): McpServer {
+  const slots = row.secret_slots !== undefined && row.secret_slots !== ''
+    ? JSON.parse(row.secret_slots) as McpSecretSlotRecord[] : [];
+  const oauth = slots.find((slot) => slot.kind === 'oauth');
+  const visibleSlots = slots.filter((slot) => slot.kind !== 'oauth');
   return {
     id: row.id,
     name: row.name,
     endpoint: row.endpoint,
+    ...(visibleSlots.length > 0 ? { secretSlots: visibleSlots.map((s) => ({ name: s.name, set: s.secretId !== undefined })) } : {}),
+    ...(oauth !== undefined ? { authentication: { type: 'oauth' as const, status: oauth.secretId !== undefined ? 'connected' as const : 'sign_in_required' as const } } : {}),
     trustStatus: row.trust_status,
     registrationState: 'registered',
     enablement: row.enablement,
@@ -251,6 +268,9 @@ export class McpRegistry {
       id,
       name: input.name.trim(),
       endpoint: input.endpoint.trim(),
+      ...((input.secretSlots ?? []).length > 0
+        ? { secretSlots: (input.secretSlots ?? []).map((s) => ({ name: s.name, set: false })) }
+        : {}),
       trustStatus: 'untrusted',
       registrationState: 'registered',
       enablement: 'disabled',
@@ -265,8 +285,8 @@ export class McpRegistry {
         .prepare(
           `INSERT INTO mcp_servers
              (id, name, endpoint, trust_status, registration_state, enablement,
-              health, capabilities, created_at, updated_at)
-           VALUES (?, ?, ?, 'untrusted', 'registered', 'disabled', 'unknown', ?, ?, ?)`,
+              health, capabilities, created_at, updated_at, secret_slots)
+           VALUES (?, ?, ?, 'untrusted', 'registered', 'disabled', 'unknown', ?, ?, ?, ?)`,
         )
         .run(
           server.id,
@@ -275,6 +295,7 @@ export class McpRegistry {
           JSON.stringify(server.capabilities),
           server.createdAt,
           server.updatedAt,
+          JSON.stringify(input.secretSlots ?? []),
         );
     });
 
@@ -285,7 +306,9 @@ export class McpRegistry {
       redactedPayload: { name: server.name, endpoint: server.endpoint },
     });
 
-    return server;
+    // Rehydrate through the renderer-safe mapper so internal credential slots
+    // are never exposed by the registration response.
+    return this.getOrThrow(server.id);
   }
 
   private validateRegistration(input: McpRegistrationInput): void {
@@ -396,6 +419,60 @@ export class McpRegistry {
       .prepare(`UPDATE mcp_servers SET capabilities = ?, updated_at = ? WHERE id = ?`)
       .run(JSON.stringify(capabilities), this.nowIso(), serverId);
     this.audit.append({ actor: 'orchestrator', action: 'mcp.capabilities_updated', target: serverId, redactedPayload: { count: capabilities.length } });
+    return this.getOrThrow(serverId);
+  }
+
+  /** Internal credential slots, including Keychain secret ids (never renderer-bound). */
+  secretSlotsRaw(serverId: string): McpSecretSlotRecord[] {
+    const row = this.store.db.prepare(`SELECT secret_slots FROM mcp_servers WHERE id = ?`).get(serverId) as { secret_slots: string } | undefined;
+    if (row === undefined) throw new McpNotFoundError(serverId);
+    return JSON.parse(row.secret_slots || '[]') as McpSecretSlotRecord[];
+  }
+
+  /** Attach (or clear, with undefined) the Keychain secret id for a slot. */
+  setSecretRef(serverId: string, name: string, secretId: string | undefined): McpServer {
+    const slots = this.secretSlotsRaw(serverId).map((slot) =>
+      slot.name === name
+        ? { ...slot, ...(secretId !== undefined ? { secretId } : { secretId: undefined }) }
+        : slot);
+    const cleaned = slots.map((slot) => {
+      const { secretId: _drop, ...rest } = slot;
+      return slot.secretId !== undefined ? slot : rest;
+    });
+    this.store.db.prepare(`UPDATE mcp_servers SET secret_slots = ?, updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(cleaned), this.nowIso(), serverId);
+    this.audit.append({ actor: 'user', action: secretId !== undefined ? 'mcp.secret_set' : 'mcp.secret_cleared', target: serverId, redactedPayload: { name } });
+    return this.getOrThrow(serverId);
+  }
+
+  /** Attach a Keychain id to the server's internal OAuth bearer slot. */
+  setOAuthSecretRef(serverId: string, secretId: string | undefined): McpServer {
+    const slots = this.secretSlotsRaw(serverId);
+    const index = slots.findIndex((slot) => slot.kind === 'oauth');
+    if (index < 0) throw new Error(`MCP server ${serverId} does not support OAuth`);
+    if (secretId !== undefined) slots[index] = { ...slots[index]!, secretId };
+    else {
+      const { secretId: _drop, ...withoutSecret } = slots[index]!;
+      slots[index] = withoutSecret;
+    }
+    const cleaned = slots.map((slot) => {
+      const { secretId: _drop, ...rest } = slot;
+      return slot.secretId !== undefined ? slot : rest;
+    });
+    this.store.db.prepare(`UPDATE mcp_servers SET secret_slots = ?, updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(cleaned), this.nowIso(), serverId);
+    this.audit.append({ actor: 'user', action: secretId !== undefined ? 'mcp.oauth_connected' : 'mcp.oauth_disconnected', target: serverId });
+    return this.getOrThrow(serverId);
+  }
+
+  /** Add the hidden OAuth slot when a newly configured provider adopts an existing server. */
+  ensureOAuthSlot(serverId: string): McpServer {
+    const slots = this.secretSlotsRaw(serverId);
+    if (slots.some((slot) => slot.kind === 'oauth')) return this.getOrThrow(serverId);
+    slots.push({ name: '__oauth_bearer', kind: 'oauth' });
+    this.store.db.prepare(`UPDATE mcp_servers SET secret_slots = ?, enablement = 'disabled', updated_at = ? WHERE id = ?`)
+      .run(JSON.stringify(slots), this.nowIso(), serverId);
+    this.audit.append({ actor: 'orchestrator', action: 'mcp.oauth_available', target: serverId });
     return this.getOrThrow(serverId);
   }
 

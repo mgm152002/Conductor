@@ -27,6 +27,11 @@ function Icon({ size = 16, children, ...props }: IconProps & { children: React.R
 }
 
 export const PlusIcon = (p: IconProps) => <Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>;
+export const VideoIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10.5 5-3v9l-5-3" /></Icon>;
+export const GlobeIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></Icon>;
+export const BugIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="8" width="10" height="12" rx="5" /><path d="M12 8V4M7 12H3M7 17l-3 2M17 12h4M17 17l3 2M5 5l3 3M19 5l-3 3" /></Icon>;
+export const NoteIcon = (p: IconProps) => <Icon {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5M9 12h7M9 16h7" /></Icon>;
+export const ShapesIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="8" height="8" rx="1" /><circle cx="16.5" cy="7.5" r="4" /><path d="m8 14 4 7H4z" /><rect x="14" y="14" width="7" height="7" rx="1" /></Icon>;
 export const ArrowUpIcon = (p: IconProps) => <Icon {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Icon>;
 export const StopIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></Icon>;
 export const ChevronRightIcon = (p: IconProps) => <Icon {...p}><path d="m9 6 6 6-6 6" /></Icon>;

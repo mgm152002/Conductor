@@ -1,7 +1,7 @@
 import { AttachmentService } from './attachments/attachment-service';
 import { registerAttachmentHandlers } from './ipc/register-attachments';
 import { join } from 'node:path';
-import { app, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { SqliteStore } from './db/store';
 import { WorkspaceService } from './domain/workspace-service';
 import { SettingsService } from './domain/settings-service';
@@ -61,6 +61,8 @@ import { SlackConnectorLifecycle } from './connectors/slack-connector';
 import { McpRegistry } from './mcp/mcp-registry';
 import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
+import { configuredDeviceOAuthProviders, GitHubDeviceOAuthProvider, McpOAuthService } from './mcp/mcp-oauth';
+import { ElectronMarketplaceCatalog } from './mcp/marketplace-catalog';
 import { RemoteHostService } from './adapters/remote-hosts';
 import { IpcSuggestionEmitter, registerIntegrationHandlers } from './ipc/register-integrations';
 import { ToolApprovalBroker } from './orchestrator/tool-approvals';
@@ -83,6 +85,7 @@ import { AgentPrDescriptionGenerator } from './domain/pr-description';
 import { IconService } from './domain/icon-service';
 import { defaultModelKey } from '@shared/model-defaults';
 import { IpcChatEventEmitter, registerChatHandlers } from './ipc/register-chat';
+import { contentBounds } from '@shared/content-bounds';
 import { AgentLearningAnalyzer } from './domain/learning-analyzer';
 import { LearningCronService } from './domain/learning-cron';
 
@@ -223,7 +226,20 @@ export async function bootstrap(): Promise<AppServices> {
     transport: mcpTransport,
     accessControl: ({ caller }) => caller === 'user' || permissions.allows({ type: 'agent', id: 'orchestrator' }, { kind: 'external_comm' }),
   });
-  const mcp = new McpService(mcpRegistry, mcpTransport);
+  const keychainResolver = new KeychainSecretResolver();
+  const openOAuthPage = (url: string): Promise<unknown> => shell.openExternal(url);
+  const mcpOAuth = new McpOAuthService([
+    ...configuredDeviceOAuthProviders(process.env['CONDUCTOR_MCP_OAUTH_PROVIDERS'], { openExternal: openOAuthPage }),
+    new GitHubDeviceOAuthProvider({
+      clientId: process.env['CONDUCTOR_GITHUB_OAUTH_CLIENT_ID'] ?? '',
+      openExternal: openOAuthPage,
+    }),
+  ]);
+  const mcp = new McpService(mcpRegistry, mcpTransport, new ElectronMarketplaceCatalog(), {
+    put: (input) => secretStore.put(input),
+    delete: (id) => secretStore.delete(id),
+    resolve: (id) => keychainResolver.resolve(id),
+  }, mcpOAuth);
 
   // Managed_Local_Storage for artifacts persisted during step execution lives
   // beside the DB under userData.
@@ -303,6 +319,7 @@ export async function bootstrap(): Promise<AppServices> {
     (snapshot) => chatEvents.emit(snapshot),
     {
       memory, catalogs: modelCatalogs, settings, attachments,
+      mcpServers: () => mcp.forAgents(),
       generateTitle: (firstMessage, pin) => threadTitles.generateTitle(firstMessage, pin),
     },
   );
@@ -345,9 +362,6 @@ export async function bootstrap(): Promise<AppServices> {
       mode,
       attachments: await runner.executionAttachments(task),
       ...threadInput(task, step.requiredCapability),
-      // Approved MCP servers can act outside the agent's sandbox, so they
-      // are only handed to agents when the profile allows execution.
-      ...(mode !== 'read_only' ? { mcpServers: mcp.forAgents() } : {}),
       ...(resolved.models ? { models: resolved.models } : {}),
       ...(resolved.efforts ? { efforts: resolved.efforts } : {}),
       runs: resolved.runs,
@@ -414,6 +428,9 @@ export async function bootstrap(): Promise<AppServices> {
         });
         return {
           ...base,
+          // Resolve Keychain-backed MCP credentials only now, immediately
+          // before adapter start. They are never serialized into task_steps.
+          ...(base['mode'] !== 'read_only' ? { mcpServers: await mcp.forAgents() } : {}),
           contextData: prepared.contextData,
           ...(prepared.guidance ? { guidance: prepared.guidance } : {}),
         };
@@ -603,12 +620,40 @@ export async function bootstrap(): Promise<AppServices> {
     cliCatalog,
     dataControl,
     questions: agentQuestions,
+    toolApprovals,
     flushMemories: () => memory.synchronize(),
     deleteProject: (workspaceId) => deleteProject({ store, storage, attachments, audit, flushMemories: () => memory.synchronize(), deleteConnector: (id) => connectorRuntime.delete(id) }, workspaceId),
     deleteThread: (threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId),
     generateIcon: (input) => new IconService({
       generateText: (prompt, description, pin) => titleGenerator.generateText(prompt, description, pin),
     }).generate(input),
+    // Paint an agent diagram offscreen for embedding in generated files.
+    // Sandboxed, scriptless window; the fragment was already sanitized by
+    // the renderer (scripts and external references stripped).
+    renderVisual: async (html) => {
+      const win = new BrowserWindow({
+        show: false, width: 1400, height: 1000,
+        webPreferences: { sandbox: true, javascript: false, contextIsolation: true, nodeIntegration: false, offscreen: true },
+      });
+      try {
+        await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+        // The visual's assembly animation finishes within ~900 ms.
+        await new Promise((resolve) => { setTimeout(resolve, 950); });
+        const captured = await win.webContents.capturePage();
+        // The diagram rarely fills the window: crop away the surrounding
+        // white so it embeds at full size instead of as a tiny card inside
+        // a big white frame.
+        const capSize = captured.getSize();
+        const bounds = contentBounds(captured.toBitmap(), capSize.width, capSize.height);
+        const image = bounds !== null ? captured.crop(bounds) : captured;
+        const size = image.getSize();
+        const resized = size.width > 1400 ? image.resize({ width: 1400 }) : image;
+        const finalSize = resized.getSize();
+        return { dataBase64: resized.toPNG().toString('base64'), width: finalSize.width, height: finalSize.height };
+      } finally {
+        if (!win.isDestroyed()) win.destroy();
+      }
+    },
     refreshUsageLimits: async () => { await Promise.all([quotaPolling.refresh(), modelPricing.refresh()]); },
     usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters(), pricing: modelPricing.priceFor }),
   });

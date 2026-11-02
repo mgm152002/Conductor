@@ -140,6 +140,7 @@ export interface LocalCliStartInput {
   /** Text written to the CLI's stdin. May contain placeholder tokens. */
   stdin?: string;
   cwd?: string;
+  env?: Record<string, string>;
 }
 
 interface LiveSession {
@@ -214,7 +215,9 @@ export class LocalCliAdapter implements AgentAdapter {
 
     const parsed = normalizeStartInput(input);
     const executable = this.resolveExecutable();
-    const child = parsed.cwd ? this.env.spawn(executable, parsed.args, {cwd:parsed.cwd}) : this.env.spawn(executable, parsed.args);
+    const child = parsed.cwd || parsed.env !== undefined
+      ? this.env.spawn(executable, parsed.args, { ...(parsed.cwd ? { cwd: parsed.cwd } : {}), ...(parsed.env !== undefined ? { env: parsed.env } : {}) })
+      : this.env.spawn(executable, parsed.args);
     const completion = new Promise<{code:number|null;signal:NodeJS.Signals|null;error?:string}>((resolve) => {
       child.once('close', (code, signal) => resolve({code,signal}));
       child.once('error', (err) => resolve({code:null,signal:null,error:err.message}));
@@ -362,6 +365,7 @@ function normalizeStartInput(input: unknown): {
   args: string[];
   stdin?: string;
   cwd?: string;
+  env?: Record<string, string>;
 } {
   if (input === null || typeof input !== 'object') {
     return { args: [] };
@@ -375,7 +379,11 @@ function normalizeStartInput(input: unknown): {
   const rawStdin = obj['stdin'];
   const stdin = typeof rawStdin === 'string' ? rawStdin : undefined;
   const cwd = typeof obj['cwd'] === 'string' ? obj['cwd'] : undefined;
-  return {args, ...(stdin !== undefined ? {stdin} : {}), ...(cwd ? {cwd} : {})};
+  const rawEnv = obj['env'];
+  const env = rawEnv !== null && typeof rawEnv === 'object' && !Array.isArray(rawEnv)
+    && Object.values(rawEnv as Record<string, unknown>).every((value) => typeof value === 'string')
+    ? rawEnv as Record<string, string> : undefined;
+  return {args, ...(stdin !== undefined ? {stdin} : {}), ...(cwd ? {cwd} : {}), ...(env !== undefined ? { env } : {})};
 }
 
 /**

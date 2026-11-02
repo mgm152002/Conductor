@@ -69,6 +69,13 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('mcp.remove', S['mcp.remove'], (_e, input) => deps.mcp.remove(input.id));
   router.handle('mcp.checkHealth', S['mcp.checkHealth'], (_e, input) => deps.mcp.checkHealth(input.id));
   router.handle('mcp.invoke', S['mcp.invoke'], (_e, input) => deps.mcp.invoke({ id: input.id, tool: input.tool, ...(input.args !== undefined ? { args: input.args } : {}) }));
+  router.handle('mcp.marketplace', S['mcp.marketplace'], (_e, input) => deps.mcp.marketplace(input?.search));
+  router.handle('mcp.install', S['mcp.install'], (_e, input) => deps.mcp.installAndAuthorize(input.entryId));
+  router.handle('mcp.oauth.start', S['mcp.oauth.start'], (_e, input) => deps.mcp.startOAuth(input.id));
+  router.handle('mcp.oauth.complete', S['mcp.oauth.complete'], (_e, input) => deps.mcp.completeOAuth(input.id));
+  router.handle('mcp.oauth.cancel', S['mcp.oauth.cancel'], (_e, input) => { deps.mcp.cancelOAuth(input.id); });
+  router.handle('mcp.setSecret', S['mcp.setSecret'], (_e, input) => deps.mcp.setSecret(input.id, input.name, input.value));
+  router.handle('mcp.clearSecret', S['mcp.clearSecret'], (_e, input) => deps.mcp.clearSecret(input.id, input.name));
 
   router.handle('remote.list', S['remote.list'], () => deps.remote.list().map(remoteView));
   router.handle('remote.add', S['remote.add'], (_e, input) => remoteView(deps.remote.add(input)));

@@ -256,7 +256,35 @@ export class AntigravityAdapter extends GatedAgentAdapter {
       writeFileSync(join(agents, 'hooks.json'), JSON.stringify({
         'conductor-approvals': { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `/bin/sh ${shq(script)}`, timeout: HOOK_TIMEOUT_S }] }] },
       }), { mode: 0o400 });
+      // Approved MCP servers for this run, in Antigravity's workspace config
+      // (.agents/mcp_config.json in the --add-dir workspace). Remote servers
+      // use serverUrl; local ones a command. The PreToolUse hook above gates
+      // their tool calls like any other tool.
+      if ((data.mcpServers ?? []).length > 0) {
+        const servers: Record<string, unknown> = {};
+        for (const server of data.mcpServers ?? []) {
+          servers[server.key] = server.url !== undefined
+            ? { serverUrl: server.url, ...(server.headers !== undefined ? { headers: server.headers } : {}) }
+            : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
+        }
+        writeFileSync(join(agents, 'mcp_config.json'), JSON.stringify({ mcpServers: servers }), { mode: 0o400 });
+      }
       chmodSync(agents, 0o500);
+      args.push('--add-dir', join(base, 'root'));
+    } else if ((data.mcpServers ?? []).length > 0) {
+      // Trusted runs skip the hook, but still get the approved MCP servers
+      // through the same workspace-config mechanism.
+      const base = mkdtempSync(join(tmpdir(), 'conductor-agy-'));
+      const agents = join(base, 'root', '.agents');
+      live.cleanup.push(() => { rmSync(base, { recursive: true, force: true }); });
+      mkdirSync(agents, { recursive: true });
+      const servers: Record<string, unknown> = {};
+      for (const server of data.mcpServers ?? []) {
+        servers[server.key] = server.url !== undefined
+          ? { serverUrl: server.url, ...(server.headers !== undefined ? { headers: server.headers } : {}) }
+          : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
+      }
+      writeFileSync(join(agents, 'mcp_config.json'), JSON.stringify({ mcpServers: servers }), { mode: 0o400 });
       args.push('--add-dir', join(base, 'root'));
     }
     args.push('-p', argvPrompt(header, body));

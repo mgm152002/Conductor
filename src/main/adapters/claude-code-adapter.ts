@@ -27,6 +27,21 @@ const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 const APPROVAL_TIMEOUT_MS = 3_600_000;
 
+/** Keep Authorization values out of Claude's process arguments. */
+function claudeMcpAuth(server: NonNullable<GatedLive['data']['mcpServers']>[number]): { headers?: Record<string, string>; env: Record<string, string> } {
+  if (server.headers === undefined) return { env: {} };
+  const env: Record<string, string> = {};
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(server.headers)) {
+    if (name.toLowerCase() === 'authorization') {
+      const variable = `CONDUCTOR_MCP_AUTH_${server.key.toUpperCase()}`;
+      env[variable] = value;
+      headers[name] = `\${${variable}}`;
+    } else headers[name] = value;
+  }
+  return { headers, env };
+}
+
 /** What the user is asked for one Claude Code tool call. */
 export function claudeGateRequest(toolName: string, input: Json): GateRequest {
   const reason = str(input['description']);
@@ -69,7 +84,29 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
     // the gate accepts every request. With the toggle off the gate still
     // declines non-read tools because the run's mode is read_only.
     if (this.config.autoApprove?.() !== true && data.mode !== 'assisted_execution' && data.mode !== 'trusted_automation') {
-      return { args: ['-p', '--output-format', 'json', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', ...modelArgs], cwd: data.rootPath, stdin };
+      // Read-only runs still get the approved MCP servers: their tools are
+      // pre-allowed by name pattern (they act inside the user's approved
+      // server, not on local files), while built-in write tools stay off.
+      // This is what lets a casual chat use e.g. a video-generation server.
+      const mcpServers = data.mcpServers ?? [];
+      if (mcpServers.length === 0) {
+        return { args: ['-p', '--output-format', 'json', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', ...modelArgs], cwd: data.rootPath, stdin };
+      }
+      const config: Record<string, unknown> = {};
+      const mcpEnv: Record<string, string> = {};
+      for (const server of mcpServers) {
+        const auth = claudeMcpAuth(server);
+        Object.assign(mcpEnv, auth.env);
+        config[server.key] = server.url !== undefined
+          ? { type: 'http', url: server.url, timeout: APPROVAL_TIMEOUT_MS, ...(auth.headers !== undefined ? { headers: auth.headers } : {}) }
+          : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
+      }
+      const allowed = mcpServers.flatMap((server) => [`mcp__${server.key}__*`, `mcp__${server.key}`]);
+      return {
+        args: ['-p', '--output-format', 'json', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep',
+          '--mcp-config', JSON.stringify({ mcpServers: config }), '--allowedTools', ...allowed, ...modelArgs],
+        cwd: data.rootPath, stdin, env: mcpEnv,
+      };
     }
     const session = await this.bridge.open({
       permissionPrompt: async (args, signal) => {
@@ -88,11 +125,22 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
     // HTTP MCP requests time out after 60 s unless the server sets `timeout`
     // (https://code.claude.com/docs/en/env-vars, MCP_TOOL_TIMEOUT); the user
     // may take longer than that to answer.
-    const mcpConfig = { mcpServers: { [CLAUDE_APPROVAL_SERVER]: { type: 'http', url: `${session.baseUrl}/mcp`, timeout: APPROVAL_TIMEOUT_MS } } };
+    // Conductor's approval bridge plus every approved marketplace/manual MCP
+    // server, so Claude Code gets the same servers as the other CLIs.
+    const approved: Record<string, unknown> = {};
+    const mcpEnv: Record<string, string> = {};
+    for (const server of data.mcpServers ?? []) {
+      const auth = claudeMcpAuth(server);
+      Object.assign(mcpEnv, auth.env);
+      approved[server.key] = server.url !== undefined
+        ? { type: 'http', url: server.url, timeout: APPROVAL_TIMEOUT_MS, ...(auth.headers !== undefined ? { headers: auth.headers } : {}) }
+        : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
+    }
+    const mcpConfig = { mcpServers: { [CLAUDE_APPROVAL_SERVER]: { type: 'http', url: `${session.baseUrl}/mcp`, timeout: APPROVAL_TIMEOUT_MS }, ...approved } };
     return {
       args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
         '--mcp-config', JSON.stringify(mcpConfig), '--permission-prompt-tool', `mcp__${CLAUDE_APPROVAL_SERVER}__${PERMISSION_TOOL}`, ...modelArgs],
-      cwd: data.rootPath, stdin,
+      cwd: data.rootPath, stdin, env: mcpEnv,
     };
   }
 
