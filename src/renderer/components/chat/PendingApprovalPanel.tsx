@@ -4,6 +4,55 @@ import { useApprovalStore, useTaskStore } from '../../stores';
 import { Button, Switch } from '../ui/primitives';
 import { ShieldIcon } from '../ui/icons';
 
+/**
+ * Approval requests scoped to a casual chat thread. Chat agents call tools
+ * (including approved MCP servers like a video generator) through the same
+ * broker as Work, but chat threads are not Work tasks — without this panel
+ * those requests would wait unseen until they expire and the agent falls
+ * back to a text-only answer.
+ */
+export function ChatPendingApprovals({ threadId }: { threadId: string }): React.JSX.Element | null {
+  const allPending = useApprovalStore((s) => s.pending);
+  const pending = allPending.filter((request) => request.taskId === threadId);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (pending.length === 0 && error === null) return null;
+  const request = pending[0];
+  async function resolve(approvalId: string, decision: 'approved' | 'denied'): Promise<void> {
+    setBusyId(approvalId);
+    setError(null);
+    try {
+      await window.conductor.approval.resolve({ approvalId, decision });
+      useApprovalStore.getState().remove(approvalId);
+      useApprovalStore.getState().setPending(await window.conductor.approval.list());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update approval');
+    } finally { setBusyId(null); }
+  }
+  return (
+    <section aria-label="Approval requests" className="mb-2 w-full rounded-2xl border border-warning/30 bg-warning/6 px-3.5 py-3">
+      {request !== undefined ? (
+        <>
+          <div className="flex items-center gap-2 text-2xs text-muted-foreground">
+            <ShieldIcon size={13} className="text-warning" />
+            <span className="font-medium text-warning">Approval needed</span>
+            {pending.length > 1 ? <span className="ml-auto tabular-nums">1/{pending.length}</span> : null}
+          </div>
+          <p className="mt-1.5 text-[13px] text-foreground">{request.summary.split('\n')[0]}</p>
+          {request.summary.includes('\n') ? (
+            <pre className="mt-1.5 max-h-40 overflow-auto rounded-lg border border-border bg-code px-2.5 py-1.5 font-mono text-2xs whitespace-pre-wrap break-all text-foreground/90">{request.summary.split('\n').slice(1).join('\n')}</pre>
+          ) : null}
+          <div className="mt-2.5 flex gap-2">
+            <Button size="sm" variant="primary" disabled={busyId !== null} onClick={() => { void resolve(request.id, 'approved'); }}>{busyId === request.id ? 'Updating…' : 'Approve'}</Button>
+            <Button size="sm" variant="outline" disabled={busyId !== null} onClick={() => { void resolve(request.id, 'denied'); }}>Deny</Button>
+          </div>
+        </>
+      ) : null}
+      {error !== null ? <p role="alert" className="mt-2 text-xs text-destructive-foreground">{error}</p> : null}
+    </section>
+  );
+}
+
 // Pending approvals for the focused thread, attached above the composer like
 // T3 Code's pending-approval panel. Approving or denying round-trips through
 // the main process; the adapter is never invoked before an approval.

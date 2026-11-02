@@ -59,6 +59,14 @@ export class ToolApprovalBroker {
     return this.waiting.has(approvalId);
   }
 
+  /** Live tool-approval requests across every scope (Work tasks and chat
+   *  threads alike), so chat surfaces can show them too. */
+  pendingApprovals(): import('@shared/domain').ApprovalRequest[] {
+    return [...this.waiting.keys()]
+      .map((id) => this.permissions.getApproval(id))
+      .filter((a): a is import('@shared/domain').ApprovalRequest => a !== undefined && a.status === 'pending');
+  }
+
   /** Apply the user's decision. Returns false when the request is not a live tool call. */
   resolve(approvalId: string, decision: 'approved' | 'denied', remember = false): boolean {
     const waiter = this.waiting.get(approvalId);

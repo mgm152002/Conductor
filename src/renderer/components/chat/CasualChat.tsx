@@ -10,6 +10,7 @@ import { HandoffDivider } from './AgentMark';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PendingQuestionPanel } from './PendingQuestionPanel';
+import { ChatPendingApprovals } from './PendingApprovalPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { RenameChatDialog } from '../threads/RenameChatDialog';
 import { SpaceNameDialog } from '../threads/SpaceDialogs';
@@ -20,6 +21,8 @@ import { MenuSelect } from '../ui/MenuSelect';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
+import { hasArtifactBlock, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
+import { GeneratedArtifact } from './GeneratedArtifact';
 
 /** Project-free conversation: no plans, project context or task workflow. */
 export function CasualChat(): React.JSX.Element {
@@ -226,6 +229,14 @@ export function CasualChat(): React.JSX.Element {
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
+              {(() => {
+                // Fallback: the user asked for a file but this agent (any CLI)
+                // replied in plain text — Conductor still builds the file.
+                if (message.role !== 'assistant' || message.status !== 'complete' || message.content.trim() === '' || hasArtifactBlock(message.content)) return null;
+                const request = [...(conversation?.messages.slice(0, index) ?? [])].reverse().find((m) => m.role === 'user');
+                const kind = request !== undefined ? requestedArtifactKind(request.content) : null;
+                return kind !== null && request !== undefined ? <GeneratedArtifact spec={synthesizeSpec(kind, request.content, message.content)} /> : null;
+              })()}
               </div>
               );
             })}
@@ -243,6 +254,7 @@ export function CasualChat(): React.JSX.Element {
         {!agents.length ? <p className="mb-3 text-xs text-muted-foreground">Connect a local agent in <NavLink to="/connected-apps" className="underline">Connections</NavLink> to start chatting. No project is needed.</p> : null}
         <Mem0OfflineNotice />
         {selectedId !== null ? <PendingQuestionPanel scopeId={selectedId} /> : null}
+        {selectedId !== null ? <ChatPendingApprovals threadId={selectedId} /> : null}
         <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-border bg-card p-3 shadow-xs focus-within:border-ring/50">
           <label htmlFor="casual-message" className="sr-only">Message</label>
           <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} onKeyDown={(event) => {
