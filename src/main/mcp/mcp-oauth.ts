@@ -72,9 +72,14 @@ export class DeviceOAuthProvider implements McpOAuthProvider {
     } catch { return false; }
   }
 
+  private resolveClientId(): string {
+    const { clientId } = this.options;
+    return (typeof clientId === 'function' ? clientId() : clientId).trim();
+  }
+
   async start(server: OAuthServerRef): Promise<McpOAuthChallenge> {
     if (!this.supports(server.endpoint)) throw new McpOAuthError('unsupported', `${server.name} is not supported by the ${this.name} OAuth provider.`);
-    const clientId = (typeof this.options.clientId === 'function' ? this.options.clientId() : this.options.clientId).trim();
+    const clientId = this.resolveClientId();
     if (clientId === '') throw new McpOAuthError('not_configured', `${this.name} sign-in needs your own OAuth App client ID. Add it in Connected apps → MCP servers → ${this.name} sign-in.`);
 
     const body = new URLSearchParams({ client_id: clientId });
@@ -115,7 +120,7 @@ export class DeviceOAuthProvider implements McpOAuthProvider {
       await this.sleep(intervalMs);
       if (authorization.cancelled) break;
       const body = new URLSearchParams({
-        client_id: this.options.clientId.trim(), device_code: authorization.deviceCode,
+        client_id: this.resolveClientId(), device_code: authorization.deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       });
       let response: Response;
@@ -159,7 +164,7 @@ export class DeviceOAuthProvider implements McpOAuthProvider {
   async refresh(token: McpOAuthToken): Promise<McpOAuthToken> {
     if (token.refreshToken === undefined) throw new McpOAuthError('expired', `${this.name} sign-in expired. Sign in again.`);
     const body = new URLSearchParams({
-      client_id: this.options.clientId.trim(), grant_type: 'refresh_token', refresh_token: token.refreshToken,
+      client_id: this.resolveClientId(), grant_type: 'refresh_token', refresh_token: token.refreshToken,
     });
     let response: Response;
     try { response = await this.fetchFn(this.options.tokenEndpoint, { method: 'POST', headers: { accept: 'application/json' }, body }); }
