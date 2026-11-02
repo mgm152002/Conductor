@@ -10,6 +10,8 @@ copyright: Copyright © 2026 Conductor
 
 directories:
   output: release
+  # build/icon.png (1024x1024) is converted to the macOS .icns automatically.
+  buildResources: build
 
 # electron-vite emits main/preload/renderer into out/; production
 # dependencies from package.json are packed alongside it automatically.
