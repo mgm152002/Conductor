@@ -132,6 +132,16 @@ export class MemoryEngine {
     return (this.store.db.prepare('SELECT user_id FROM mem0_namespace WHERE id=1').get() as { user_id: string }).user_id;
   }
 
+  /** Check a url/key pair without saving it. */
+  testMem0(input: { url: string; apiKey: string }): Promise<{ ok: boolean; detail?: string }> {
+    return this.mem0.test(input);
+  }
+
+  /** Save and switch to a new Mem0 connection. */
+  configureMem0(input: { url: string; apiKey: string }): void {
+    this.mem0.configure(input);
+  }
+
   /** Whether the Mem0 service is reachable right now (never throws). */
   health(): Promise<{ reachable: boolean; detail?: string }> {
     return this.mem0.health();

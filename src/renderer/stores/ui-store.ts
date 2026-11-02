@@ -17,6 +17,9 @@ interface UiState {
   collapsedSpaces: Record<string, boolean>;
   toggleSpace: (id: string) => void;
   addProjectOpen: boolean;
+  /** First-run setup walkthrough. */
+  onboardingOpen: boolean;
+  setOnboardingOpen: (open: boolean) => void;
   /** Composer plan mode: a planner agent splits the message across agents. */
   planMode: boolean;
   notice: string | null;
@@ -39,6 +42,8 @@ export const useUiStore = create<UiState>((set) => ({
     set((state) => ({ collapsedSpaces: { ...state.collapsedSpaces, [id]: !state.collapsedSpaces[id] } }));
   },
   addProjectOpen: false,
+  onboardingOpen: false,
+  setOnboardingOpen: (onboardingOpen): void => { set({ onboardingOpen }); },
   planMode: false,
   notice: null,
   setNotice: (notice): void => { set({ notice }); },

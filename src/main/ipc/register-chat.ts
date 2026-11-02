@@ -18,6 +18,8 @@ export function registerChatHandlers(router: IpcRouter, chat: ChatService): void
   router.handle('chat.setThreadSpace', CHAT_SCHEMAS['chat.setThreadSpace'], (_event, { threadId, spaceId }) => chat.setThreadSpace(threadId, spaceId));
   router.handle('chat.setSpaceIcon', CHAT_SCHEMAS['chat.setSpaceIcon'], (_event, { spaceId, icon }) => chat.setSpaceIcon(spaceId, icon));
   router.handle('chat.mem0Health', CHAT_SCHEMAS['chat.mem0Health'], () => chat.mem0Health());
+  router.handle('chat.mem0Test', CHAT_SCHEMAS['chat.mem0Test'], (_event, input) => chat.mem0Test(input));
+  router.handle('chat.mem0Configure', CHAT_SCHEMAS['chat.mem0Configure'], (_event, input) => chat.mem0Configure(input));
 }
 
 export class IpcChatEventEmitter {

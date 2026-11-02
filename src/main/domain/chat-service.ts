@@ -511,6 +511,21 @@ export class ChatService {
     return thread;
   }
 
+  /** Verify a Mem0 url/key pair without saving it. */
+  async mem0Test(input: { url: string; apiKey: string }): Promise<{ ok: boolean; detail?: string }> {
+    if (this.memory === undefined) return { ok: false, detail: 'Memory context is not configured for chat.' };
+    return this.memory.testMem0(input);
+  }
+
+  /** Save a verified Mem0 connection and start using it. */
+  async mem0Configure(input: { url: string; apiKey: string }): Promise<Mem0Health> {
+    if (this.memory === undefined) throw new Error('Memory context is not configured for chat.');
+    const check = await this.memory.testMem0(input);
+    if (!check.ok) throw new Error(check.detail ?? 'Could not verify the Mem0 connection.');
+    this.memory.configureMem0(input);
+    return this.mem0Health();
+  }
+
   /** Whether the Mem0 context service is reachable right now. */
   async mem0Health(): Promise<Mem0Health> {
     const checkedAt = new Date().toISOString();

@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 /** Self-hosted Mem0 REST API. No alternate retrieval implementation. */
 export interface Mem0Memory {
@@ -18,12 +19,14 @@ export class Mem0Error extends Error {
 }
 
 export class Mem0Client {
-  private readonly baseUrl: string;
-  private readonly apiKey: string | undefined;
+  private baseUrl: string;
+  private apiKey: string | undefined;
+  private readonly connectionFile: string | undefined;
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
 
   constructor(options: { url?: string; apiKey?: string; connectionFile?: string; fetch?: typeof fetch; timeoutMs?: number } = {}) {
+    this.connectionFile = options.connectionFile;
     let saved: { url?: string; apiKey?: string } = {};
     if (options.connectionFile !== undefined) {
       try {
@@ -42,6 +45,49 @@ export class Mem0Client {
       ?? (this.baseUrl === saved.url?.replace(/\/+$/, '') ? saved.apiKey : undefined);
     this.fetcher = options.fetch ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+  }
+
+  /** Validate a Mem0 base URL (http/https, no credentials/query/fragment) and strip trailing slashes. */
+  static normalizeUrl(raw: string): string {
+    const trimmed = raw.trim().replace(/\/+$/, '');
+    let url: URL;
+    try { url = new URL(trimmed); } catch { throw new Mem0Error('Enter a valid URL, for example http://127.0.0.1:8000'); }
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Mem0Error('Invalid Mem0 URL');
+    return trimmed;
+  }
+
+  /**
+   * Check a url/key pair without saving it: the service must answer /health,
+   * and the key must be accepted by an authenticated read. Never throws.
+   */
+  async test(input: { url: string; apiKey: string }): Promise<{ ok: boolean; detail?: string }> {
+    let base: string;
+    try { base = Mem0Client.normalizeUrl(input.url); } catch (error) { return { ok: false, detail: (error as Error).message }; }
+    try {
+      const health = await this.fetcher(`${base}/health`, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(Math.min(this.timeoutMs, 5_000)) });
+      if (!health.ok) return { ok: false, detail: `Mem0 responded with HTTP ${health.status}.` };
+    } catch { return { ok: false, detail: 'Mem0 is unreachable. Check the URL and that the service is running.' }; }
+    try {
+      const auth = await this.fetcher(`${base}/memories?${new URLSearchParams({ user_id: 'conductor-setup-check', top_k: '1' })}`, {
+        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(Math.min(this.timeoutMs, 5_000)),
+        headers: { 'X-API-Key': input.apiKey },
+      });
+      if (auth.status === 401 || auth.status === 403) return { ok: false, detail: 'Mem0 rejected the API key.' };
+    } catch { return { ok: false, detail: 'Mem0 became unreachable while checking the API key.' }; }
+    return { ok: true };
+  }
+
+  /** Persist a new connection (0600) and use it immediately. */
+  configure(input: { url: string; apiKey: string }): void {
+    if (this.connectionFile === undefined) throw new Mem0Error('This Mem0 client has no connection file to save to');
+    const url = Mem0Client.normalizeUrl(input.url);
+    const apiKey = input.apiKey.trim();
+    if (apiKey === '') throw new Mem0Error('Enter the Mem0 API key');
+    mkdirSync(dirname(this.connectionFile), { recursive: true, mode: 0o700 });
+    writeFileSync(this.connectionFile, `${JSON.stringify({ url, apiKey })}\n`, { mode: 0o600 });
+    chmodSync(this.connectionFile, 0o600);
+    this.baseUrl = url;
+    this.apiKey = apiKey;
   }
 
   private async request(path: string, method = 'GET', body?: unknown): Promise<unknown> {

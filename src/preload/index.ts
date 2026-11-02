@@ -152,6 +152,8 @@ const chat: ChatBridge = {
   setThreadSpace: (threadId, spaceId) => invoke('chat.setThreadSpace', { threadId, spaceId }),
   setSpaceIcon: (spaceId, icon) => invoke('chat.setSpaceIcon', { spaceId, icon }),
   mem0Health: () => invoke('chat.mem0Health'),
+  mem0Test: (input) => invoke('chat.mem0Test', input),
+  mem0Configure: (input) => invoke('chat.mem0Configure', input),
 };
 
 const icon: IconBridge = {

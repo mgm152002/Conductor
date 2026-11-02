@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { AddProjectDialog } from './projects/AddProjectDialog';
+import { OnboardingWalkthrough } from './onboarding/OnboardingWalkthrough';
 import { Alert, Button } from './ui/primitives';
 import { useSystemAppearance } from '../hooks/useSystemAppearance';
 import { useTaskEvents } from '../hooks/useTaskEvents';
@@ -56,6 +57,7 @@ export function AppLayout(): React.JSX.Element {
         </div>
       </main>
       <AddProjectDialog />
+      <OnboardingWalkthrough />
     </div>
   );
 }

@@ -99,6 +99,12 @@ export const ChatSendRequest = z.object({
 
 export type ChatSendInput = z.infer<typeof ChatSendRequest>;
 
+/** A Mem0 service address and API key (the key is write-only: never returned). */
+export const Mem0ConnectionInput = z.object({
+  url: z.string().trim().min(1).max(2048),
+  apiKey: z.string().trim().min(1).max(512),
+}).strict();
+
 /** Whether the Mem0 memory service is reachable, for a renderer status badge. */
 export interface Mem0Health {
   reachable: boolean;
@@ -128,6 +134,8 @@ export const CHAT_SCHEMAS = {
   'chat.setSpaceIcon': z.object({ spaceId: z.string().uuid(), icon: IconDataUrl.nullable() }).strict(),
   'chat.setThreadSpace': z.object({ threadId: z.string().uuid(), spaceId: z.string().uuid().nullable() }).strict(),
   'chat.mem0Health': z.void(),
+  'chat.mem0Test': Mem0ConnectionInput,
+  'chat.mem0Configure': Mem0ConnectionInput,
 } as const;
 
 export interface ChatBridge {
@@ -150,4 +158,8 @@ export interface ChatBridge {
   setThreadSpace(threadId: string, spaceId: string | null): Promise<ChatThread>;
   /** Check whether the Mem0 context service is reachable right now. */
   mem0Health(): Promise<Mem0Health>;
+  /** Verify a Mem0 URL + API key without saving them. */
+  mem0Test(input: { url: string; apiKey: string }): Promise<{ ok: boolean; detail?: string }>;
+  /** Verify, save and switch to a Mem0 connection; resolves to the new health. */
+  mem0Configure(input: { url: string; apiKey: string }): Promise<Mem0Health>;
 }
