@@ -12,7 +12,7 @@ import { Alert, Button } from '../ui/primitives';
 import { FolderIcon, PlusIcon } from '../ui/icons';
 import { ArtifactRow } from '../workspace/ArtifactsRegion';
 import { requestsArtifact } from '../../lib/artifacts';
-import { hasArtifactBlock, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
+import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
 import { GeneratedArtifact } from './GeneratedArtifact';
 import { ChatHeader } from './ChatHeader';
 import { Composer } from './Composer';
@@ -121,12 +121,12 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
   // A generated file is already in the chat when the agent emitted an
   // artifact block, or when the fallback below builds one from plain text.
   // The backend's stored output copy ("Document") would only duplicate it.
-  const generatedInChat = !live && replyText !== '' && (hasArtifactBlock(replyText) || requestedKind !== null);
+  const generatedInChat = !live && replyText !== '' && (hasArtifactBlock(replyText) || (requestedKind !== null && !hasDeliveredFileLink(replyText)));
   return (
     <section aria-label={`Message: ${task.objective.slice(0, 60)}`} className="group/turn flex flex-col gap-5">
       {error !== null ? <Alert action={<Button size="xs" variant="ghost" onClick={refresh}>Retry details</Button>}>{error}</Alert> : null}
       <MessagesTimeline items={items} live={live} />
-      {!live && replyText !== '' && requestedKind !== null && !hasArtifactBlock(replyText)
+      {!live && replyText !== '' && requestedKind !== null && !hasArtifactBlock(replyText) && !hasDeliveredFileLink(replyText)
         ? <GeneratedArtifact spec={synthesizeSpec(requestedKind, task.objective, replyText)} />
         : null}
       {details !== null && details.artifacts.length > 0 && requestsArtifact(task.objective) && !generatedInChat ? (

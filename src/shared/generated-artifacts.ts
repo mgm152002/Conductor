@@ -240,6 +240,12 @@ export function hasArtifactBlock(text: string): boolean {
   return text.includes('```artifact');
 }
 
+/** The agent already produced the file itself (e.g. via an MCP tool) and linked to it. */
+export function hasDeliveredFileLink(text: string): boolean {
+  return /\]\(https?:\/\/[^)\s]+\)|https?:\/\/\S+\.(?:pptx?|pdf|docx?|xlsx?|mp4|webm|mov)\b/i.test(text)
+    && /download|\.(?:pptx?|pdf|docx?|xlsx?|mp4|webm|mov)\b/i.test(text);
+}
+
 export type GeneratedArtifactSpecInput = z.infer<typeof GeneratedArtifactSpecSchema>;
 
 type SpecSlideInput = NonNullable<GeneratedArtifactSpecInput['slides']>[number];

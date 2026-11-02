@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isApplicationUrl } from './navigation-policy';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import { bootstrap, type AppServices } from './bootstrap';
 import { registerThemeRelay } from './ipc/theme';
 
@@ -35,9 +35,12 @@ function createMainWindow(): BrowserWindow {
   });
 
   const applicationUrl = RENDERER_DEV_URL ?? pathToFileURL(join(__dirname, '../renderer/index.html')).href;
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const openInBrowser = (url: string): void => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  };
+  window.webContents.setWindowOpenHandler(({ url }) => { openInBrowser(url); return { action: 'deny' }; });
   window.webContents.on('will-navigate', (event, url) => {
-    if (!isApplicationUrl(url, applicationUrl)) event.preventDefault();
+    if (!isApplicationUrl(url, applicationUrl)) { event.preventDefault(); openInBrowser(url); }
   });
 
   if (RENDERER_DEV_URL !== undefined) {

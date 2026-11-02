@@ -21,7 +21,7 @@ import { MenuSelect } from '../ui/MenuSelect';
 import { AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
-import { hasArtifactBlock, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
+import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
 import { GeneratedArtifact } from './GeneratedArtifact';
 
 /** Project-free conversation: no plans, project context or task workflow. */
@@ -232,7 +232,7 @@ export function CasualChat(): React.JSX.Element {
               {(() => {
                 // Fallback: the user asked for a file but this agent (any CLI)
                 // replied in plain text — Conductor still builds the file.
-                if (message.role !== 'assistant' || message.status !== 'complete' || message.content.trim() === '' || hasArtifactBlock(message.content)) return null;
+                if (message.role !== 'assistant' || message.status !== 'complete' || message.content.trim() === '' || hasArtifactBlock(message.content) || hasDeliveredFileLink(message.content)) return null;
                 const request = [...(conversation?.messages.slice(0, index) ?? [])].reverse().find((m) => m.role === 'user');
                 const kind = request !== undefined ? requestedArtifactKind(request.content) : null;
                 return kind !== null && request !== undefined ? <GeneratedArtifact spec={synthesizeSpec(kind, request.content, message.content)} /> : null;

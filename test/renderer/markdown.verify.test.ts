@@ -49,7 +49,9 @@ it('renders GFM structures', () => {
   expect(html).toContain('overflow-x-auto');
   expect(html).toContain('<pre');
   expect(html).toContain('language-ts');
-  expect(html).not.toContain('<a ');
+  // http(s) links open in the system browser (never in-app); other schemes stay inert.
+  expect(html).toContain('<a href="https://example.com" target="_blank" rel="noopener noreferrer"');
+  expect(renderToStaticMarkup(createElement(Markdown, { text: "[x](javascript:alert(1)) [y](file:///etc/passwd)" }))).not.toContain('<a ');
 });
 
 it('does not render raw HTML', () => {

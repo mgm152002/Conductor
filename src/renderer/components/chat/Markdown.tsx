@@ -148,18 +148,15 @@ const components: Components = {
     return <input type={type} checked={checked} disabled={disabled} className={className} {...props} />;
   },
   // Links are kept completely inert so renderer navigation remains locked to the app.
-  a: ({ node: _node, href, title, children, className, ...props }) => (
-    <span
-      className={cn(
-        'text-primary underline decoration-primary/40 underline-offset-2 break-all',
-        className,
-      )}
-      title={href || title}
-      {...props}
-    >
-      {children}
-    </span>
-  ),
+  // Only http(s) links are clickable; the main process opens them in the
+  // system browser (window-open handler), never inside the app window.
+  a: ({ node: _node, href, title, children, className, ...props }) => {
+    const linkClass = cn('text-primary underline decoration-primary/40 underline-offset-2 break-all', className);
+    if (href !== undefined && /^https?:\/\//i.test(href)) {
+      return <a href={href} target="_blank" rel="noopener noreferrer" className={cn(linkClass, 'cursor-pointer hover:decoration-primary')} title={href || title} {...props}>{children}</a>;
+    }
+    return <span className={linkClass} title={href || title} {...props}>{children}</span>;
+  },
   pre: ({ node, children, className, ...props }) => {
     let lang = '';
     if (node && 'children' in node && Array.isArray(node.children)) {
