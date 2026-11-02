@@ -22,7 +22,7 @@ export function ArtifactRow({ taskId, artifact }: { taskId: string; artifact: Ar
     finally { setLoading(false); }
   }
   return (
-    <li className="bar-card">
+    <li className="rounded-lg border border-border bg-transparent">
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
           <FileTextIcon size={17} />

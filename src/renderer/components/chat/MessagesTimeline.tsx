@@ -7,10 +7,10 @@ import { cn } from '../../lib/cn';
 // markdown when the chunk arrives (and it is cached for the session).
 const Markdown = lazy(() => import('./Markdown').then((m) => ({ default: m.Markdown })));
 
-function MarkdownText({ text }: { text: string }): React.JSX.Element {
+function MarkdownText({ text, live = false }: { text: string; live?: boolean }): React.JSX.Element {
   return (
     <Suspense fallback={<p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{text}</p>}>
-      <Markdown text={text} />
+      <Markdown text={text} live={live} />
     </Suspense>
   );
 }
@@ -162,7 +162,7 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
           ) : null}
           {item.kind === 'assistant' ? (
             <div className="px-1">
-              <MarkdownText text={item.text} />
+              <MarkdownText text={item.text} live={live && index === items.length - 1} />
               {live && index === items.length - 1 ? <span aria-hidden="true" className="animate-status-pulse ml-0.5 inline-block h-3.5 w-[7px] translate-y-0.5 rounded-[2px] bg-primary/70" /> : null}
             </div>
           ) : null}

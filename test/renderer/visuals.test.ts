@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildVisualSrcDoc, sanitizeVisualHtml, splitVisualBlocks, visualAspectRatio } from '../../src/renderer/lib/visuals';
+import { buildVisualSrcDoc, normalizeSvgForImage, sanitizeVisualHtml, splitVideoUrls, splitVisualBlocks, visualAspectRatio } from '../../src/renderer/lib/visuals';
 
 describe('splitVisualBlocks', () => {
   it('keeps plain markdown as one segment', () => {
@@ -48,6 +48,42 @@ describe('sanitizeVisualHtml', () => {
     expect(clean).not.toContain('javascript:');
     expect(clean).not.toContain('evil.example');
     expect(clean).toContain('<svg>');
+  });
+});
+
+describe('normalizeSvgForImage', () => {
+  it('repairs bare ampersands, adds a namespace, and sizes from the viewBox', () => {
+    const svg = normalizeSvgForImage('<div>wrap</div><svg viewBox="0 0 800 400"><text>Fish & Chips</text></svg>');
+    expect(svg).not.toBeNull();
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(svg).toContain('width="800"');
+    expect(svg).toContain('height="400"');
+    expect(svg).toContain('Fish &amp; Chips');
+    expect(svg).not.toContain('<div>');
+  });
+
+  it('converts HTML named entities and stray "<" that are invalid in XML', () => {
+    const svg = normalizeSvgForImage('<svg viewBox="0 0 100 50"><text>a&nbsp;b &copy; x < y</text><br></svg>');
+    expect(svg).toContain('a&#160;b');
+    expect(svg).toContain('&#169;');
+    expect(svg).toContain('x &lt; y');
+    expect(svg).not.toContain('&nbsp;');
+  });
+
+  it('keeps valid entities and returns null without an SVG', () => {
+    expect(normalizeSvgForImage('<svg width="10" height="10"><text>a &amp; b</text></svg>')).toContain('a &amp; b');
+    expect(normalizeSvgForImage('<p>no diagram</p>')).toBeNull();
+  });
+});
+
+describe('splitVideoUrls', () => {
+  it('turns direct video file URLs into player segments', () => {
+    expect(splitVideoUrls('Done: https://cdn.example.com/clip.mp4?sig=1 enjoy')).toEqual([
+      { type: 'text', text: 'Done: ' },
+      { type: 'video', url: 'https://cdn.example.com/clip.mp4?sig=1' },
+      { type: 'text', text: ' enjoy' },
+    ]);
+    expect(splitVideoUrls('no video here')).toEqual([{ type: 'text', text: 'no video here' }]);
   });
 });
 

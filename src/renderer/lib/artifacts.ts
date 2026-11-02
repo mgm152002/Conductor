@@ -5,10 +5,10 @@
 // deliverable: a named file, something "as a document/file/attachment",
 // or a create/write/generate verb aimed at a document-like noun.
 
-const FILE_NAME = /\b[\w][\w.-]*\.(?:md|markdown|txt|rtf|pdf|docx?|odt|csv|tsv|json|ya?ml|html?|xml|pptx?|xlsx?)\b/i;
-const AS_DELIVERABLE = /\bas an? (?:document|doc|file|attachment|artifact|report)\b/i;
+const FILE_NAME = /\b[\w][\w.-]*\.(?:md|markdown|txt|rtf|pdf|docx?|odt|csv|tsv|json|ya?ml|html?|xml|pptx?|xlsx?|mp4|webm|mov)\b/i;
+const AS_DELIVERABLE = /\bas an? (?:document|doc|file|attachment|artifact|report|video|presentation)\b/i;
 const CREATE_VERB = /\b(?:create|write|generate|produce|make|draft|prepare|export|save|attach|give|send|return|output|compile|build)\b/i;
-const DELIVERABLE = /\b(?:artifact|document|doc|report|memo|file|attachment|summary file|markdown|pdf|spreadsheet|slide deck|presentation)\b/i;
+const DELIVERABLE = /\b(?:artifact|document|doc|report|memo|file|attachment|summary file|markdown|pdf|spreadsheet|slide deck|presentation|video|movie|clip)\b/i;
 
 export function requestsArtifact(objective: string): boolean {
   if (FILE_NAME.test(objective)) return true;

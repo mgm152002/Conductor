@@ -3,9 +3,11 @@ import type { Element } from 'hast';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../lib/cn';
-import { splitVisualBlocks } from '../../lib/visuals';
+import { splitVideoUrls, splitVisualBlocks } from '../../lib/visuals';
+import { splitArtifactBlocks } from '@shared/generated-artifacts';
 import { HtmlVisual } from './HtmlVisual';
 import { MermaidDiagram } from './MermaidDiagram';
+import { GeneratedArtifact } from './GeneratedArtifact';
 
 /** Context to signal whether inline code is inside a `<pre>` code block. */
 const InPreContext = createContext(false);
@@ -275,6 +277,9 @@ export interface MarkdownProps {
   children?: ReactNode;
   /** Optional class names applied to the outer container. */
   className?: string;
+  /** True while this text is still streaming in; finished text treats an
+   *  unclosed artifact block as complete so its file still gets generated. */
+  live?: boolean;
 }
 
 /**
@@ -283,29 +288,67 @@ export interface MarkdownProps {
  * renderer navigation remains locked to the app. Tables support horizontal
  * scrolling when wide. Usable for streaming assistant replies and attachment previews.
  */
-export function Markdown({ text, children, className }: MarkdownProps): React.JSX.Element {
+export function Markdown({ text, children, className, live = false }: MarkdownProps): React.JSX.Element {
   const content = typeof text === 'string' ? text : typeof children === 'string' ? children : '';
-  // ```html blocks (diagrams/charts the user asked for) become live visuals
-  // and ```mermaid blocks become rendered diagrams; the prose around them
-  // stays markdown.
-  const segments = splitVisualBlocks(content);
+  // ```html blocks (diagrams/charts the user asked for) become live visuals,
+  // ```mermaid blocks become rendered diagrams, and ```artifact blocks
+  // become real downloadable files (video plays inline); the prose around
+  // them stays markdown.
+  const artifactSegments = splitArtifactBlocks(content);
+  // Visuals the agent drew as separate chat blocks belong in the file too
+  // when the user asked for them there: if the artifact spec carries no
+  // diagram of its own, attach the reply's visuals to it.
+  const replyVisuals = splitVisualBlocks(content)
+    .filter((s) => s.type === 'html')
+    .map((s) => /<svg[\s\S]*?<\/svg>/i.exec(s.code)?.[0])
+    .filter((svg): svg is string => svg !== undefined);
+  const specHasVisual = (spec: (typeof artifactSegments)[number]): boolean =>
+    spec.type === 'artifact' && spec.spec !== null
+    && ((spec.spec.slides ?? []).some((s) => s.svg !== undefined) || /```(?:svg|html|visual)/.test(spec.spec.content ?? ''));
+  const attachVisuals = (segment: (typeof artifactSegments)[number]): typeof segment => {
+    if (segment.type !== 'artifact' || segment.spec === null || replyVisuals.length === 0 || specHasVisual(segment)) return segment;
+    const spec = segment.spec;
+    if (spec.kind === 'presentation' || spec.kind === 'video') {
+      let next = 0;
+      const slides = (spec.slides ?? []).map((slide) => {
+        if (slide.svg !== undefined || next >= replyVisuals.length) return slide;
+        const svg = replyVisuals[next]!;
+        next += 1;
+        return { ...slide, svg };
+      });
+      return { ...segment, spec: { ...spec, slides } };
+    }
+    return { ...segment, spec: { ...spec, content: `${spec.content ?? ''}\n${replyVisuals.map((svg) => `\`\`\`svg\n${svg}\n\`\`\``).join('\n')}` } };
+  };
 
   return (
     <div className={cn('flex flex-col gap-3 text-sm leading-relaxed break-words text-foreground', className)}>
-      {segments.map((segment, index) => segment.type === 'html'
-        ? <HtmlVisual key={index} code={segment.code} complete={segment.complete} />
-        : segment.type === 'mermaid'
-          ? <MermaidDiagram key={index} code={segment.code} complete={segment.complete} />
-          : (
-          <ReactMarkdown
-            key={index}
-            remarkPlugins={[remarkGfm]}
-            skipHtml={true}
-            components={components}
-          >
-            {segment.text}
-          </ReactMarkdown>
-        ))}
+      {artifactSegments.map((segment, index) => {
+        if (segment.type === 'artifact') {
+          const attached = attachVisuals(segment);
+          return <GeneratedArtifact key={index} spec={attached.type === 'artifact' ? attached.spec : null} complete={segment.complete || !live} />;
+        }
+        return splitVisualBlocks(segment.text).map((visual, visualIndex) => visual.type === 'html'
+          ? <HtmlVisual key={`${index}:${visualIndex}`} code={visual.code} complete={visual.complete} />
+          : visual.type === 'mermaid'
+            ? <MermaidDiagram key={`${index}:${visualIndex}`} code={visual.code} complete={visual.complete} />
+            : splitVideoUrls(visual.text).map((part, partIndex) => part.type === 'video'
+              ? (
+                <figure key={`${index}:${visualIndex}:${partIndex}`} className="my-1 bg-transparent" aria-label="Video result">
+                  <video controls preload="metadata" src={part.url} className="aspect-video w-full rounded-lg border border-border bg-black" />
+                </figure>
+              )
+              : (
+                <ReactMarkdown
+                  key={`${index}:${visualIndex}:${partIndex}`}
+                  remarkPlugins={[remarkGfm]}
+                  skipHtml={true}
+                  components={components}
+                >
+                  {part.text}
+                </ReactMarkdown>
+              )));
+      })}
     </div>
   );
 }

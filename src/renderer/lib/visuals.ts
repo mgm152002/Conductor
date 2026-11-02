@@ -10,7 +10,7 @@ export type VisualSegment =
   | { type: 'html'; code: string; complete: boolean }
   | { type: 'mermaid'; code: string; complete: boolean };
 
-const FENCE = /```(html|visual|diagram|mermaid)[^\S\r\n]*\r?\n([\s\S]*?)(?:```|$)/g;
+const FENCE = /```(html|visual|diagram|mermaid|svg)[^\S\r\n]*\r?\n([\s\S]*?)(?:```|$)/g;
 
 export function splitVisualBlocks(text: string): VisualSegment[] {
   const segments: VisualSegment[] = [];
@@ -97,6 +97,75 @@ export function buildVisualSrcDoc(code: string, dark: boolean): string {
     body { color: ${foreground}; }
     ${ASSEMBLY_CSS}
   </style></head><body><div class="cv-root">${fragment}</div></body></html>`;
+}
+
+/**
+ * Make an agent-supplied SVG loadable as an <img> (for rasterizing into
+ * documents): extract the <svg> element, sanitize it, repair bare `&`,
+ * ensure a namespace, and give it explicit dimensions — an SVG with only
+ * a viewBox and malformed entities is the usual "could not render" cause.
+ * Returns null when the fragment contains no SVG at all.
+ */
+export function normalizeSvgForImage(fragment: string): string | null {
+  const match = /<svg[\s\S]*?<\/svg>/i.exec(fragment);
+  const raw = match !== null ? match[0] : fragment.trim().startsWith('<svg') ? fragment.trim() : null;
+  if (raw === null) return null;
+  // HTML named entities (&nbsp;, &copy;, …) are undefined in XML and make
+  // the whole SVG unloadable as an image; convert the common ones to
+  // numeric form and escape any others, plus stray "<" and void elements.
+  const NAMED_ENTITIES: Record<string, number> = {
+    nbsp: 160, copy: 169, reg: 174, trade: 8482, hellip: 8230, mdash: 8212, ndash: 8211,
+    lsquo: 8216, rsquo: 8217, ldquo: 8220, rdquo: 8221, bull: 8226, middot: 183,
+    laquo: 171, raquo: 187, deg: 176, plusmn: 177, times: 215, divide: 247,
+    ne: 8800, le: 8804, ge: 8805, rarr: 8594, larr: 8592, uarr: 8593, darr: 8595,
+    infin: 8734, sum: 8721, prod: 8719, minus: 8722, lowast: 8727, radic: 8730, prop: 8733,
+    alpha: 945, beta: 946, gamma: 947, delta: 948, epsilon: 949, zeta: 950, eta: 951, theta: 952,
+    lambda: 955, mu: 956, pi: 960, sigma: 963, tau: 964, phi: 966, omega: 969,
+  };
+  let svg = sanitizeVisualHtml(raw)
+    .replace(/&(\w+);/g, (whole, name: string) => {
+      if (['amp', 'lt', 'gt', 'quot', 'apos'].includes(name)) return whole;
+      const code = NAMED_ENTITIES[name];
+      return code !== undefined ? `&#${code};` : `&amp;${name};`;
+    })
+    .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-fA-F]+);)/g, '&amp;')
+    .replace(/<(?![a-zA-Z/!?])/g, '&lt;')
+    .replace(/<(br|hr|img|input|link|meta)([^>]*[^/])>/g, '<$1$2/>');
+  if (!/xmlns\s*=/.test(svg)) svg = svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  const viewBox = /viewBox\s*=\s*"([\d.\s-]+)"/i.exec(svg)?.[1]?.trim().split(/\s+/).map(Number);
+  const hasWidth = /\swidth\s*=/.test(svg);
+  const hasHeight = /\sheight\s*=/.test(svg);
+  if (!hasWidth || !hasHeight) {
+    const width = viewBox !== undefined && viewBox.length === 4 && viewBox[2]! > 0 ? Math.round(viewBox[2]!) : 1200;
+    const height = viewBox !== undefined && viewBox.length === 4 && viewBox[3]! > 0 ? Math.round(viewBox[3]!) : 800;
+    svg = svg.replace('<svg', `<svg${hasWidth ? '' : ` width="${width}"`}${hasHeight ? '' : ` height="${height}"`}`);
+  }
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+      if (doc.querySelector('parsererror') === null) return new XMLSerializer().serializeToString(doc.documentElement);
+    } catch { /* fall through to the repaired text */ }
+  }
+  return svg;
+}
+
+export type VideoUrlSegment = { type: 'text'; text: string } | { type: 'video'; url: string };
+
+const VIDEO_URL = /(https?:\/\/[^\s<>()'"\]]+?\.(?:mp4|webm|mov)(?:\?[^\s<>()'"\]]*)?)/gi;
+
+/** Direct video-file URLs in a reply (e.g. a generation MCP tool's result)
+ *  become inline players instead of inert link text. */
+export function splitVideoUrls(text: string): VideoUrlSegment[] {
+  const segments: VideoUrlSegment[] = [];
+  let last = 0;
+  for (const match of text.matchAll(VIDEO_URL)) {
+    const at = match.index ?? 0;
+    if (at > last) segments.push({ type: 'text', text: text.slice(last, at) });
+    segments.push({ type: 'video', url: match[1]! });
+    last = at + match[0].length;
+  }
+  if (last < text.length) segments.push({ type: 'text', text: text.slice(last) });
+  return segments.filter((s) => s.type !== 'text' || s.text !== '');
 }
 
 /** Aspect ratio from the fragment's first SVG viewBox, if it has one. */
