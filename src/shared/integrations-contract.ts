@@ -33,8 +33,8 @@ export const INTEGRATION_SCHEMAS = {
   'mcp.oauth.start': z.object({ id }),
   'mcp.oauth.complete': z.object({ id }),
   'mcp.oauth.cancel': z.object({ id }),
-  'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), value: z.string().min(1).max(65536) }),
-  'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/) }),
+  'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/), value: z.string().min(1).max(65536) }),
+  'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/) }),
 
   'remote.list': z.void(),
   'remote.add': z.object({
