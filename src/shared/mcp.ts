@@ -248,3 +248,8 @@ export interface McpTransport {
     signal: AbortSignal,
   ): Promise<unknown>;
 }
+
+/** Global preference holding the user's own GitHub OAuth App client ID (public, not a secret). */
+export const GITHUB_OAUTH_CLIENT_ID_KEY = 'mcp.github.oauthClientId';
+/** GitHub client IDs look like `Ov23li…` or `Iv1.…`. */
+export const GITHUB_CLIENT_ID_PATTERN = /^[A-Za-z0-9._-]{8,64}$/;

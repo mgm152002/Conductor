@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { MenuSelect } from '../ui/MenuSelect';
+import { GITHUB_CLIENT_ID_PATTERN, GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
 import type { McpDiscoveryEntry, McpInvocationResult, McpOAuthChallenge, McpServer } from '@shared/mcp';
 import type { McpMarketplaceEntry, McpMarketplaceIcon } from '@shared/mcp-marketplace';
 import { relativeTime } from '../../lib/time';
@@ -199,6 +200,14 @@ export function McpServers(): React.JSX.Element {
   const [approveKeys, setApproveKeys] = useState<Record<string, string>>({});
   const [oauth, setOauth] = useState<McpOAuthChallenge | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  const [githubOpen, setGithubOpen] = useState(false);
+  const [githubClientId, setGithubClientId] = useState('');
+  const [githubSaved, setGithubSaved] = useState('');
+  useEffect(() => {
+    void window.conductor.settings.get(GITHUB_OAUTH_CLIENT_ID_KEY).then((value) => {
+      if (typeof value === 'string') { setGithubSaved(value); setGithubClientId(value); }
+    }).catch(() => undefined);
+  }, []);
   const oauthRef = useRef<McpOAuthChallenge | null>(null);
   useEffect(() => { oauthRef.current = oauth; }, [oauth]);
   useEffect(() => () => {
@@ -261,11 +270,17 @@ export function McpServers(): React.JSX.Element {
           <p className="mt-0.5 text-xs text-muted-foreground">Approved servers are exposed to every agent — Codex, Claude Code, OpenCode, Kiro and Antigravity — in Work and Chat.</p>
         </div>
         <div className="flex gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => { setGithubOpen(true); }} title={githubSaved === '' ? 'Add your GitHub OAuth App client ID' : 'GitHub sign-in is configured'}>GitHub sign-in{githubSaved === '' ? '' : ' ✓'}</Button>
           <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void act('discover', async () => { setDiscovered(await window.conductor.mcp.discover()); }); }}><SearchIcon size={13} />Find installed</Button>
           <Button size="sm" variant="primary" onClick={() => { setName(''); setEndpoint(''); setAdding(true); }}><PlusIcon size={13} />Add server</Button>
         </div>
       </header>
-      {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
+      {error !== null ? (
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-xs text-destructive-foreground">
+          <span>{error}</span>
+          {/OAuth App client ID/i.test(error) ? <Button size="xs" variant="outline" onClick={() => { setGithubOpen(true); }}>Set GitHub client ID</Button> : null}
+        </p>
+      ) : null}
       <Marketplace servers={servers} busy={busy} onInstall={(entry) => { void install(entry); }} />
       {discovered !== null ? (
         <div className="rounded-xl border border-border p-3">
@@ -338,6 +353,35 @@ export function McpServers(): React.JSX.Element {
           </div>
           <div className="mt-2 flex justify-end gap-2"><Button size="md" variant="ghost" onClick={() => { setAdding(false); }}>Cancel</Button><Button size="md" variant="primary" type="submit" disabled={busy !== null || !name.trim() || !endpoint.trim()}>Add</Button></div>
         </form>
+      </Dialog>
+      <Dialog
+        open={githubOpen}
+        onClose={() => { setGithubOpen(false); setGithubClientId(githubSaved); }}
+        title="GitHub sign-in"
+        description="Conductor signs in to GitHub with your own OAuth App, so tokens and rate limits belong to you. Nothing is shared with the Conductor authors."
+        footer={<>
+          {githubSaved !== '' ? <Button size="md" variant="ghost" onClick={() => {
+            void act('github-clear', async () => { await window.conductor.settings.set({ key: GITHUB_OAUTH_CLIENT_ID_KEY, value: '', scope: 'global' }); setGithubSaved(''); setGithubClientId(''); setGithubOpen(false); });
+          }}>Remove</Button> : null}
+          <span className="flex-1" />
+          <Button size="md" variant="ghost" onClick={() => { setGithubOpen(false); setGithubClientId(githubSaved); }}>Cancel</Button>
+          <Button size="md" variant="primary" disabled={!GITHUB_CLIENT_ID_PATTERN.test(githubClientId.trim())} onClick={() => {
+            const value = githubClientId.trim();
+            void act('github-save', async () => { await window.conductor.settings.set({ key: GITHUB_OAUTH_CLIENT_ID_KEY, value, scope: 'global' }); setGithubSaved(value); setGithubOpen(false); });
+          }}>Save</Button>
+        </>}
+      >
+        <div className="flex flex-col gap-3 text-xs">
+          <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+            <li>Open <a href="https://github.com/settings/applications/new" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">github.com/settings/applications/new</a> and register an OAuth App (any name; the homepage and callback URL can be <code className="font-mono">http://localhost</code>).</li>
+            <li>On the app’s page, tick <strong className="font-medium text-foreground">Enable Device Flow</strong> and save.</li>
+            <li>Paste its <strong className="font-medium text-foreground">Client ID</strong> below. The client ID is public; no client secret is needed.</li>
+          </ol>
+          <label className="flex flex-col gap-1 font-medium">Client ID
+            <input className={inputClassName} value={githubClientId} onChange={(e) => { setGithubClientId(e.target.value); }} placeholder="Ov23li…" spellCheck={false} autoComplete="off" />
+          </label>
+          {githubClientId.trim() !== '' && !GITHUB_CLIENT_ID_PATTERN.test(githubClientId.trim()) ? <p role="alert" className="text-destructive-foreground">That doesn’t look like a GitHub client ID.</p> : null}
+        </div>
       </Dialog>
       <Dialog
         open={oauth !== null}

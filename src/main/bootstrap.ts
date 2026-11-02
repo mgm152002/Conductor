@@ -61,6 +61,7 @@ import { SlackConnectorLifecycle } from './connectors/slack-connector';
 import { McpRegistry } from './mcp/mcp-registry';
 import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
+import { GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
 import { configuredDeviceOAuthProviders, GitHubDeviceOAuthProvider, McpOAuthService } from './mcp/mcp-oauth';
 import { ElectronMarketplaceCatalog } from './mcp/marketplace-catalog';
 import { RemoteHostService } from './adapters/remote-hosts';
@@ -231,7 +232,13 @@ export async function bootstrap(): Promise<AppServices> {
   const mcpOAuth = new McpOAuthService([
     ...configuredDeviceOAuthProviders(process.env['CONDUCTOR_MCP_OAUTH_PROVIDERS'], { openExternal: openOAuthPage }),
     new GitHubDeviceOAuthProvider({
-      clientId: process.env['CONDUCTOR_GITHUB_OAUTH_CLIENT_ID'] ?? '',
+      // The user's own GitHub OAuth App (Connected apps → MCP servers), read
+      // on every sign-in so a change applies without a restart. The env var
+      // remains as an override for developers; there is no built-in default.
+      clientId: () => {
+        const saved = settings.resolve(GITHUB_OAUTH_CLIENT_ID_KEY);
+        return typeof saved === 'string' && saved.trim() !== '' ? saved.trim() : (process.env['CONDUCTOR_GITHUB_OAUTH_CLIENT_ID'] ?? '');
+      },
       openExternal: openOAuthPage,
     }),
   ]);

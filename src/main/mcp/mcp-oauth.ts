@@ -33,7 +33,8 @@ export interface McpOAuthProvider {
 export interface DeviceOAuthProviderOptions {
   name: string;
   endpointPrefixes: readonly string[];
-  clientId: string;
+  /** The OAuth App client ID, or a getter so it can change without a restart. */
+  clientId: string | (() => string);
   deviceAuthorizationEndpoint: string;
   tokenEndpoint: string;
   scopes?: readonly string[];
@@ -73,8 +74,8 @@ export class DeviceOAuthProvider implements McpOAuthProvider {
 
   async start(server: OAuthServerRef): Promise<McpOAuthChallenge> {
     if (!this.supports(server.endpoint)) throw new McpOAuthError('unsupported', `${server.name} is not supported by the ${this.name} OAuth provider.`);
-    const clientId = this.options.clientId.trim();
-    if (clientId === '') throw new McpOAuthError('not_configured', `${this.name} OAuth is not configured in this Conductor build.`);
+    const clientId = (typeof this.options.clientId === 'function' ? this.options.clientId() : this.options.clientId).trim();
+    if (clientId === '') throw new McpOAuthError('not_configured', `${this.name} sign-in needs your own OAuth App client ID. Add it in Connected apps → MCP servers → ${this.name} sign-in.`);
 
     const body = new URLSearchParams({ client_id: clientId });
     if ((this.options.scopes ?? []).length > 0) body.set('scope', this.options.scopes!.join(' '));

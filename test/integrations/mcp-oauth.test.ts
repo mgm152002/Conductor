@@ -146,6 +146,18 @@ describe('MCP GitHub OAuth device flow', () => {
   it('rejects unsupported endpoints and missing client configuration actionably', async () => {
     const service = oauth({ clientId: '', fetchFn: vi.fn(), openExternal: async () => undefined });
     await expect(service.start(server)).rejects.toMatchObject({ reason: 'not_configured' } satisfies Partial<McpOAuthError>);
+    await expect(service.start(server)).rejects.toThrow(/own OAuth App client ID/);
     await expect(service.start({ ...server, endpoint: 'https://mcp.example.com/' })).rejects.toMatchObject({ reason: 'unsupported' } satisfies Partial<McpOAuthError>);
+  });
+
+  it('reads the client ID from a getter on every sign-in, so a saved setting applies without restart', async () => {
+    let id = '';
+    const fetchFn = vi.fn(async () => response({ device_code: 'd', user_code: 'ABCD-1234', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 }));
+    const service = oauth({ clientId: () => id, fetchFn, openExternal: async () => undefined });
+    await expect(service.start(server)).rejects.toMatchObject({ reason: 'not_configured' });
+    id = 'Ov23liUserOwnApp';
+    await service.start(server);
+    const body = (fetchFn.mock.calls[0] as unknown as [string, { body: URLSearchParams }])[1].body;
+    expect(body.get('client_id')).toBe('Ov23liUserOwnApp');
   });
 });
