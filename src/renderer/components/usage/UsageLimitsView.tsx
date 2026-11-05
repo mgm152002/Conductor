@@ -15,7 +15,7 @@ import { UsageLimitCard } from './UsageLimitCard';
 // several labelled model groups (Antigravity's Gemini and Claude/GPT weekly
 // quotas) renders one card per group.
 //
-// Quota windows are rare: Codex, Antigravity, OpenCode Go, and OpenCode's free
+// Quota windows are rare: Codex, Claude Code, Antigravity, OpenCode Go, and OpenCode's free
 // tier report them; most other CLIs only report tokens. The view therefore
 // leads with the usage that *is* available (a bar per CLI) and explains, once,
 // why some CLIs have no quota windows below.
@@ -81,7 +81,7 @@ export function UsageLimitsView({
       {reporting === 0 ? (
         <Alert tone="info">
           No CLI has reported a quota window yet. Codex reports limits after a Codex session starts;
-          Antigravity reports its Gemini model groups; OpenCode reports its free-model daily window,
+          Claude Code reports its 5-hour and weekly windows (checked in the background with a tiny Haiku request); Antigravity reports its Gemini model groups; OpenCode reports its free-model daily window,
           and adds Go session and weekly windows when an active Go subscription is connected. Other
           CLIs do not expose quota data.
         </Alert>

@@ -102,6 +102,7 @@ interface FakeBinaries {
   codex?: FakeCodexChild | (() => FakeCodexChild);
   agy?: FakeCliChild | (() => FakeCliChild);
   opencode?: FakeCliChild | (() => FakeCliChild);
+  claude?: FakeCliChild | (() => FakeCliChild);
 }
 
 function spawnChild<T>(entry: T | (() => T) | undefined, name: string): T {
@@ -116,12 +117,14 @@ function fakeMultiEnv(children: FakeBinaries, available = true): CliEnvironment 
       candidate === '/usr/local/bin/codex' && children.codex !== undefined
       || candidate === '/usr/local/bin/agy' && children.agy !== undefined
       || candidate === '/usr/local/bin/opencode' && children.opencode !== undefined
+      || candidate === '/usr/local/bin/claude' && children.claude !== undefined
     ),
     spawn: (executable) => {
       const name = executable.split('/').pop();
       if (name === 'codex') return spawnChild(children.codex, name) as unknown as ChildProcessWithoutNullStreams;
       if (name === 'agy') return spawnChild(children.agy, name) as unknown as ChildProcessWithoutNullStreams;
       if (name === 'opencode') return spawnChild(children.opencode, name) as unknown as ChildProcessWithoutNullStreams;
+      if (name === 'claude') return spawnChild(children.claude, name) as unknown as ChildProcessWithoutNullStreams;
       throw new Error(`Unexpected spawn: ${executable}`);
     },
     isPidAlive: () => true,
@@ -614,5 +617,42 @@ describe('QuotaPollingService lifecycle', () => {
     expect(codex.signals).toContain('SIGTERM');
     expect(agy.signals).toContain('SIGTERM');
     expect(auth.signals).toContain('SIGTERM');
+  });
+});
+
+describe('QuotaPollingService Claude Code probe', () => {
+  const resetsAt = Math.floor((NOW.getTime() + 2 * 3_600_000) / 1000);
+  const event = JSON.stringify({ type: 'rate_limit_event', rate_limit_info: {
+    status: 'allowed', rateLimitType: 'five_hour',
+    unifiedWindows: { five_hour: { utilization: 0.25, resetsAt, status: 'allowed' }, seven_day: { utilization: 0.4, resetsAt: resetsAt + 86_400, status: 'allowed' } },
+  } });
+
+  it('records the 5-hour and weekly windows from a minimal Haiku request', async () => {
+    const { store, quota } = await storeWithQuota(() => NOW);
+    const claude = new FakeCliChild({ stdout: `{"type":"system"}\n${event}\n{"type":"result"}\n` });
+    const env = fakeMultiEnv({ claude });
+    const spawn = vi.spyOn(env, 'spawn');
+    const service = new QuotaPollingService({ quota, env, timeoutMs: 1_000, openCodeDbPath: null, now: () => NOW });
+
+    await service.refresh();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(['--model', 'haiku', '--tools', '']));
+    expect(storedLimits(store)).toEqual([
+      expect.objectContaining({ adapter_id: 'claude-code', window_kind: 'session', used_percent: 25 }),
+      expect.objectContaining({ adapter_id: 'claude-code', window_kind: 'weekly', used_percent: 40 }),
+    ]);
+  });
+
+  it('throttles scheduled probes but always runs a manual refresh', async () => {
+    const { quota } = await storeWithQuota(() => NOW);
+    const env = fakeMultiEnv({ claude: () => new FakeCliChild({ stdout: `${event}\n` }) });
+    const spawn = vi.spyOn(env, 'spawn');
+    const service = new QuotaPollingService({ quota, env, timeoutMs: 1_000, openCodeDbPath: null, now: () => NOW });
+
+    await service.refresh({ scheduled: true });
+    await service.refresh({ scheduled: true });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await service.refresh();
+    expect(spawn).toHaveBeenCalledTimes(2);
   });
 });

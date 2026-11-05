@@ -1,5 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import Database from 'better-sqlite3';
@@ -11,6 +11,7 @@ import {
 import {
   nextUtcMidnight,
   quotaSampleFromAntigravityUsage,
+  quotaSampleFromClaudeRateLimit,
   quotaSampleFromCodexRateLimits,
   quotaSampleFromOpenCodeFreeTier,
   quotaSampleFromOpenCodeGoUsage,
@@ -24,6 +25,12 @@ const DEFAULT_INTERVAL_MS = 5 * 60_000;
 // Antigravity's `/usage` round trip is slower than Codex's local app-server;
 // this still bounds every probe when a CLI hangs.
 const DEFAULT_TIMEOUT_MS = 10_000;
+// Claude Code has no usage command: its limits ride on a `rate_limit_event`
+// emitted during any request. The probe sends one tiny Haiku prompt (about 600
+// tokens), so scheduled ticks only repeat it this often; a manual refresh
+// always runs it.
+const CLAUDE_PROBE_MIN_INTERVAL_MS = 15 * 60_000;
+const CLAUDE_PROBE_TIMEOUT_MS = 45_000;
 const MAX_OUTPUT_BYTES = 1_000_000;
 const OPENCODE_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const OPENCODE_DB_FILE = 'opencode.db';
@@ -194,6 +201,7 @@ export class QuotaPollingService {
   private interval: ReturnType<typeof setInterval> | undefined;
   private inFlight: Promise<void> | undefined;
   private stopped = false;
+  private lastClaudeProbe: number | undefined;
 
   constructor(options: QuotaPollingServiceOptions) {
     this.quota = options.quota;
@@ -218,10 +226,10 @@ export class QuotaPollingService {
     this.interval.unref?.();
   }
 
-  refresh(): Promise<void> {
+  refresh(options: { scheduled?: boolean } = {}): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (this.inFlight !== undefined) return this.inFlight;
-    const refresh = this.runProbes().finally(() => {
+    const refresh = this.runProbes(options.scheduled === true).finally(() => {
       if (this.inFlight === refresh) this.inFlight = undefined;
     });
     this.inFlight = refresh;
@@ -239,7 +247,7 @@ export class QuotaPollingService {
 
   /** A scheduled tick must never surface as an unhandled rejection. */
   private poll(): void {
-    void this.refresh().catch((error: unknown) => {
+    void this.refresh({ scheduled: true }).catch((error: unknown) => {
       console.warn('Quota refresh failed:', error instanceof Error ? error.message : 'unavailable');
     });
   }
@@ -248,9 +256,10 @@ export class QuotaPollingService {
    * Run every provider concurrently. One provider being absent, signed out, or
    * broken must not stop the others from recording their last valid snapshot.
    */
-  private async runProbes(): Promise<void> {
+  private async runProbes(scheduled = false): Promise<void> {
     const results = await Promise.allSettled([
       this.probeCodex(),
+      this.probeClaude(scheduled),
       this.probeAntigravity(),
       this.probeOpenCodeGo(),
       this.probeOpenCodeFreeTier(),
@@ -344,6 +353,34 @@ export class QuotaPollingService {
     }
   }
 
+  /**
+   * Claude Code reports its 5-hour and weekly windows only inside a request, so
+   * run the cheapest possible one: Haiku, no tools, no skills, a one-line system
+   * prompt, from a neutral directory so no project context is loaded.
+   */
+  private async probeClaude(scheduled: boolean): Promise<ProbeSample | undefined> {
+    const executable = discoverOnPath('claude', this.env);
+    if (executable === undefined) return undefined;
+    const nowMs = this.now().getTime();
+    if (scheduled && this.lastClaudeProbe !== undefined && nowMs - this.lastClaudeProbe < CLAUDE_PROBE_MIN_INTERVAL_MS) return undefined;
+    this.lastClaudeProbe = nowMs;
+
+    const output = await this.capture(executable, [
+      '-p', 'ok', '--output-format', 'stream-json', '--verbose', '--model', 'haiku', '--tools', '',
+      '--no-session-persistence', '--disable-slash-commands', '--system-prompt', 'Reply with: ok',
+    ], { cwd: tmpdir(), timeoutMs: CLAUDE_PROBE_TIMEOUT_MS });
+    if (output === undefined) return undefined;
+
+    for (const line of output.split('\n')) {
+      if (!line.includes('rate_limit_event')) continue;
+      let event: unknown;
+      try { event = JSON.parse(line); } catch { continue; }
+      const sample = quotaSampleFromClaudeRateLimit(event, { source: 'claude-code', now: this.now() });
+      if (sample !== undefined) return { adapterId: 'claude-code', sample };
+    }
+    return undefined;
+  }
+
   private async probeAntigravity(): Promise<ProbeSample | undefined> {
     const executable = discoverOnPath('agy', this.env);
     if (executable === undefined) return undefined;
@@ -433,8 +470,8 @@ export class QuotaPollingService {
   }
 
   /** Run a short-lived CLI command and capture bounded stdout. */
-  private async capture(executable: string, args: string[]): Promise<string | undefined> {
-    const child = this.env.spawn(executable, args);
+  private async capture(executable: string, args: string[], options: { cwd?: string; timeoutMs?: number } = {}): Promise<string | undefined> {
+    const child = options.cwd !== undefined ? this.env.spawn(executable, args, { cwd: options.cwd }) : this.env.spawn(executable, args);
     this.activeChildren.add(child);
     // Non-interactive probes never read stdin; closing it prevents a CLI from
     // waiting for an answer.
@@ -483,7 +520,7 @@ export class QuotaPollingService {
         if (overflow || code !== 0) finish(undefined);
         else finish(chunks.join(''));
       });
-      deadline.timer = setTimeout(() => { finish(undefined); }, this.timeoutMs);
+      deadline.timer = setTimeout(() => { finish(undefined); }, options.timeoutMs ?? this.timeoutMs);
     });
   }
 

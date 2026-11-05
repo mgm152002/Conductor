@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ApprovalBridge } from '@main/adapters/approval-bridge';
 import { ClaudeCodeAdapter } from '@main/adapters/claude-code-adapter';
 import type { CliEnvironment } from '@main/adapters/local-cli-adapter';
+import { quotaFromEvent } from '@main/usage/quota';
 import type { AdapterStreamEvent } from '@shared/adapter';
 
 const capability = {
@@ -19,6 +20,7 @@ const capability = {
 const AGENT = String.raw`
 const out = (event) => process.stdout.write(JSON.stringify(event) + '\n');
 out({ type: 'system', subtype: 'init' });
+out({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.3, resetsAt: Math.floor(Date.now() / 1000) + 3600 } });
 out({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'Inspecting the workspace.' }] } });
 out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'npm test' } }] } });
 out({ type: 'assistant', message: { content: [{ type: 'text', text: 'All done.' }] } });
@@ -77,6 +79,9 @@ describe('Claude Code stream-json activity', () => {
       expect.objectContaining({ message: 'Run npm test', kind: 'execute', detail: 'npm test', key: 'tool-1', status: 'running', source: 'Claude Code' }),
       expect.objectContaining({ key: 'tool-1', detail: 'npm test\n\n3 passed', status: 'completed', source: 'Claude Code' }),
     ]));
+    // The CLI's rate-limit event becomes a quota window for the Usage view.
+    const quota = events.map((event) => quotaFromEvent(event)).find((q) => q !== undefined);
+    expect(quota?.windows[0]).toMatchObject({ kind: 'session', usedPercent: 30 });
     const stdout = events.filter((event) => event.kind === 'stdout').map((event) => String(event.data));
     expect(stdout).toEqual(['All done.']);
   });

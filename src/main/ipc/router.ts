@@ -29,12 +29,20 @@ function byteLength(payload: unknown, seen = new Set<object>()): number {
   if (typeof payload === 'string') return Buffer.byteLength(payload, 'utf8');
   if (typeof payload === 'number' || typeof payload === 'boolean') return 8;
   if (typeof payload !== 'object') return MAX_IPC_PAYLOAD_BYTES + 1;
+  // `seen` holds only the ancestors of this value: a true cycle is rejected,
+  // but an object referenced twice (structured clone preserves shared
+  // references, e.g. plan mode's runOptions.main also sitting in
+  // runOptions.agents) is legitimately counted once per use.
   if (seen.has(payload)) return MAX_IPC_PAYLOAD_BYTES + 1;
   seen.add(payload);
-  if (Array.isArray(payload)) return payload.reduce((total, item) => total + byteLength(item, seen), 0);
-  return Object.entries(payload as Record<string, unknown>).reduce(
-    (total, [key, value]) => total + Buffer.byteLength(key, 'utf8') + byteLength(value, seen), 0,
-  );
+  try {
+    if (Array.isArray(payload)) return payload.reduce((total, item) => total + byteLength(item, seen), 0);
+    return Object.entries(payload as Record<string, unknown>).reduce(
+      (total, [key, value]) => total + Buffer.byteLength(key, 'utf8') + byteLength(value, seen), 0,
+    );
+  } finally {
+    seen.delete(payload);
+  }
 }
 
 function fail(error: IpcError['error']): IpcError {

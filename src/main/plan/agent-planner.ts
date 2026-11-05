@@ -256,10 +256,17 @@ export class AgentPlanner implements Planner {
       VALUES (?, ?, ?, ?, 'live', 0, ?, NULL)`).run(handle.sessionId, task.id, plannerId, handle.externalRef ?? null, now);
     const stdout: string[] = [];
     const stderr: string[] = [];
+    const seen = new Set<string>();
     let ok = false;
+    // Planning can take minutes; say it is still alive so the thread never
+    // looks frozen.
+    const startedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      this.log(task.id, `Still planning with ${this.deps.agentName(plannerId)}… ${Math.round((Date.now() - startedAt) / 1000)}s elapsed`);
+    }, 20_000);
     try {
       for await (const ev of adapter.stream(handle)) {
-        this.observe(task.id, handle.sessionId, plannerId, ev, stdout, stderr);
+        this.observe(task.id, handle.sessionId, plannerId, ev, stdout, stderr, seen);
       }
       const result = await adapter.await(handle);
       ok = result.status === 'succeeded';
@@ -275,6 +282,7 @@ export class AgentPlanner implements Planner {
         throw retryableOnAnotherAgent(kind) ? new PlannerRetryableError(message, kind) : new Error(message);
       }
     } finally {
+      clearInterval(heartbeat);
       store.db.prepare('UPDATE agent_sessions SET status = ? WHERE id = ?').run(ok ? 'exited' : 'orphaned', handle.sessionId);
     }
     const raw = stdout.join('\n');
@@ -287,7 +295,7 @@ export class AgentPlanner implements Planner {
   }
 
   /** Collect the reply, record usage, and surface the planner's activity in the thread. */
-  private observe(taskId: string, sessionId: string, plannerId: string, ev: AdapterStreamEvent, stdout: string[], stderr: string[]): void {
+  private observe(taskId: string, sessionId: string, plannerId: string, ev: AdapterStreamEvent, stdout: string[], stderr: string[], seen: Set<string> = new Set()): void {
     const usage = usageFromEvent(ev);
     if (usage !== undefined) {
       try { this.deps.usage?.record({ sessionId, taskId, adapterId: plannerId, sample: usage }); } catch { /* informational */ }
@@ -297,16 +305,49 @@ export class AgentPlanner implements Planner {
       try { this.deps.quota?.record({ adapterId: plannerId, sample: quota }); } catch { /* informational */ }
     }
     if (ev.kind === 'stderr' && typeof ev.data === 'string') { stderr.push(ev.data); return; }
+    if (ev.kind === 'log') { this.observeActivity(taskId, plannerId, ev.data, seen); return; }
     if (ev.kind !== 'stdout' || typeof ev.data !== 'string') return;
     stdout.push(ev.data);
-    // Codex JSONL: show the commands the planner ran while reading the project.
+    // Codex JSONL: surface what the planner is doing as it happens, so a slow
+    // planning run is not a silent wait.
     if (!ev.data.startsWith('{')) return;
     try {
-      const line = JSON.parse(ev.data) as { type?: string; item?: { type?: string; command?: string } };
-      if (line.type === 'item.completed' && line.item?.type === 'command_execution' && typeof line.item.command === 'string') {
-        this.log(taskId, `Planner ran ${line.item.command.replace(/^(?:\/bin\/)?(?:bash|zsh|sh) -lc ['"]?|['"]$/g, '').slice(0, 200)}`);
+      const line = JSON.parse(ev.data) as { type?: string; item?: { type?: string; command?: string; text?: string; query?: string; tool?: string; server?: string } };
+      const item = line.item;
+      if (item === undefined) return;
+      const clean = (text: string, max: number): string => text.replace(/^(?:\/bin\/)?(?:bash|zsh|sh) -lc ['"]?|['"]$/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+      if (line.type === 'item.started' && item.type === 'command_execution' && typeof item.command === 'string') {
+        this.log(taskId, `Planner is running ${clean(item.command, 200)}`);
+      } else if (line.type === 'item.completed') {
+        if (item.type === 'reasoning' && typeof item.text === 'string' && item.text.trim() !== '') this.log(taskId, `Planner is thinking: ${clean(item.text, 160)}`);
+        else if (item.type === 'web_search' && typeof item.query === 'string') this.log(taskId, `Planner searched the web for ${clean(item.query, 120)}`);
+        else if (item.type === 'mcp_tool_call') this.log(taskId, `Planner used ${item.server ?? 'a'} tool ${item.tool ?? ''}`.trim());
       }
     } catch { /* not JSON */ }
+  }
+
+  /**
+   * Activity rows from every CLI that reports them as `log` events (Claude
+   * Code, Antigravity, ACP agents like OpenCode and Kiro): tool calls and
+   * reasoning, as the thread's planning log. Rows are `{ message, kind, key,
+   * status }`; a row is logged once when it appears, not again on each update.
+   */
+  private observeActivity(taskId: string, plannerId: string, data: unknown, seen: Set<string>): void {
+    if (data === null || typeof data !== 'object') return;
+    const row = data as { message?: unknown; kind?: unknown; key?: unknown; status?: unknown };
+    if (typeof row.message !== 'string' || row.message.trim() === '') return;
+    // The reply text and approval chatter are not planning activity.
+    if (row.kind === 'reply' || row.kind === 'plan') return;
+    if (typeof row.key === 'string') {
+      const id = `${row.key}:${row.kind === 'reasoning' ? row.message.slice(0, 40) : ''}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+    }
+    const text = row.message.replace(/\s+/g, ' ').trim();
+    const name = this.deps.agentName(plannerId);
+    this.log(taskId, row.kind === 'reasoning'
+      ? `${name} is thinking: ${text.slice(0, 160)}`
+      : `${name}: ${text.slice(0, 200)}`);
   }
 
   private writeDocs(task: Task, plan: AgentPlan, plannerId: string): string | undefined {

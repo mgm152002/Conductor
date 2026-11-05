@@ -33,6 +33,21 @@ describe('withValidation', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('accepts a small payload that references the same object twice, but still rejects cycles', async () => {
+    const schema = z.object({ runOptions: z.any() });
+    const handler = vi.fn(() => 'accepted');
+    const wrapped = withValidation(schema, handler, { channel: 'task.create' });
+
+    // Plan mode sends runOptions.main and runOptions.agents[id] as one object.
+    const choice = { model: 'gpt-5' };
+    await expect(wrapped(fakeEvent, { runOptions: { main: choice, agents: { codex: choice } } })).resolves.toEqual({ ok: true, value: 'accepted' });
+
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    const rejected = await wrapped(fakeEvent, { runOptions: cyclic });
+    expect(rejected.ok).toBe(false);
+  });
+
   it('counts typed-array bytes and honors an explicit bounded binary channel limit', async () => {
     const schema = z.object({ bytes: z.instanceof(Uint8Array) });
     const handler = vi.fn(() => 'accepted');

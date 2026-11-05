@@ -6,6 +6,7 @@ import {
   normalizeQuotaSample,
   quotaFromEvent,
   quotaSampleFromAntigravityUsage,
+  quotaSampleFromClaudeRateLimit,
   quotaSampleFromCodexRateLimits,
   quotaSampleFromOpenCodeFreeTier,
   quotaSampleFromOpenCodeGoUsage,
@@ -605,5 +606,35 @@ describe('QuotaRecorder latest-snapshot upsert', () => {
       ['claude-code', 'session', 40],
       ['codex', 'session', 10],
     ]);
+  });
+});
+
+describe('quotaSampleFromClaudeRateLimit', () => {
+  const now = new Date('2026-11-04T10:00:00.000Z');
+  const resetsAt = Math.floor(Date.parse('2026-11-04T12:00:00.000Z') / 1000);
+
+  it('maps the five-hour window to Session and seven-day windows to Weekly', () => {
+    const session = quotaSampleFromClaudeRateLimit({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.42, resetsAt } }, { now });
+    expect(session?.source).toBe('claude-code');
+    expect(session?.windows[0]).toMatchObject({ kind: 'session', usedPercent: 42, windowMinutes: 300 });
+    const opus = quotaSampleFromClaudeRateLimit({ rate_limit_info: { rateLimitType: 'seven_day_opus', utilization: 12, resetsAt } }, { now });
+    expect(opus?.windows[0]).toMatchObject({ kind: 'weekly', usedPercent: 12, label: 'Opus' });
+  });
+
+  it('reads both windows from the unifiedWindows block Claude Code 2.1 emits', () => {
+    const sample = quotaSampleFromClaudeRateLimit({ type: 'rate_limit_event', rate_limit_info: {
+      status: 'allowed', resetsAt, rateLimitType: 'five_hour',
+      unifiedWindows: { five_hour: { utilization: 0.03, resetsAt, status: 'allowed' }, seven_day: { utilization: 0.5, resetsAt: resetsAt + 86_400, status: 'allowed' } },
+    } }, { now });
+    expect(sample?.windows).toEqual([
+      expect.objectContaining({ kind: 'session', usedPercent: 3, windowMinutes: 300 }),
+      expect.objectContaining({ kind: 'weekly', usedPercent: 50, windowMinutes: 10080 }),
+    ]);
+  });
+
+  it('ignores events with no percentage unless the window is rejected', () => {
+    expect(quotaSampleFromClaudeRateLimit({ rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', resetsAt } }, { now })).toBeUndefined();
+    expect(quotaSampleFromClaudeRateLimit({ rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt } }, { now })?.windows[0]).toMatchObject({ usedPercent: 100 });
+    expect(quotaSampleFromClaudeRateLimit({ rate_limit_info: { rateLimitType: 'overage', utilization: 1 } }, { now })).toBeUndefined();
   });
 });

@@ -373,6 +373,59 @@ export function quotaSampleFromOpenCodeFreeTier(
   }, options);
 }
 
+/**
+ * Map a Claude Code `rate_limit_event` (stream-json) onto the generic
+ * contract: `five_hour` is the Session window and `seven_day*` the Weekly
+ * window (a per-model variant such as `seven_day_opus` is labelled). Claude
+ * Code 2.1 nests every window under `rate_limit_info.unifiedWindows` as
+ * `{ utilization, resetsAt, status }`; older builds put `utilization` beside
+ * `rateLimitType`. `utilization` is a 0–1 fraction (or 0–100). A window with
+ * no percentage is only meaningful when rejected (exhausted); otherwise it is
+ * ignored.
+ */
+export function quotaSampleFromClaudeRateLimit(
+  value: unknown,
+  options: { now?: Date; source?: string } = {},
+): NormalizedQuotaSample | undefined {
+  const raw = obj(value);
+  if (raw === null) return undefined;
+  const info = obj(raw['rate_limit_info']) ?? obj(raw['rateLimitInfo']) ?? raw;
+  const candidates: [string, Json][] = [];
+  const unified = obj(info['unifiedWindows']) ?? obj(info['unified_windows']);
+  if (unified !== null) {
+    for (const [type, window] of Object.entries(unified)) {
+      const w = obj(window);
+      if (w !== null) candidates.push([type, w]);
+    }
+  }
+  const topType = typeof info['rateLimitType'] === 'string' ? info['rateLimitType'] : typeof info['rate_limit_type'] === 'string' ? info['rate_limit_type'] : undefined;
+  if (topType !== undefined && !candidates.some(([type]) => type === topType)) candidates.push([topType, info]);
+
+  const windows: Json[] = [];
+  for (const [type, w] of candidates) {
+    let kind: UsageLimitWindowKind;
+    let label: string | undefined;
+    if (type === 'five_hour') kind = 'session';
+    else if (type === 'seven_day') kind = 'weekly';
+    else if (type.startsWith('seven_day_')) { kind = 'weekly'; label = type.slice('seven_day_'.length).replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()); }
+    else continue;
+    const utilization = w['utilization'];
+    let usedPercent: number | undefined;
+    if (typeof utilization === 'number' && Number.isFinite(utilization) && utilization >= 0) {
+      usedPercent = Math.min(100, Math.round((utilization <= 1 ? utilization * 100 : utilization) * 10) / 10);
+    } else if (w['status'] === 'rejected') {
+      usedPercent = 100;
+    }
+    if (usedPercent === undefined) continue;
+    windows.push({
+      kind, usedPercent, resetsAt: w['resetsAt'] ?? w['resets_at'],
+      windowMinutes: kind === 'session' ? 300 : 10_080,
+      ...(label !== undefined ? { label } : {}),
+    });
+  }
+  return normalizeQuotaSample({ source: options.source ?? 'claude-code', windows }, options);
+}
+
 /** The quota an adapter stream event reports, if any. */
 export function quotaFromEvent(ev: AdapterStreamEvent): NormalizedQuotaSample | undefined {
   if (ev.kind !== 'log') return undefined;

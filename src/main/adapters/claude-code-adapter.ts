@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { PERMISSION_TOOL, sharedApprovalBridge, type ApprovalBridge } from './approval-bridge';
 import { GatedAgentAdapter, objectivePrompt, pinnedEffort, pinnedModel, type GatedAdapterConfig, type GatedLive, type Launch } from './gated-agent-adapter';
 import type { CliEnvironment } from './local-cli-adapter';
+import { quotaSampleFromClaudeRateLimit } from '../usage/quota';
 import { isAccept, isSensitivePath, type GateRequest, type ToolApprover } from './tool-gate';
 
 // Claude Code in print mode (`claude -p`), asking Conductor before each tool
@@ -90,7 +91,7 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
       // This is what lets a casual chat use e.g. a video-generation server.
       const mcpServers = data.mcpServers ?? [];
       if (mcpServers.length === 0) {
-        return { args: ['-p', '--output-format', 'json', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', ...modelArgs], cwd: data.rootPath, stdin };
+        return { args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', ...modelArgs], cwd: data.rootPath, stdin };
       }
       const config: Record<string, unknown> = {};
       const mcpEnv: Record<string, string> = {};
@@ -103,7 +104,7 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
       }
       const allowed = mcpServers.flatMap((server) => [`mcp__${server.key}__*`, `mcp__${server.key}`]);
       return {
-        args: ['-p', '--output-format', 'json', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep',
+        args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep',
           '--mcp-config', JSON.stringify({ mcpServers: config }), '--allowedTools', ...allowed, ...modelArgs],
         cwd: data.rootPath, stdin, env: mcpEnv,
       };
@@ -211,6 +212,11 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
             source: 'Claude Code',
           });
         }
+        return;
+      }
+      if (event['type'] === 'rate_limit_event') {
+        const quota = quotaSampleFromClaudeRateLimit(event, { source: 'claude-code' });
+        if (quota !== undefined) live.events.push('log', { quota });
         return;
       }
       if (event['type'] === 'result') envelope = event;
