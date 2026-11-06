@@ -662,7 +662,7 @@ export async function bootstrap(): Promise<AppServices> {
       }
     },
     refreshUsageLimits: async () => { await Promise.all([quotaPolling.refresh(), modelPricing.refresh()]); },
-    usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters(), pricing: modelPricing.priceFor }),
+    usageSummary: (input) => usageSummary(store, input, agentName, { adapters: registry.listAdapters(), pricing: modelPricing.priceFor, limitStatuses: quotaPolling.limitStatuses() }),
   });
 
   registerGitHubHandlers(router, github);
