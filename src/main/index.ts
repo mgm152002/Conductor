@@ -83,6 +83,14 @@ app.whenReady().then(async () => {
   services.connectorRuntime.start();
   services.suggestionEvents.setWebContentsResolver(getWebContents);
   services.mcp.startHealthChecks();
+  // When the user has turned auto-sync on, copy MCP servers installed in one
+  // agent CLI into the others (add-only, respects per-CLI removals). It is off
+  // by default. Delayed so it never competes with first paint.
+  setTimeout(() => {
+    void services.cliMcp.overview({ sync: true }).catch((error: unknown) => {
+      console.warn('MCP sync failed:', error instanceof Error ? error.message : 'unavailable');
+    });
+  }, 8_000).unref?.();
   services.quotaPolling.start();
   services.modelPricing.start();
   services.learningCron.start();
