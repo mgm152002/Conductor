@@ -106,6 +106,8 @@ export interface DomainHandlerDeps {
   questions?: AgentQuestionBroker;
   /** Live tool-approval broker (also serves chat-scoped approvals). */
   toolApprovals?: ToolApprovalBroker;
+  /** Sandbox agents: binds a new thread to the agent that runs it. */
+  sandboxAgents?: import('../sandbox/sandbox-agents').SandboxAgentService;
   flushMemories?: () => Promise<void>;
   /** Deletes a project and everything stored for it. */
   deleteProject?: (workspaceId: string) => Promise<ProjectDeletionResult>;
@@ -289,7 +291,13 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     'task.create',
     TaskCreateRequest,
     async (_event, input): Promise<Task> => {
-      return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(input.parentTaskId ? {parentTaskId:input.parentTaskId}:{}),...(input.agentId ? {agentId:input.agentId}:{}),...(input.plan === true ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{})});
+      // A sandbox agent starts a new thread on its first available CLI; its
+      // thread is bound to it before the run starts, so the first step already
+      // gets the agent's sandbox, instructions and fallback order.
+      const sandboxAgentId = input.parentTaskId === undefined ? input.sandboxAgentId : undefined;
+      const agentId = sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? deps.sandboxAgents.startingCli(sandboxAgentId) : input.agentId;
+      return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(input.parentTaskId ? {parentTaskId:input.parentTaskId}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && sandboxAgentId === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
+        ...(sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? { onCreated: (task: Task) => { deps.sandboxAgents!.bindThread(task.threadId ?? task.id, sandboxAgentId); } } : {})});
     },
   );
 

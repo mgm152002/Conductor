@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { statSync, mkdirSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import type { Store } from '../db/types';
 import type { Workspace } from '@shared/domain';
@@ -127,7 +127,7 @@ export class WorkspaceService {
     const rows = this.store.db
       .prepare(
         `SELECT id, name, root_path, icon, created_at, updated_at
-         FROM workspaces ORDER BY created_at ASC, rowid ASC`,
+         FROM workspaces WHERE hidden = 0 ORDER BY created_at ASC, rowid ASC`,
       )
       .all() as WorkspaceRow[];
     return rows.map(rowToWorkspace);
@@ -141,6 +141,21 @@ export class WorkspaceService {
       )
       .get(id) as WorkspaceRow | undefined;
     return row === undefined ? undefined : rowToWorkspace(row);
+  }
+
+  /**
+   * An internal workspace that never appears in project lists (for agent
+   * chats without a project). Created on first use with a fixed id, rooted
+   * at `rootPath` (created if missing).
+   */
+  ensureHidden(id: string, name: string, rootPath: string): Workspace {
+    const existing = this.get(id);
+    if (existing !== undefined) return existing;
+    mkdirSync(rootPath, { recursive: true });
+    const now = new Date().toISOString();
+    this.store.db.prepare('INSERT INTO workspaces (id, name, root_path, created_at, updated_at, hidden) VALUES (?, ?, ?, ?, ?, 1)')
+      .run(id, name, rootPath, now, now);
+    return this.get(id)!;
   }
 
   /** Set (or clear, with null) the project's custom icon data URL. */

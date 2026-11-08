@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { McpDiscoveryEntry, McpInstallResult, McpInvocationResult, McpOAuthChallenge, McpServer } from './mcp';
 import type { McpMarketplaceEntry } from './mcp-marketplace';
 import type { CliMcpOverview, CliMcpSyncReport } from './cli-mcp';
+import { AttachmentIdsSchema } from './attachments';
+import type { AgentGroup, AgentGroupMessage, SandboxAgent, SandboxStatus } from './sandbox-agents';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
 import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
@@ -13,6 +15,15 @@ import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } 
 
 const id = z.string().trim().min(1).max(200);
 const uuid = z.string().uuid();
+const sandboxAgentInput = z.object({
+  name: z.string().trim().min(1).max(60),
+  description: z.string().max(300),
+  instructions: z.string().max(8000),
+  clis: z.array(z.string().trim().regex(/^[\w:.-]{1,200}$/)).min(1).max(10),
+  tools: z.array(z.enum(['browser', 'shell', 'files', 'code', 'documents'])).min(1).max(5),
+  approval: z.enum(['risky', 'all', 'none']),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+});
 const mcpCli = z.enum(['claude-code', 'codex', 'opencode', 'antigravity', 'kiro']);
 const mcpKey = z.string().trim().regex(/^[a-z0-9][a-z0-9_.-]{0,63}$/);
 
@@ -39,6 +50,27 @@ export const INTEGRATION_SCHEMAS = {
   'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/), value: z.string().min(1).max(65536) }),
   'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/) }),
 
+  // Sandbox agents and their AIO Sandbox containers.
+  'agents.sandbox.list': z.void(),
+  'agents.sandbox.create': sandboxAgentInput,
+  'agents.sandbox.update': sandboxAgentInput.extend({ id: uuid }),
+  'agents.sandbox.remove': z.object({ id: uuid }),
+  'agents.sandbox.threads': z.void(),
+  'agents.workspace': z.void(),
+  'agents.group.list': z.void(),
+  'agents.group.create': z.object({ name: z.string().max(60), agentIds: z.array(uuid).min(2).max(12) }),
+  'agents.group.remove': z.object({ id: uuid }),
+  'agents.group.messages': z.object({ groupId: uuid }),
+  'agents.group.send': z.object({
+    groupId: uuid, workspaceId: uuid.optional(), text: z.string().trim().min(1).max(10_000),
+    agentIds: z.array(uuid).min(1).max(12).optional(),
+    context: z.string().max(20_000).optional(),
+    attachmentIds: AttachmentIdsSchema.optional(),
+  }),
+  'sandbox.status': z.void(),
+  'sandbox.pull': z.void(),
+  'sandbox.stop': z.object({ agentId: uuid }),
+  'sandbox.viewer': z.object({ agentId: uuid }),
 
   // MCP servers in each agent CLI's own configuration.
   'mcp.cli.overview': z.object({ sync: z.boolean().optional() }).optional(),
@@ -106,6 +138,29 @@ export interface AgentStat { adapterId: string; stats: PerformanceBaseline }
 export interface IntegrationsBridge {
   agents: { list(): Promise<AgentOption[]>; models(agentId: string, refresh?: boolean): Promise<AgentModelCatalog> };
   secrets: { list(): Promise<SecretInfo[]>; delete(id: string): Promise<void> };
+  sandboxAgents: {
+    list(): Promise<SandboxAgent[]>;
+    create(input: IntegrationRequest<'agents.sandbox.create'>): Promise<SandboxAgent>;
+    update(input: IntegrationRequest<'agents.sandbox.update'>): Promise<SandboxAgent>;
+    remove(id: string): Promise<void>;
+    /** Thread id → id of the agent that runs it. */
+    threads(): Promise<Record<string, string>>;
+    groups(): Promise<{ groups: AgentGroup[]; groupThreads: Record<string, string> }>;
+    /** The hidden workspace agent chats use when no project is chosen. */
+    workspace(): Promise<string>;
+    createGroup(input: IntegrationRequest<'agents.group.create'>): Promise<AgentGroup>;
+    removeGroup(id: string): Promise<void>;
+    groupMessages(groupId: string): Promise<AgentGroupMessage[]>;
+    sendGroup(input: IntegrationRequest<'agents.group.send'>): Promise<AgentGroupMessage>;
+  };
+  sandbox: {
+    status(): Promise<SandboxStatus>;
+    /** Start downloading the sandbox image; poll status for progress. */
+    pull(): Promise<SandboxStatus>;
+    stop(agentId: string): Promise<void>;
+    /** Open a window showing the agent's sandbox desktop (live browser). */
+    openViewer(agentId: string): Promise<void>;
+  };
   mcp: {
     list(): Promise<McpServer[]>;
     discover(): Promise<McpDiscoveryEntry[]>;

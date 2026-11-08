@@ -5,6 +5,7 @@ import { GatedAgentAdapter, objectivePrompt, pinnedEffort, pinnedModel, type Gat
 import type { CliEnvironment } from './local-cli-adapter';
 import { quotaSampleFromClaudeRateLimit } from '../usage/quota';
 import { isAccept, isSensitivePath, type GateRequest, type ToolApprover } from './tool-gate';
+import { SANDBOX_MCP_KEY, SANDBOX_ONLY_NOTICE } from '@shared/sandbox-agents';
 
 // Claude Code in print mode (`claude -p`), asking Conductor before each tool
 // call through --permission-prompt-tool
@@ -119,7 +120,8 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
         if (isAccept(decision)) return { behavior: 'allow', updatedInput: input };
         return { behavior: 'deny', message: decision === 'cancel'
           ? 'The task was cancelled in Conductor.'
-          : 'The user declined this action in Conductor. Do not retry it; continue another way or explain what you need.' };
+          : data.sandboxOnly === true && (request.kind === 'command' || request.kind === 'file_change') ? SANDBOX_ONLY_NOTICE
+            : 'The user declined this action in Conductor. Do not retry it; continue another way or explain what you need.' };
       },
     });
     live.cleanup.push(() => { session.dispose(); });
@@ -138,9 +140,16 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
         : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
     }
     const mcpConfig = { mcpServers: { [CLAUDE_APPROVAL_SERVER]: { type: 'http', url: `${session.baseUrl}/mcp`, timeout: APPROVAL_TIMEOUT_MS }, ...approved } };
+    // A sandbox agent has no Bash, web or file-editing tools of its own at all
+    // (not merely declined): `--tools` limits the built-ins to reading, and the
+    // sandbox MCP server is pre-allowed because its gateway already asks the
+    // user before risky calls, so Claude must not ask a second time.
+    const sandboxOnly = data.sandboxOnly === true
+      ? ['--tools', 'Read,Glob,Grep', '--allowedTools', `mcp__${SANDBOX_MCP_KEY}`, `mcp__${SANDBOX_MCP_KEY}__*`]
+      : [];
     return {
       args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'default',
-        '--mcp-config', JSON.stringify(mcpConfig), '--permission-prompt-tool', `mcp__${CLAUDE_APPROVAL_SERVER}__${PERMISSION_TOOL}`, ...modelArgs],
+        '--mcp-config', JSON.stringify(mcpConfig), '--permission-prompt-tool', `mcp__${CLAUDE_APPROVAL_SERVER}__${PERMISSION_TOOL}`, ...sandboxOnly, ...modelArgs],
       cwd: data.rootPath, stdin, env: mcpEnv,
     };
   }

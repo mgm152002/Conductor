@@ -51,8 +51,12 @@ export class TaskRunner {
   private readonly running = new Map<string, Promise<void>>();
   constructor(private readonly deps: TaskRunnerDeps) {}
 
-  async create(input: CreateTaskInput & { agentId?: string; plan?: boolean; runOptions?: RunOptions; attachmentIds?: readonly string[] }): Promise<Task> {
-    const { agentId, plan, runOptions, attachmentIds = [], ...rest } = input;
+  async create(input: CreateTaskInput & {
+    agentId?: string; plan?: boolean; runOptions?: RunOptions; attachmentIds?: readonly string[];
+    /** Runs once the task exists and before it starts (e.g. binding its thread to a sandbox agent). */
+    onCreated?: (task: Task) => void;
+  }): Promise<Task> {
+    const { agentId, plan, runOptions, attachmentIds = [], onCreated, ...rest } = input;
     if (attachmentIds.length > 0 && !this.deps.attachments) throw new Error('Attachments are not available. Remove the files and try again.');
     this.deps.attachments?.validate(attachmentIds);
     if (plan === true) {
@@ -67,6 +71,7 @@ export class TaskRunner {
       ...rest,
       acceptanceCriteria: rest.acceptanceCriteria?.length ? rest.acceptanceCriteria : ['response: nonempty'],
     });
+    onCreated?.(task);
     if (attachmentIds.length > 0) {
       const destination = this.attachmentDirectory(task);
       try {

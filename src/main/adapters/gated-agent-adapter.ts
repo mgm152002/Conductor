@@ -104,7 +104,7 @@ export abstract class GatedAgentAdapter implements AgentAdapter {
 
     const handle: AdapterSessionHandle = { sessionId: `${this.config.id}-${randomUUID()}`, adapterId: this.config.id, resumable: false };
     const live: GatedLive = {
-      handle, data, events: new EventQueue(), gate: new ToolGate(data.mode, this.approver, { taskId: data.taskId, stepId: data.stepId }, { approveCommands: data.approveCommands === true, ...(this.config.autoApprove !== undefined ? { autoApprove: this.config.autoApprove } : {}) }),
+      handle, data, events: new EventQueue(), gate: new ToolGate(data.mode, this.approver, { taskId: data.taskId, stepId: data.stepId }, { approveCommands: data.approveCommands === true, ...(data.sandboxOnly === true ? { sandboxOnly: true } : {}), ...(this.config.autoApprove !== undefined ? { autoApprove: this.config.autoApprove } : {}) }),
       cancelled: false, stderrTail: [], cleanup: [],
     };
     let launch: Launch;

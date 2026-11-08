@@ -1,6 +1,7 @@
 import { AttachmentService } from './attachments/attachment-service';
 import { registerAttachmentHandlers } from './ipc/register-attachments';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { SqliteStore } from './db/store';
 import { WorkspaceService } from './domain/workspace-service';
@@ -62,6 +63,9 @@ import { McpRegistry } from './mcp/mcp-registry';
 import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
 import { CliMcpManager } from './mcp/cli-mcp';
+import { SandboxManager } from './sandbox/sandbox-manager';
+import { SandboxGateway } from './sandbox/sandbox-gateway';
+import { SandboxAgentService } from './sandbox/sandbox-agents';
 import { GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
 import { configuredDeviceOAuthProviders, GitHubDeviceOAuthProvider, McpOAuthService } from './mcp/mcp-oauth';
 import { ElectronMarketplaceCatalog } from './mcp/marketplace-catalog';
@@ -120,6 +124,9 @@ export interface AppServices {
   learningCron: LearningCronService;
   mcp: McpService;
   cliMcp: CliMcpManager;
+  sandboxes: SandboxManager;
+  sandboxGateway: SandboxGateway;
+  sandboxAgents: SandboxAgentService;
   remoteHosts: RemoteHostService;
   secrets: SecretStore;
   /** The renderer emitter proactive suggestions are surfaced through. */
@@ -252,6 +259,30 @@ export async function bootstrap(): Promise<AppServices> {
   // MCP servers live in each agent CLI's own config; Conductor installs them
   // there and keeps the CLIs in step (sync preferences beside the DB).
   const cliMcp = new CliMcpManager({ statePath: join(app.getPath('userData'), 'mcp-cli-sync.json') });
+  // Sandbox agents: named agents that run on the user's CLIs (in their own
+  // fallback order) with an AIO Sandbox container per thread for browsing,
+  // commands and files, behind Conductor's approval gate. The renderer polls
+  // sandbox status while it shows it.
+  const sandboxes = new SandboxManager();
+  const sandboxGateway = new SandboxGateway();
+  // Agent chats without a project run in this hidden, non-git workspace.
+  const AGENT_WORKSPACE_ID = '00000000-0000-4000-8000-0000a6e17000';
+  // Late-bound: the approval broker is created after the orchestrator.
+  // eslint-disable-next-line prefer-const
+  let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
+  const sandboxAgents = new SandboxAgentService({
+    store, manager: sandboxes, gateway: sandboxGateway,
+    approver: (request, signal) => (sandboxApprover !== undefined ? sandboxApprover(request, signal) : Promise.resolve('decline' as const)),
+    autoApprove,
+    cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
+    agentWorkspace: () => workspaces.ensureHidden(AGENT_WORKSPACE_ID, 'Agents', join(app.getPath('userData'), 'agent-space')).id,
+    log: (taskId, stepId, payload) => {
+      store.db.prepare("INSERT INTO task_events (id, task_id, step_id, kind, payload, created_at) VALUES (?, ?, ?, 'log', ?, ?)")
+        .run(randomUUID(), taskId, stepId, JSON.stringify({ phase: 'execution', ...payload }), new Date().toISOString());
+      const task = stateMachine.getTask(taskId);
+      if (task !== undefined) taskEvents.emit('task.updated', task);
+    },
+  });
 
   // Managed_Local_Storage for artifacts persisted during step execution lives
   // beside the DB under userData.
@@ -421,6 +452,7 @@ export async function bootstrap(): Promise<AppServices> {
       maxStepRetries: 0,
       historicalPerformance: (adapterId, capabilityId) => learningLoop.routingScore(adapterId, capabilityId),
       fallbackModel: (id) => runResolver.fallbackModel(id),
+      fallbackOrder: (task) => sandboxAgents.fallbackOrder(task),
       executionInput,
       resolveInput: async (step, base) => {
         const task = stateMachine.getTask(step.taskId);
@@ -430,6 +462,9 @@ export async function bootstrap(): Promise<AppServices> {
         // between planning and execution is applied at its current version.
         // Persistent context is included so invoice text or a purchase order
         // carried as a context item participates in recognition and matching.
+        // A sandbox agent's thread: its gateway (sandbox tools) and standing
+        // instructions for this step.
+        const sandboxRun = await sandboxAgents.prepareStep(task, step.id, (base['mode'] as import('@shared/domain').PermissionProfile | undefined) ?? 'read_only');
         const prepared = skillOrchestration.prepareStep({
           task, step,
           contextData: [
@@ -442,14 +477,25 @@ export async function bootstrap(): Promise<AppServices> {
           ...base,
           // Resolve Keychain-backed MCP credentials only now, immediately
           // before adapter start. They are never serialized into task_steps.
-          ...(base['mode'] !== 'read_only' ? { mcpServers: await mcp.forAgents() } : {}),
+          ...(base['mode'] !== 'read_only' || sandboxRun !== undefined ? {
+            mcpServers: [
+              ...(base['mode'] !== 'read_only' ? await mcp.forAgents() : []),
+              ...(sandboxRun !== undefined ? [sandboxRun.server] : []),
+            ],
+          } : {}),
+          ...(sandboxRun !== undefined ? { sandboxOnly: true } : {}),
           contextData: prepared.contextData,
-          ...(prepared.guidance ? { guidance: prepared.guidance } : {}),
+          ...(prepared.guidance || sandboxRun !== undefined
+            ? { guidance: [sandboxRun?.guidance, prepared.guidance].filter((part) => part !== undefined && part !== '').join('\n\n') }
+            : {}),
         };
       },
       onStepSettled: (taskId) => {
         planner.refresh(taskId);
         const task = stateMachine.getTask(taskId);
+        // The step's sandbox gateway closes; the sandbox idles out later so a
+        // follow-up in the same thread keeps its browser and files.
+        if (task !== undefined && ['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED', 'RECOVERABLE_INTERRUPTION'].includes(task.state)) sandboxAgents.release(task);
         if (task !== undefined) taskEvents.emit('task.updated', task);
       },
     },
@@ -506,6 +552,7 @@ export async function bootstrap(): Promise<AppServices> {
   const toolApprovals = new ToolApprovalBroker(store, permissions, (taskId) => {
     taskEvents.emit('task.updated', orchestrator.getTask(taskId));
   });
+  sandboxApprover = (request, signal) => toolApprovals.request(request, signal);
   // Agent questions (Codex requestUserInput, MCP elicitation, ACP question
   // tools) park here until the user answers in the thread.
   const agentQuestions = new AgentQuestionBroker((request) => {
@@ -557,6 +604,7 @@ export async function bootstrap(): Promise<AppServices> {
     },
   });
   runnerRef = runner;
+  sandboxAgents.setTaskCreator((input) => runner.create(input));
   // Threads created before auto-titles (or whose generation failed) get named
   // too: backfill the most recent untitled roots, queued one at a time.
   threadTitles.scheduleRecent(10);
@@ -623,6 +671,7 @@ export async function bootstrap(): Promise<AppServices> {
 
 
   registerDomainHandlers({
+    sandboxAgents,
     router, runner, taskQueries, permissions, registry, audit, store,
     workspaces,
     settings,
@@ -673,7 +722,7 @@ export async function bootstrap(): Promise<AppServices> {
   registerGitHubHandlers(router, github);
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,sandboxAgents,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);
@@ -729,6 +778,9 @@ export async function bootstrap(): Promise<AppServices> {
     learningCron,
     mcp,
     cliMcp,
+    sandboxes,
+    sandboxGateway,
+    sandboxAgents,
     remoteHosts,
     secrets: secretStore,
     suggestionEvents,
