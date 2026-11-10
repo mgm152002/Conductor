@@ -10,6 +10,8 @@ export interface AttachmentTrayProps {
   attachments: readonly AttachmentSummary[];
   onRemove?: ((id: string) => void) | undefined;
   onPick?: (() => void) | undefined;
+  /** False when the composer renders its own attach button (see AttachButton). */
+  picker?: boolean | undefined;
   busy?: boolean | undefined;
   disabled?: boolean | undefined;
   progress?: AttachmentProgress | null | undefined;
@@ -18,7 +20,7 @@ export interface AttachmentTrayProps {
 }
 
 /** Use in composers with draft handlers, or in history with just attachments. */
-export function AttachmentTray({ attachments, onRemove, onPick, busy = false, disabled = false, progress, errors = [], onClearErrors }: AttachmentTrayProps): React.JSX.Element {
+export function AttachmentTray({ attachments, onRemove, onPick, picker = true, busy = false, disabled = false, progress, errors = [], onClearErrors }: AttachmentTrayProps): React.JSX.Element {
   const [selected, setSelected] = useState<AttachmentSummary | null>(null);
   const close = useCallback(() => { setSelected(null); }, []);
   const preview = selected && attachments.some(item => item.id === selected.id) ? selected : null;
@@ -26,7 +28,7 @@ export function AttachmentTray({ attachments, onRemove, onPick, busy = false, di
   // inline preview instead of the small composer chip.
   const history = onPick === undefined && onRemove === undefined;
   return <div className="min-w-0 max-w-full space-y-2" aria-label="Attachments" aria-busy={busy}>
-    {onPick && <div className="flex flex-wrap items-center gap-2">
+    {onPick && picker && <div className="flex flex-wrap items-center gap-2">
       <Button variant="ghost" disabled={busy || disabled || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE} onClick={onPick}><PaperclipIcon />Attach files</Button>
       <span className="text-2xs text-muted-foreground">Up to {MAX_ATTACHMENTS_PER_MESSAGE} files, {formatAttachmentSize(MAX_ATTACHMENT_BYTES)} each</span>
     </div>}
@@ -43,4 +45,21 @@ export function AttachmentTray({ attachments, onRemove, onPick, busy = false, di
     </div>}
     <AttachmentPreviewDialog attachment={preview} onClose={close} />
   </div>;
+}
+
+/** The composer's attach control: a paperclip in the footer, with the limits in its tooltip. */
+export function AttachButton({ onPick, count, disabled = false }: { onPick: () => void; count: number; disabled?: boolean }): React.JSX.Element {
+  const limit = `Up to ${MAX_ATTACHMENTS_PER_MESSAGE} files, ${formatAttachmentSize(MAX_ATTACHMENT_BYTES)} each. You can also paste or drop files.`;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled || count >= MAX_ATTACHMENTS_PER_MESSAGE}
+      aria-label="Attach files"
+      title={`Attach files — ${limit}`}
+      className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <PaperclipIcon size={15} />
+    </button>
+  );
 }
