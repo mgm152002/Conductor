@@ -9,11 +9,14 @@ import { prNumberFromUrl, prPath } from '../../lib/pull-request';
 import { SnoozePickerDialog } from '../threads/SnoozePickerDialog';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
-import { CheckIcon, ClockIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
+import { ArrowLeftIcon, CheckIcon, ClockIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PencilIcon, PlayIcon, PullRequestIcon, RotateIcon } from '../ui/icons';
 import { RenameThreadDialog } from '../threads/RenameThreadDialog';
 import { EntityIcon } from '../ui/EntityIcon';
+import { useThreadSandboxAgent } from '../../stores/sandbox-agent-store';
+import { AgentAvatar } from '../ui/AgentAvatar';
+import { useThreadNavigation } from '../../hooks/useThreadNavigation';
 
-// The 52px thread header: project / thread breadcrumb, a status pill, the
+// The thread header: project / thread breadcrumb, a status pill, the
 // recovery actions that apply to the current state, and the details toggle.
 
 export function ChatHeader({ project, task, title }: { project: Workspace | undefined; task: Task | null; title?: Task }): React.JSX.Element {
@@ -23,6 +26,9 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   const tierPref = useThreadTierStore((s) => (task !== null ? s.prefs[threadKey(title ?? task)] : undefined));
   const detailsOpen = useUiStore((s) => s.detailsOpen);
   const setDetailsOpen = useUiStore((s) => s.setDetailsOpen);
+  const panelCollapsed = useUiStore((s) => s.panelCollapsed);
+  const sandboxAgent = useThreadSandboxAgent(task !== null ? threadKey(title ?? task) : null);
+  const { newThread } = useThreadNavigation();
   const [busy, setBusy] = useState<'retry' | 'resume' | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // Snooze timer for the open thread: fire exactly at `snoozedUntil` so the
@@ -91,7 +97,13 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   }
 
   return (
-    <header className="app-drag flex min-h-(--topbar-height) shrink-0 flex-wrap items-center gap-2 px-4 py-2">
+    <header className="flex min-h-(--topbar-height) shrink-0 flex-wrap items-center gap-1.5 border-b border-border px-4 py-2">
+      <Button size="icon" variant="ghost" aria-label={panelCollapsed ? 'Show thread list' : 'Hide thread list'} aria-pressed={!panelCollapsed} title="Thread list (⌘B)" onClick={() => { useUiStore.getState().setPanelCollapsed(!panelCollapsed); }} className={cn('size-7', !panelCollapsed && 'bg-accent text-foreground')}>
+        <PanelLeftIcon size={15} />
+      </Button>
+      <Button size="sm" variant="ghost" title="Back to the Work board" onClick={() => { void newThread(); }} className="mr-1 px-2">
+        <ArrowLeftIcon size={13} />Board
+      </Button>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 text-sm">
         {project !== undefined ? (
           <span className="flex min-w-0 max-w-[40%] items-center gap-1.5 text-muted-foreground" title={project.rootPath}>
@@ -102,20 +114,33 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
         {task !== null ? (
           <>
             <span className="text-muted-foreground/50" aria-hidden="true">/</span>
-            <h1 className="min-w-0 truncate font-medium text-foreground" title={(title ?? task).objective}>{threadTitle(title ?? task)}</h1>
+            <h1 className="min-w-0 truncate font-semibold text-foreground" title={(title ?? task).objective}>{threadTitle(title ?? task)}</h1>
+            {sandboxAgent !== undefined ? (
+              <span className="ml-1 flex shrink-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2 pl-0.5 text-2xs font-medium text-foreground" title={`Run by ${sandboxAgent.name}, with its own sandbox`}>
+                <AgentAvatar agent={sandboxAgent} size={20} mood={status?.active === true ? (task?.state === 'WAITING_FOR_APPROVAL' || pending.some((request) => request.taskId === task?.id) ? 'waiting' : 'working') : task?.state === 'COMPLETED' ? 'done' : task?.state === 'FAILED' ? 'error' : 'idle'} />{sandboxAgent.name}
+              </span>
+            ) : null}
           </>
         ) : (
           <h1 className="sr-only">New thread</h1>
         )}
         {status !== null ? (
-          <span className={cn('ml-1 flex shrink-0 items-center gap-1 text-2xs font-medium', status.colorClass)}>
+          <span className={cn('ml-1.5 flex h-5 shrink-0 items-center gap-1.5 rounded-full bg-current/10 px-2 text-2xs font-medium', status.colorClass)}>
             <span className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && tierInfo?.tier !== 'snoozed' && 'animate-status-pulse')} />
             {tierInfo?.tier === 'needs-attention' ? tierInfo.attentionLabel : tierInfo?.tier === 'snoozed' ? (snoozeCountdown !== null ? `Snoozed · wakes ${snoozeCountdown}` : 'Snoozed') : tierInfo?.tier === 'settled' ? 'Settled' : status.label}
           </span>
         ) : null}
       </div>
       {error !== null ? <span role="alert" className="max-w-64 truncate text-2xs text-destructive-foreground" title={error}>{error}</span> : null}
-      {task !== null && task.state === 'COMPLETED' && (title ?? task)?.prUrl === undefined ? (
+      {sandboxAgent !== undefined && task !== null ? (
+        <Button size="sm" variant="outline" title="Watch the agent’s sandbox desktop and browser live" onClick={() => {
+          setError(null);
+          void window.conductor.sandbox.openViewer(sandboxAgent.id).catch((err: unknown) => { setError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not open the sandbox'); });
+        }}>
+          <MonitorIcon size={13} />Watch
+        </Button>
+      ) : null}
+      {task !== null && project !== undefined && task.state === 'COMPLETED' && (title ?? task)?.prUrl === undefined ? (
         <Button
           size="sm"
           variant="outline"
