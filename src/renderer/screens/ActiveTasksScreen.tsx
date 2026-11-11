@@ -9,7 +9,7 @@ export function ActiveTasksScreen(): React.JSX.Element {
       title="Active tasks"
       screen="active-tasks"
       layout="dashboard"
-      icon={<TicketIcon size={14} />}
+      icon={<TicketIcon size={16} />}
     >
       {/* Ops wall: the live ticket feed takes the desk, resumptions wait in a rail. */}
       <div className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">

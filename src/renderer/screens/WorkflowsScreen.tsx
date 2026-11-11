@@ -64,7 +64,7 @@ export function WorkflowsScreen(): React.JSX.Element {
     else { const task = await window.conductor.workflows.start(request); setTaskId(task.id); setNotice(`Workflow version ${selected.version} started. Monitor its task for approvals and results.`); }
     setHistory(await window.conductor.workflows.history(selected.workflowId));
   }
-  return <ScreenScaffold title="Workflows" screen="workflows" layout="workbench" icon={<WorkflowIcon size={14} />}>
+  return <ScreenScaffold title="Workflows" screen="workflows" layout="workbench" icon={<WorkflowIcon size={16} />}>
     <div className="grid gap-5 text-foreground lg:grid-cols-[280px_minmax(0,1fr)]">
       <aside className={`${panelClass} self-start space-y-3 lg:sticky lg:top-5`} aria-label="Saved workflows">
         <div className="flex justify-between gap-2"><h2 className="font-semibold">Saved workflows</h2><button className={buttonClass} disabled={busy} onClick={newWorkflow}>New</button></div>

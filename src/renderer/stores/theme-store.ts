@@ -7,25 +7,27 @@ import type { Appearance } from '@shared/ipc-contract';
 // appearance so the whole UI can react from one place; `useSystemAppearance`
 // keeps it in sync with the bridge and applies the `dark` class to <html>.
 
-/** Accent colour themes (Settings > Appearance). `punch` is the default. */
-export type AccentId = 'punch' | 'cobalt' | 'plum' | 'pine' | 'marigold';
+/** Accent colour themes (Settings > Appearance). `orchid` is the default. */
+export type AccentId = 'orchid' | 'cobalt' | 'pine' | 'marigold' | 'ember';
 
 export const ACCENTS: Array<{ id: AccentId; label: string; swatch: string }> = [
-  { id: 'punch', label: 'Punch red', swatch: '#b23f16' },
-  { id: 'cobalt', label: 'Cobalt', swatch: '#2f4fc4' },
-  { id: 'plum', label: 'Plum', swatch: '#7431c8' },
-  { id: 'pine', label: 'Pine', swatch: '#1e7046' },
-  { id: 'marigold', label: 'Marigold', swatch: '#9c6a0a' },
+  { id: 'orchid', label: 'Orchid', swatch: '#c9379a' },
+  { id: 'cobalt', label: 'Cobalt', swatch: '#4a6fe8' },
+  { id: 'pine', label: 'Pine', swatch: '#2a9763' },
+  { id: 'marigold', label: 'Marigold', swatch: '#c58c1c' },
+  { id: 'ember', label: 'Ember', swatch: '#e0602c' },
 ];
 
-const ACCENT_KEY = 'conductor.accent';
+// Versioned: the Score palette replaced the earlier accent set, so a choice
+// stored against the old set is not carried over.
+const ACCENT_KEY = 'conductor.accent.v2';
 
 function loadAccent(): AccentId {
   try {
     const raw = window.localStorage.getItem(ACCENT_KEY);
-    return ACCENTS.some((accent) => accent.id === raw) ? (raw as AccentId) : 'punch';
+    return ACCENTS.some((accent) => accent.id === raw) ? (raw as AccentId) : 'orchid';
   } catch {
-    return 'punch';
+    return 'orchid';
   }
 }
 

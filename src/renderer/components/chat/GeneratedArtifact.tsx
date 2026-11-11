@@ -1,8 +1,10 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ARTIFACT_KIND_META, artifactFileName, normalizeSpec, type ArtifactImageData, type GeneratedArtifactSpec,
 } from '@shared/generated-artifacts';
-import { DownloadIcon, EyeIcon, FileTextIcon, PlayIcon, Spinner } from '../ui/icons';
+import { ChevronRightIcon, DownloadIcon, FileTextIcon, PlayIcon, Spinner, XIcon } from '../ui/icons';
+import { cn } from '../../lib/cn';
 import { buildVisualSrcDoc, normalizeSvgForImage } from '../../lib/visuals';
 import { contentBounds } from '@shared/content-bounds';
 import { useThemeStore } from '../../stores';
@@ -20,7 +22,7 @@ function ArtifactPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.E
     const slide = slides[Math.min(index, Math.max(0, slides.length - 1))];
     return (
       <div className="flex flex-col gap-2">
-        <div className="flex aspect-video w-full flex-col gap-3 overflow-y-auto rounded-lg border border-border bg-transparent px-6 py-5">
+        <div className="flex aspect-video w-full flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card px-6 py-5">
           <p className="text-lg font-semibold text-foreground">{slide?.title}</p>
           {slide?.body ? <p className="text-sm whitespace-pre-wrap text-muted-foreground">{slide.body}</p> : null}
           <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-foreground">
@@ -45,7 +47,7 @@ function ArtifactPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.E
   }
   const markdown = spec.content ?? slides.map((s) => `# ${s.title}\n${s.body ?? ''}\n${s.bullets.map((b) => `- ${b}`).join('\n')}`).join('\n\n');
   return (
-    <div className="max-h-[480px] overflow-y-auto rounded-lg border border-border px-4 py-3">
+    <div className="px-1">
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading preview…</p>}>
         <Markdown text={markdown} />
       </Suspense>
@@ -53,10 +55,122 @@ function ArtifactPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.E
   );
 }
 
-// A deliverable Conductor generated from an agent's artifact spec. No card
-// background: it sits transparently on the chat canvas, like the visuals.
-// While the file renders it shows a generation animation; a finished video
-// plays inline here, and every kind gets a Download button.
+// A deliverable Conductor generated from an agent's artifact spec. In the
+// conversation it is one compact card (what it is, its state, Download);
+// clicking the card opens the artifact panel at the right of the window with
+// the preview. A video shows its render canvas under the card while it
+// records, then plays in the panel.
+
+/** 42 → "42 bytes", 1_536 → "1.5 KB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} byte${bytes === 1 ? "" : "s"}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The artifact card shown in a conversation. The card itself opens the
+ * artifact; `action` is the trailing control (usually Download).
+ */
+export function ArtifactCard({ icon, title, meta, onOpen, open = false, busy = false, progress, error = false, action, label }: {
+  icon: ReactNode;
+  title: string;
+  /** One line under the title: kind, size or state. */
+  meta: ReactNode;
+  /** Omit while there is nothing to open yet. */
+  onOpen?: (() => void) | undefined;
+  open?: boolean;
+  busy?: boolean;
+  /** 0–1 while generating; draws a progress line on the card's lower edge. */
+  progress?: number | undefined;
+  error?: boolean;
+  action?: ReactNode;
+  label: string;
+}): React.JSX.Element {
+  return (
+    <div className={cn(
+      'group/artifact relative flex max-w-md items-stretch overflow-hidden rounded-xl border bg-card transition-[border-color,box-shadow]',
+      open ? 'border-primary/50 shadow-lift' : error ? 'border-destructive/30' : 'border-border hover:border-border-strong hover:shadow-lift',
+    )}>
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={onOpen === undefined}
+        aria-expanded={onOpen !== undefined ? open : undefined}
+        aria-label={label}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-2.5 pr-2 pl-2.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default"
+      >
+        <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-lg', error ? 'bg-destructive/10 text-destructive-foreground' : 'bg-primary/12 text-primary')}>
+          {busy ? <Spinner size={16} /> : icon}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-[13px] font-medium text-foreground" title={title}>{title}</span>
+          <span className={cn('truncate text-2xs', error ? 'text-destructive-foreground' : 'text-muted-foreground')}>{meta}</span>
+        </span>
+        {onOpen !== undefined ? <ChevronRightIcon size={14} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'translate-x-0.5 text-primary')} /> : null}
+      </button>
+      {action !== undefined ? <div className="flex shrink-0 items-center border-l border-border px-1.5">{action}</div> : null}
+      {progress !== undefined ? (
+        <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5 bg-accent">
+          <span className="block h-full bg-primary transition-[width] duration-200" style={{ width: `${Math.max(6, Math.min(1, progress) * 100)}%` }} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The trailing icon button on an artifact card or in the panel header. */
+export function ArtifactAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }): React.JSX.Element {
+  return (
+    <button type="button" onClick={onClick} aria-label={label} title={label} className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The artifact panel: a sheet docked to the right edge of the window, under
+ * the top bar, showing one artifact. Escape or the close button dismisses it;
+ * the conversation stays usable beside it.
+ */
+export function ArtifactPanel({ title, meta, icon, actions, onClose, children }: {
+  title: string;
+  meta: ReactNode;
+  icon: ReactNode;
+  actions?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}): React.JSX.Element | null {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); closeRef.current(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); };
+  }, []);
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <aside
+      role="complementary"
+      aria-label={`Artifact: ${title}`}
+      className="animate-slide-in fixed top-(--bar-height) right-0 bottom-0 z-40 flex w-[min(44rem,58vw)] min-w-[22rem] flex-col border-l border-border bg-background shadow-pop"
+    >
+      <header className="flex h-(--topbar-height) shrink-0 items-center gap-2.5 border-b border-border pr-2 pl-4">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-primary">{icon}</span>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-[13px] leading-tight font-semibold text-foreground" title={title}>{title}</h2>
+          <p className="truncate text-3xs text-muted-foreground">{meta}</p>
+        </div>
+        {actions}
+        <ArtifactAction label="Close artifact" onClick={onClose}><XIcon size={15} /></ArtifactAction>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div>
+    </aside>,
+    document.body,
+  );
+}
 
 interface Ready { url: string; fileName: string; sizeBytes: number; missingDiagrams?: number; missingReason?: string }
 type State = { status: 'generating'; progress: number } | { status: 'ready'; ready: Ready } | { status: 'failed'; error: string };
@@ -344,29 +458,9 @@ function generate(spec: GeneratedArtifactSpec, canvas: HTMLCanvasElement | null,
   return pending;
 }
 
-function Generating({ kind, progress, canvasRef }: { kind: GeneratedArtifactSpec['kind']; progress: number; canvasRef?: React.RefObject<HTMLCanvasElement | null> }): React.JSX.Element {
-  const label = `Generating ${ARTIFACT_KIND_META[kind].label.toLowerCase()}…`;
-  return (
-    <div className="flex flex-col gap-2 py-1" role="status" aria-label={label}>
-      {kind === 'video' ? (
-        <canvas ref={canvasRef} width={VIDEO_W} height={VIDEO_H} className="aspect-video w-full rounded-lg border border-border" aria-hidden="true" />
-      ) : (
-        <div className="flex flex-col gap-2" aria-hidden="true">
-          {[72, 48, 88, 60].map((width, i) => (
-            <div key={width} className="animate-pop-in h-3 rounded-sm bg-accent" style={{ width: `${width}%`, animationDelay: `${i * 110}ms` }} />
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-2 text-2xs text-muted-foreground">
-        <Spinner size={11} />
-        <span className="text-shimmer">{label}</span>
-        {kind === 'video' ? <span className="tabular-nums">{Math.round(progress * 100)}%</span> : null}
-      </div>
-      <div className="h-1 overflow-hidden rounded-full bg-accent" aria-hidden="true">
-        <div className="h-full rounded-full bg-primary transition-[width] duration-200" style={{ width: `${Math.max(8, progress * 100)}%` }} />
-      </div>
-    </div>
-  );
+/** The live canvas a video is painted and recorded on while it renders. */
+function VideoCanvas({ canvasRef }: { canvasRef: React.RefObject<HTMLCanvasElement | null> }): React.JSX.Element {
+  return <canvas ref={canvasRef} width={VIDEO_W} height={VIDEO_H} className="mt-2 aspect-video w-full max-w-md rounded-xl border border-border" aria-hidden="true" />;
 }
 
 export function GeneratedArtifact({ spec, complete = true }: { spec: GeneratedArtifactSpec | null; complete?: boolean }): React.JSX.Element {
@@ -392,10 +486,13 @@ export function GeneratedArtifact({ spec, complete = true }: { spec: GeneratedAr
     return () => { active = false; cancelAnimationFrame(frame); };
   }, [specKey, complete]);
 
+  const kind = spec?.kind ?? 'pdf';
+  const meta = ARTIFACT_KIND_META[kind];
+  const icon = kind === 'video' ? <PlayIcon size={17} /> : <FileTextIcon size={17} />;
   if (!complete) {
     return (
-      <div className="bg-transparent py-1">
-        <Generating kind={spec?.kind ?? 'pdf'} progress={0.15} />
+      <div className="my-1" role="status" aria-label={`Generating ${meta.label.toLowerCase()}…`}>
+        <ArtifactCard icon={icon} busy progress={0.15} title={spec?.title ?? meta.label} meta={<span className="text-shimmer">Writing {meta.label.toLowerCase()}…</span>} label={`Generating ${meta.label.toLowerCase()}`} />
       </div>
     );
   }
@@ -403,45 +500,50 @@ export function GeneratedArtifact({ spec, complete = true }: { spec: GeneratedAr
     return <p className="bg-transparent px-1 py-1 text-2xs text-muted-foreground">The agent’s file description could not be read, so no file was created.</p>;
   }
 
-  const meta = ARTIFACT_KIND_META[spec.kind];
+  const ready = state.status === 'ready' ? state.ready : null;
+  const cardMeta = state.status === 'generating'
+    ? <span className="text-shimmer">Generating {meta.label.toLowerCase()}…{spec.kind === 'video' ? ` ${Math.round(state.progress * 100)}%` : ''}</span>
+    : state.status === 'failed'
+      ? `Could not generate this ${meta.label.toLowerCase()}: ${state.error}`
+      : `${meta.label}, ${formatBytes(state.ready.sizeBytes)}. Click to open`;
   return (
-    <figure className="my-1 bg-transparent" aria-label={`${meta.label}: ${spec.title}`}>
-      <figcaption className="flex items-center gap-1.5 px-1 py-1.5 text-2xs font-medium text-muted-foreground">
-        {spec.kind === 'video' ? <PlayIcon size={12} className="text-primary" /> : <FileTextIcon size={12} className="text-primary" />}
-        <span className="min-w-0 flex-1 truncate">{spec.title} · {meta.label}</span>
-        {state.status === 'ready' ? (
-          <>
-            <span className="tabular-nums">{state.ready.sizeBytes.toLocaleString()} bytes</span>
-            {spec.kind !== 'video' ? (
-              <button
-                type="button"
-                onClick={() => { setPreviewOpen((v) => !v); }}
-                aria-expanded={previewOpen}
-                className="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-3xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                aria-label={previewOpen ? `Hide preview of ${state.ready.fileName}` : `Preview ${state.ready.fileName} in the app`}
-              >
-                <EyeIcon size={11} /> {previewOpen ? 'Hide preview' : 'Preview'}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => { download(state.ready.url, state.ready.fileName); }}
-              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 py-0.5 text-3xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              aria-label={`Download ${state.ready.fileName}`}
-            >
-              <DownloadIcon size={11} /> Download
-            </button>
-          </>
-        ) : null}
-      </figcaption>
-      {state.status === 'generating' ? <Generating kind={spec.kind} progress={state.progress} canvasRef={canvasRef} /> : null}
-      {state.status === 'failed' ? <p role="alert" className="px-1 text-2xs text-destructive-foreground">Could not generate this {meta.label.toLowerCase()}: {state.error}</p> : null}
-      {state.status === 'ready' && spec.kind === 'video' ? (
-        <video controls preload="metadata" src={state.ready.url} className="aspect-video w-full rounded-lg border border-border bg-black" aria-label={spec.title} />
+    <figure className="my-1" aria-label={`${meta.label}: ${spec.title}`}>
+      <div role={state.status === 'failed' ? 'alert' : state.status === 'generating' ? 'status' : undefined}>
+        <ArtifactCard
+          icon={icon}
+          title={spec.title}
+          meta={cardMeta}
+          busy={state.status === 'generating'}
+          progress={state.status === 'generating' ? state.progress : undefined}
+          error={state.status === 'failed'}
+          open={previewOpen}
+          onOpen={ready !== null ? () => { setPreviewOpen((v) => !v); } : undefined}
+          label={ready !== null ? `${previewOpen ? 'Close' : 'Open'} ${ready.fileName}` : `${meta.label}: ${spec.title}`}
+          action={ready !== null ? (
+            <ArtifactAction label={`Download ${ready.fileName}`} onClick={() => { download(ready.url, ready.fileName); }}><DownloadIcon size={15} /></ArtifactAction>
+          ) : undefined}
+        />
+      </div>
+      {state.status === 'generating' && spec.kind === 'video' ? <VideoCanvas canvasRef={canvasRef} /> : null}
+      {ready !== null && ready.missingDiagrams !== undefined ? (
+        <p className="mt-1.5 px-1 text-2xs text-muted-foreground">{ready.missingDiagrams} diagram{ready.missingDiagrams === 1 ? '' : 's'} could not be embedded in the file{ready.missingReason !== undefined ? ` (${ready.missingReason})` : ''}; the preview still shows {ready.missingDiagrams === 1 ? 'it' : 'them'}.</p>
       ) : null}
-      {state.status === 'ready' && spec.kind !== 'video' && previewOpen ? <ArtifactPreview spec={spec} /> : null}
-      {state.status === 'ready' && state.ready.missingDiagrams !== undefined ? (
-        <p className="px-1 text-2xs text-muted-foreground">{state.ready.missingDiagrams} diagram{state.ready.missingDiagrams === 1 ? '' : 's'} could not be embedded in the file{state.ready.missingReason !== undefined ? ` (${state.ready.missingReason})` : ''}; the preview still shows {state.ready.missingDiagrams === 1 ? 'it' : 'them'} here.</p>
+      {ready !== null && previewOpen ? (
+        <ArtifactPanel
+          title={spec.title}
+          meta={`${ready.fileName}, ${formatBytes(ready.sizeBytes)}`}
+          icon={kind === 'video' ? <PlayIcon size={14} /> : <FileTextIcon size={14} />}
+          onClose={() => { setPreviewOpen(false); }}
+          actions={(
+            <button type="button" onClick={() => { download(ready.url, ready.fileName); }} className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-semibold text-primary-foreground transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
+              <DownloadIcon size={13} />Download
+            </button>
+          )}
+        >
+          {spec.kind === 'video'
+            ? <video controls preload="metadata" src={ready.url} className="aspect-video w-full rounded-xl border border-border bg-black" aria-label={spec.title} />
+            : <ArtifactPreview spec={spec} />}
+        </ArtifactPanel>
       ) : null}
     </figure>
   );

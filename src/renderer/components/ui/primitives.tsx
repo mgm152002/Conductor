@@ -3,27 +3,27 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../lib/cn';
 import { XIcon } from './icons';
 
-// Shared UI primitives in the dispatch-ledger idiom: squared ticket-stub
-// controls, hairline borders, punch red for the primary action (with a hard
-// offset shadow so it reads as stamped, not floating), and visible focus rings.
+// Shared UI primitives in the Score idiom: soft-cornered controls, hairline
+// borders, the accent reserved for the one primary action, and visible focus
+// rings. Nothing floats on an offset shadow; depth is surface on surface.
 
 type Variant = 'default' | 'primary' | 'outline' | 'ghost' | 'destructive' | 'destructive-outline';
 type Size = 'xs' | 'sm' | 'md' | 'icon' | 'icon-sm';
 
 const VARIANTS: Record<Variant, string> = {
   default: 'bg-foreground text-background hover:opacity-90',
-  primary: 'bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--shadow-hard-color)] hover:brightness-110',
-  outline: 'border border-border bg-card text-foreground shadow-xs hover:bg-accent',
+  primary: 'bg-primary text-primary-foreground font-semibold hover:brightness-110',
+  outline: 'border border-border-strong bg-card text-foreground hover:bg-accent',
   ghost: 'bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
   destructive: 'bg-destructive text-white hover:opacity-90',
   'destructive-outline': 'border border-destructive/30 text-destructive-foreground hover:bg-destructive/10',
 };
 
 const SIZES: Record<Size, string> = {
-  xs: 'h-6 gap-1 rounded-md px-2.5 text-2xs',
-  sm: 'h-7 gap-1.5 rounded-md px-3 text-xs',
-  md: 'h-8 gap-2 rounded-md px-3.5 text-sm',
-  icon: 'size-8 rounded-md',
+  xs: 'h-6 gap-1 rounded-md px-2 text-2xs',
+  sm: 'h-7 gap-1.5 rounded-lg px-2.5 text-xs',
+  md: 'h-8 gap-2 rounded-lg px-3.5 text-[13px]',
+  icon: 'size-8 rounded-lg',
   'icon-sm': 'size-6 rounded-md',
 };
 
@@ -62,7 +62,7 @@ export function Badge({ children, className, tone = 'neutral' }: { children: Rea
     info: 'border-info/25 bg-info/8 text-info',
     primary: 'border-primary/25 bg-primary/10 text-primary',
   } as const;
-  return <span className={cn('inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-3xs font-medium whitespace-nowrap', tones[tone], className)}>{children}</span>;
+  return <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-3xs font-medium whitespace-nowrap', tones[tone], className)}>{children}</span>;
 }
 
 export function Kbd({ children }: { children: ReactNode }): React.JSX.Element {
@@ -86,8 +86,8 @@ export function Alert({ children, tone = 'destructive', action }: { children: Re
 export function EmptyState({ title, description, children, icon }: { title: string; description?: ReactNode; children?: ReactNode; icon?: ReactNode }): React.JSX.Element {
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 px-6 py-14 text-center">
-      {icon !== undefined ? <div className="mb-2 flex size-11 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-[3px_3px_0_0_var(--shadow-hard-color)]">{icon}</div> : null}
-      <p className="font-display text-lg font-semibold text-foreground">{title}</p>
+      {icon !== undefined ? <div className="mb-2 flex size-11 items-center justify-center rounded-2xl bg-primary/12 text-primary">{icon}</div> : null}
+      <p className="font-display text-base font-semibold text-foreground">{title}</p>
       {description !== undefined ? <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">{description}</p> : null}
       {children !== undefined ? <div className="mt-3 flex gap-2">{children}</div> : null}
     </div>
@@ -140,8 +140,8 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
   if (!open) return null;
   const dialog = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
-      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn('animate-pop-in relative z-10 w-full rounded-xl border border-border bg-surface-raised p-5 text-foreground shadow-2xl outline-none', width)}>
+      <div className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
+      <div ref={panel} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className={cn('animate-pop-in relative z-10 w-full rounded-2xl border border-border bg-surface-raised p-5 text-foreground shadow-pop outline-none', width)}>
         <div className="mb-3 flex items-start justify-between gap-4">
           <div>
             <h2 id={titleId} className="font-display text-base font-semibold">{title}</h2>
@@ -174,12 +174,12 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       disabled={disabled}
       onClick={() => { onChange(!checked); }}
       className={cn(
-        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-45',
+        'relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-45',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         checked ? 'bg-primary' : 'bg-input',
       )}
     >
-      <span className={cn('inline-block size-5 rounded-full bg-white shadow transition-transform duration-200 ease-drawer', checked ? 'translate-x-[22px]' : 'translate-x-0.5')} />
+      <span className={cn('inline-block size-[18px] rounded-full bg-white shadow transition-transform duration-200 ease-drawer', checked ? 'translate-x-[18px]' : 'translate-x-0.5')} />
     </button>
   );
 }

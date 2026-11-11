@@ -18,7 +18,8 @@ import { UsageIcon } from '../components/ui/icons';
 // The Cost/Tokens/Limits bodies live in `components/usage` (tasks 3.2/3.3);
 // this shell only owns the header, range selection, and data lifecycle.
 
-const DEFAULT_RANGE: UsageRange = '7d';
+// A month by default: a week routinely hides a CLI that was used last week.
+const DEFAULT_RANGE: UsageRange = '30d';
 const DEFAULT_VIEW: UsageView = 'cost';
 
 export interface UsageScreenViewProps {
@@ -76,7 +77,7 @@ export function UsageScreenView({
       title="Usage"
       screen="usage"
       layout="dashboard"
-      icon={<UsageIcon size={14} />}
+      icon={<UsageIcon size={16} />}
       actions={(
         <UsageHeader
           view={view}

@@ -5,6 +5,7 @@ import { DeleteProjectDialog } from '../projects/DeleteProjectDialog';
 import { Button } from '../ui/primitives';
 import { ImageIcon, TrashIcon } from '../ui/icons';
 import { EntityIcon } from '../ui/EntityIcon';
+import { cn } from '../../lib/cn';
 import { IconPickerDialog } from '../icons/IconPickerDialog';
 
 // Workspace create/list/select wired to the `window.conductor.workspace` bridge
@@ -62,11 +63,11 @@ export function WorkspaceManager(): React.JSX.Element {
             No workspaces yet. Create one below to start.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border">
+          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
             {workspaces.map((workspace) => {
               const isActive = workspace.id === activeWorkspaceId;
               return (
-                <li key={workspace.id} className="flex items-stretch">
+                <li key={workspace.id} className="group/project relative flex items-stretch">
                   <button
                     type="button"
                     onClick={() => {
@@ -75,33 +76,35 @@ export function WorkspaceManager(): React.JSX.Element {
                       });
                     }}
                     aria-pressed={isActive}
-                    className={
-                      isActive
-                        ? 'flex w-full min-w-0 flex-col items-start gap-0.5 bg-accent px-3 py-2 text-left'
-                        : 'flex w-full min-w-0 flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors hover:bg-accent'
-                    }
+                    title={isActive ? 'Active project' : 'Make this the active project'}
+                    className={cn(
+                      'flex w-full min-w-0 cursor-pointer items-center gap-3 px-3.5 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                      isActive ? 'bg-primary/7' : 'hover:bg-accent',
+                    )}
                   >
-                    <span className="flex w-full items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-2 truncate text-[13px] font-medium text-foreground">
-                        <EntityIcon icon={workspace.icon ?? null} name={workspace.name} kind="project" />
-                        {workspace.name}
+                    <EntityIcon icon={workspace.icon ?? null} name={workspace.name} kind="project" size={28} active={isActive} />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-[13px] font-semibold text-foreground">{workspace.name}</span>
+                        {isActive ? (
+                          <span className="shrink-0 rounded-full bg-success/12 px-1.5 py-px text-3xs font-medium text-success">
+                            Active
+                          </span>
+                        ) : null}
                       </span>
-                      {isActive ? (
-                        <span className="shrink-0 text-2xs font-medium text-success">
-                          Active
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="w-full truncate font-mono text-2xs text-muted-foreground">
-                      {workspace.rootPath}
+                      <span className="w-full truncate pr-16 font-mono text-2xs text-muted-foreground" title={workspace.rootPath}>
+                        {workspace.rootPath}
+                      </span>
                     </span>
                   </button>
-                  <Button variant="outline" size="sm" className="m-1.5 shrink-0 self-center" aria-label={`Icon for ${workspace.name}`} onClick={() => { setIconProject(workspace); }}>
-                    <ImageIcon size={12} />Icon
-                  </Button>
-                  <Button variant="destructive-outline" size="sm" className="m-1.5 shrink-0 self-center" aria-label={`Delete ${workspace.name}`} onClick={() => { setDeleting(workspace); }}>
-                    <TrashIcon size={12} />Delete
-                  </Button>
+                  <span className="absolute top-2 right-2 flex items-center gap-0.5 opacity-60 transition-opacity group-focus-within/project:opacity-100 group-hover/project:opacity-100">
+                    <Button variant="ghost" size="icon-sm" title="Change icon" aria-label={`Icon for ${workspace.name}`} onClick={() => { setIconProject(workspace); }}>
+                      <ImageIcon size={13} />
+                    </Button>
+                    <Button variant="ghost" size="icon-sm" title="Delete project" className="hover:text-destructive-foreground" aria-label={`Delete ${workspace.name}`} onClick={() => { setDeleting(workspace); }}>
+                      <TrashIcon size={13} />
+                    </Button>
+                  </span>
                 </li>
               );
             })}
@@ -110,47 +113,54 @@ export function WorkspaceManager(): React.JSX.Element {
       </div>
 
       <form
-        className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3"
+        className="flex flex-col gap-3 rounded-xl border border-dashed border-border-strong p-3.5"
         onSubmit={(event) => {
           void handleCreate(event);
         }}
         aria-label="Create workspace"
       >
-        <label
-          htmlFor="workspace-name"
-          className="text-2xs font-medium text-muted-foreground"
-        >
-          Name
-        </label>
-        <input
-          id="workspace-name"
-          type="text"
-          value={name}
-          maxLength={255}
-          onChange={(event) => {
-            setName(event.target.value);
-          }}
-          className="inset-field h-8 px-2.5 text-[13px]"
-          placeholder="My project"
-        />
-        <label
-          htmlFor="workspace-root"
-          className="text-2xs font-medium text-muted-foreground"
-        >
-          Root path
-        </label>
-        <input
-          id="workspace-root"
-          type="text"
-          value={rootPath}
-          onChange={(event) => {
-            setRootPath(event.target.value);
-          }}
-          className="inset-field h-8 px-2.5 font-mono text-[13px]"
-          placeholder="/Users/you/projects/my-project"
-        />
+        <p className="text-[13px] font-semibold text-foreground">Add a project</p>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <div className="flex min-w-0 flex-col gap-1">
+            <label
+              htmlFor="workspace-name"
+              className="text-2xs font-medium text-muted-foreground"
+            >
+              Name
+            </label>
+            <input
+              id="workspace-name"
+              type="text"
+              value={name}
+              maxLength={255}
+              onChange={(event) => {
+                setName(event.target.value);
+              }}
+              className="inset-field h-8 px-2.5 text-[13px]"
+              placeholder="My project"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <label
+              htmlFor="workspace-root"
+              className="text-2xs font-medium text-muted-foreground"
+            >
+              Root path
+            </label>
+            <input
+              id="workspace-root"
+              type="text"
+              value={rootPath}
+              onChange={(event) => {
+                setRootPath(event.target.value);
+              }}
+              className="inset-field h-8 px-2.5 font-mono text-[13px]"
+              placeholder="/Users/you/projects/my-project"
+            />
+          </div>
+        </div>
         {error !== null ? (
-          <p className="text-xs text-destructive-foreground">{error}</p>
+          <p role="alert" className="text-xs text-destructive-foreground">{error}</p>
         ) : null}
         <Button variant="primary" size="sm" type="submit" disabled={!canCreate} className="self-start">
           {submitting ? 'Creating…' : 'Create workspace'}

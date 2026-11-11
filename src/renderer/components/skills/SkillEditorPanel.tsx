@@ -302,7 +302,7 @@ function VersionsTab({ controller }: SkillEditorPanelProps): React.JSX.Element {
           </dl>
 
           <div>
-            <h4 className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">Changes in this draft</h4>
+            <h4 className="text-2xs font-semibold text-muted-foreground">Changes in this draft</h4>
             {changes.length === 0 ? (
               <p className="mt-1 text-xs text-muted-foreground">The editor matches version {viewing.version}.</p>
             ) : (
