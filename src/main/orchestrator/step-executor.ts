@@ -151,6 +151,11 @@ export interface StepExecutorOptions {
   onStepSettled?: (taskId: string, stepId: string) => void;
   /** Settings-configured fallback model for an agent after a retryable failure. */
   fallbackModel?: (agentId: string) => string | undefined;
+  /**
+   * The CLIs a task may fall back to, in order (a sandbox agent's own list).
+   * Undefined means any available CLI, in the shared preference order.
+   */
+  fallbackOrder?: (task: Task) => readonly string[] | undefined;
 }
 
 /** Default number of steps of one task that run at once. */
@@ -195,6 +200,7 @@ export class StepExecutor {
   private readonly resolveInput: StepExecutorOptions['resolveInput'];
   private readonly onStepSettled: ((taskId: string, stepId: string) => void) | undefined;
   private readonly fallbackModel: StepExecutorOptions['fallbackModel'];
+  private readonly fallbackOrder: StepExecutorOptions['fallbackOrder'];
 
   constructor(
     private readonly store: Store,
@@ -221,6 +227,7 @@ export class StepExecutor {
     this.resolveInput = options.resolveInput;
     this.onStepSettled = options.onStepSettled;
     this.fallbackModel = options.fallbackModel;
+    this.fallbackOrder = options.fallbackOrder;
   }
 
   /** Tell observers that a step reached a final status. */
@@ -1015,11 +1022,16 @@ export class StepExecutor {
     // Only objective-fulfilment steps carry a per-agent alternate; other
     // capabilities route deterministically and have no provider fallback here.
     if (capability === undefined || !capability.startsWith('objective.fulfill.')) return false;
+    // A sandbox agent falls back only through the CLIs it was given, in its
+    // order; other tasks use any available CLI in the shared preference order.
+    const order = this.fallbackOrder?.(task);
+    const rank = (id: string): number => (order === undefined ? 0 : order.indexOf(id));
     const next = this.registry.listAdapters()
       .filter((a) => a.available
         && !tried.has(a.id)
-        && a.capabilities.some((c) => c.id === `objective.fulfill.${a.id}`))
-      .sort((a, b) => compareAgentPreference(a.id, b.id))[0];
+        && a.capabilities.some((c) => c.id === `objective.fulfill.${a.id}`)
+        && (order === undefined || order.includes(a.id)))
+      .sort((a, b) => rank(a.id) - rank(b.id) || compareAgentPreference(a.id, b.id))[0];
     if (next === undefined) return false;
     this.store.db.prepare('UPDATE task_steps SET assigned_adapter_id = ?, required_capability = ? WHERE id = ?')
       .run(next.id, `objective.fulfill.${next.id}`, step.id);

@@ -8,7 +8,7 @@ export function LearningScreen(): React.JSX.Element {
       title="Learning"
       screen="learning"
       layout="wide"
-      icon={<GradCapIcon size={14} />}
+      icon={<GradCapIcon size={16} />}
     >
       <LearningPanel />
     </ScreenScaffold>

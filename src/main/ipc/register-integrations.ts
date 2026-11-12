@@ -4,6 +4,10 @@ import { compareAgentPreference } from '@shared/agent-preference';
 import { INTEGRATION_SCHEMAS, type RemoteHostView } from '@shared/integrations-contract';
 import type { Registry } from '../registry/registry';
 import type { SecretStore } from '../secrets/secret-store';
+import type { CliMcpManager } from '../mcp/cli-mcp';
+import type { SandboxManager } from '../sandbox/sandbox-manager';
+import type { SandboxAgentService } from '../sandbox/sandbox-agents';
+import { openSandboxViewer } from '../sandbox/sandbox-viewer';
 import type { McpService } from '../mcp/mcp-service';
 import type { RemoteHost, RemoteHostService } from '../adapters/remote-hosts';
 import type { ProactiveAssistant } from '../domain/proactive-assistant-service';
@@ -28,6 +32,10 @@ export class IpcSuggestionEmitter implements SuggestionEmitter {
 }
 
 export interface IntegrationDeps {
+  /** MCP servers in each agent CLI's own configuration. */
+  cliMcp: CliMcpManager;
+  sandboxes: SandboxManager;
+  sandboxAgents: SandboxAgentService;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -76,6 +84,47 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('mcp.oauth.cancel', S['mcp.oauth.cancel'], (_e, input) => { deps.mcp.cancelOAuth(input.id); });
   router.handle('mcp.setSecret', S['mcp.setSecret'], (_e, input) => deps.mcp.setSecret(input.id, input.name, input.value));
   router.handle('mcp.clearSecret', S['mcp.clearSecret'], (_e, input) => deps.mcp.clearSecret(input.id, input.name));
+  router.handle('agents.sandbox.list', S['agents.sandbox.list'], () => deps.sandboxAgents.list());
+  router.handle('agents.sandbox.create', S['agents.sandbox.create'], (_e, input) => deps.sandboxAgents.create(input));
+  router.handle('agents.sandbox.update', S['agents.sandbox.update'], (_e, { id, ...input }) => deps.sandboxAgents.update(id, input));
+  router.handle('agents.sandbox.remove', S['agents.sandbox.remove'], (_e, input) => { deps.sandboxAgents.remove(input.id); });
+  router.handle('agents.sandbox.threads', S['agents.sandbox.threads'], () => deps.sandboxAgents.threadAgents());
+  router.handle('agents.workspace', S['agents.workspace'], () => deps.sandboxAgents.agentWorkspaceId());
+  router.handle('agents.group.list', S['agents.group.list'], () => ({ groups: deps.sandboxAgents.listGroups(), groupThreads: deps.sandboxAgents.groupThreadMap() }));
+  router.handle('agents.group.create', S['agents.group.create'], (_e, input) => deps.sandboxAgents.createGroup(input.name, input.agentIds));
+  router.handle('agents.group.remove', S['agents.group.remove'], (_e, input) => { deps.sandboxAgents.removeGroup(input.id); });
+  router.handle('agents.group.messages', S['agents.group.messages'], (_e, input) => deps.sandboxAgents.groupMessages(input.groupId));
+  router.handle('agents.group.send', S['agents.group.send'], (_e, input) => deps.sandboxAgents.sendGroup({
+    groupId: input.groupId, text: input.text,
+    ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+    ...(input.agentIds !== undefined ? { agentIds: input.agentIds } : {}),
+    ...(input.context !== undefined ? { context: input.context } : {}),
+    ...(input.attachmentIds !== undefined ? { attachmentIds: input.attachmentIds } : {}),
+  }));
+  router.handle('sandbox.status', S['sandbox.status'], () => deps.sandboxes.status());
+  router.handle('sandbox.pull', S['sandbox.pull'], async () => {
+    // Downloads take minutes; start it and let the renderer poll status.
+    void deps.sandboxes.pullImage().catch(() => undefined);
+    return deps.sandboxes.status();
+  });
+  router.handle('sandbox.stop', S['sandbox.stop'], (_e, input) => deps.sandboxes.stop(input.agentId));
+  router.handle('sandbox.viewer', S['sandbox.viewer'], (_e, input) => {
+    const endpoint = deps.sandboxes.endpoint(input.agentId);
+    if (endpoint === undefined) throw new Error('This agent’s sandbox isn’t running. It starts when the agent first uses a sandbox tool.');
+    openSandboxViewer(endpoint, deps.sandboxAgents.get(input.agentId)?.name);
+  });
+  router.handle('mcp.cli.overview', S['mcp.cli.overview'], (_e, input) => deps.cliMcp.overview({ sync: input?.sync === true }));
+  router.handle('mcp.cli.sync', S['mcp.cli.sync'], () => deps.cliMcp.sync());
+  router.handle('mcp.cli.setAutoSync', S['mcp.cli.setAutoSync'], (_e, input) => deps.cliMcp.setAutoSync(input.enabled));
+  router.handle('mcp.cli.add', S['mcp.cli.add'], (_e, input) => deps.cliMcp.add({
+    name: input.name, endpoint: input.endpoint,
+    ...(input.env !== undefined ? { env: input.env } : {}),
+    ...(input.headers !== undefined ? { headers: input.headers } : {}),
+    ...(input.clis !== undefined ? { clis: input.clis } : {}),
+  }));
+  router.handle('mcp.cli.install', S['mcp.cli.install'], (_e, input) => deps.cliMcp.installExisting(input.key, input.cli));
+  router.handle('mcp.cli.remove', S['mcp.cli.remove'], (_e, input) => deps.cliMcp.removeFromCli(input.key, input.cli));
+  router.handle('mcp.cli.removeEverywhere', S['mcp.cli.removeEverywhere'], (_e, input) => deps.cliMcp.removeEverywhere(input.key));
 
   router.handle('remote.list', S['remote.list'], () => deps.remote.list().map(remoteView));
   router.handle('remote.add', S['remote.add'], (_e, input) => remoteView(deps.remote.add(input)));

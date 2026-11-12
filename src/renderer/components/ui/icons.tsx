@@ -32,6 +32,7 @@ export const GlobeIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" 
 export const BugIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="8" width="10" height="12" rx="5" /><path d="M12 8V4M7 12H3M7 17l-3 2M17 12h4M17 17l3 2M5 5l3 3M19 5l-3 3" /></Icon>;
 export const NoteIcon = (p: IconProps) => <Icon {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5M9 12h7M9 16h7" /></Icon>;
 export const ShapesIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="8" height="8" rx="1" /><circle cx="16.5" cy="7.5" r="4" /><path d="m8 14 4 7H4z" /><rect x="14" y="14" width="7" height="7" rx="1" /></Icon>;
+export const ArrowLeftIcon = (p: IconProps) => <Icon {...p}><path d="M19 12H5M11 6l-6 6 6 6" /></Icon>;
 export const ArrowUpIcon = (p: IconProps) => <Icon {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Icon>;
 export const StopIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></Icon>;
 export const ChevronRightIcon = (p: IconProps) => <Icon {...p}><path d="m9 6 6 6-6 6" /></Icon>;
@@ -95,3 +96,8 @@ export const CalendarIcon = (p: IconProps) => <Icon {...p}><rect x="3.5" y="5" w
 export const MessageIcon = (p: IconProps) => <Icon {...p}><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" /></Icon>;
 export const ServerIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="7" rx="1.5" /><rect x="3" y="13" width="18" height="7" rx="1.5" /><path d="M7 7.5h.01M7 16.5h.01" /></Icon>;
 export const KeyIcon = (p: IconProps) => <Icon {...p}><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M15 8l2 2" /></Icon>;
+export const InboxIcon = (p: IconProps) => <Icon {...p}><path d="M4 13.5 6.4 5.6A2 2 0 0 1 8.3 4h7.4a2 2 0 0 1 1.9 1.6L20 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><path d="M4 13.5h4.5l1 2.5h5l1-2.5H20" /></Icon>;
+export const CommandIcon = (p: IconProps) => <Icon {...p}><path d="M9 9h6v6H9zM9 9V6.5A2.5 2.5 0 1 0 6.5 9zM15 9V6.5A2.5 2.5 0 1 1 17.5 9zM9 15v2.5A2.5 2.5 0 1 1 6.5 15zM15 15v2.5a2.5 2.5 0 1 0 2.5-2.5z" /></Icon>;
+export const ReturnIcon = (p: IconProps) => <Icon {...p}><path d="M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4" /></Icon>;
+export const FolderPlusIcon = (p: IconProps) => <Icon {...p}><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M12 11v5M9.5 13.5h5" /></Icon>;
+export const UsersIcon = (p: IconProps) => <Icon {...p}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6" /><circle cx="17" cy="9" r="2.6" /><path d="M16.5 14.2c2.6.2 4.4 2.2 5 5" /></Icon>;

@@ -12,7 +12,7 @@ export function EntityIcon({ icon, name, kind, size = 20, active = false }: {
   active?: boolean;
 }): React.JSX.Element {
   if (icon) {
-    return <img src={icon} alt="" aria-hidden="true" width={size} height={size} className="shrink-0 rounded-sm object-cover" style={{ width: size, height: size }} />;
+    return <img src={icon} alt="" aria-hidden="true" width={size} height={size} className="shrink-0 rounded-md object-cover" style={{ width: size, height: size }} />;
   }
   if (kind === 'space') {
     return (
@@ -22,7 +22,7 @@ export function EntityIcon({ icon, name, kind, size = 20, active = false }: {
     );
   }
   return (
-    <span aria-hidden="true" className={cn('flex shrink-0 items-center justify-center rounded-sm text-3xs font-bold tracking-wide', active ? 'bg-primary text-primary-foreground' : 'bg-sidebar-row-active text-sidebar-muted-foreground')} style={{ width: size, height: size }}>
+    <span aria-hidden="true" className={cn('flex shrink-0 items-center justify-center rounded-md text-3xs font-bold', active ? 'bg-primary/18 text-primary' : 'bg-accent text-muted-foreground')} style={{ width: size, height: size }}>
       {name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'P'}
     </span>
   );

@@ -104,8 +104,8 @@ export function MenuSelect({ value, options, onChange, label, disabled, variant 
         className={cn(
           'flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-1.5 text-xs whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none disabled:cursor-default disabled:opacity-60',
           variant === 'pill'
-            ? 'rounded-md pr-1.5 pl-2 text-muted-foreground hover:bg-accent hover:text-foreground'
-            : 'h-8 w-full rounded-md border border-border bg-transparent px-2 text-foreground hover:border-border-strong',
+            ? 'rounded-full pr-2 pl-2.5 text-muted-foreground hover:bg-accent hover:text-foreground'
+            : 'h-8 w-full rounded-lg border border-input bg-card px-2.5 text-foreground hover:border-border-strong',
           className,
         )}
       >
@@ -119,7 +119,7 @@ export function MenuSelect({ value, options, onChange, label, disabled, variant 
           role="menu"
           aria-label={label}
           style={{ left: pos.left, width: pos.width, ...(pos.above ? { bottom: window.innerHeight - pos.top } : { top: pos.top }) }}
-          className="animate-pop-in fixed z-50 flex max-h-80 flex-col overflow-hidden rounded-lg border border-border-strong bg-surface-raised shadow-xl"
+          className="animate-pop-in fixed z-50 flex max-h-80 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised shadow-pop"
         >
           {searchable ? (
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-2.5 py-2">

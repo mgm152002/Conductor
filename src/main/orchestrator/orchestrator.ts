@@ -247,6 +247,7 @@ export interface OrchestratorOptions {
   onStepSettled?: (taskId: string, stepId: string) => void;
   resolveInput?: import('./step-executor').StepExecutorOptions['resolveInput'];
   fallbackModel?: import('./step-executor').StepExecutorOptions['fallbackModel'];
+  fallbackOrder?: import('./step-executor').StepExecutorOptions['fallbackOrder'];
 }
 
 /** The default routing subject when none is injected. */
@@ -323,6 +324,7 @@ export class Orchestrator {
         ...(options.resolveInput !== undefined ? { resolveInput: options.resolveInput } : {}),
         ...(options.onStepSettled !== undefined ? { onStepSettled: options.onStepSettled } : {}),
         ...(options.fallbackModel !== undefined ? { fallbackModel: options.fallbackModel } : {}),
+        ...(options.fallbackOrder !== undefined ? { fallbackOrder: options.fallbackOrder } : {}),
       },
     );
 

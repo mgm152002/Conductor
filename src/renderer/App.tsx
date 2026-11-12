@@ -20,6 +20,7 @@ const SkillsScreen = lazy(() => import('./screens/SkillsScreen').then((m) => ({ 
 const ConnectedAppsScreen = lazy(() => import('./screens/ConnectedAppsScreen').then((m) => ({ default: m.ConnectedAppsScreen })));
 const MemoryScreen = lazy(() => import('./screens/MemoryScreen').then((m) => ({ default: m.MemoryScreen })));
 const UsageScreen = lazy(() => import('./screens/UsageScreen').then((m) => ({ default: m.UsageScreen })));
+const AgentsScreen = lazy(() => import('./screens/AgentsScreen').then((m) => ({ default: m.AgentsScreen })));
 const SettingsScreen = lazy(() => import('./screens/SettingsScreen').then((m) => ({ default: m.SettingsScreen })));
 
 function ScreenFallback(): React.JSX.Element {
@@ -56,6 +57,7 @@ export function App(): React.JSX.Element {
         <Route element={<AppLayout />}>
           <Route index element={<Navigate to={DEFAULT_PATH} replace />} />
           <Route path="work" element={<WorkScreen />} />
+          <Route path="agents" element={<Suspense fallback={<ScreenFallback />}><AgentsScreen /></Suspense>} />
           <Route path="pr/:workspaceId/:number" element={<Suspense fallback={<ScreenFallback />}><PullRequestScreen /></Suspense>} />
           {NAV_ENTRIES.map((entry) => {
             const Screen = SCREENS[entry.id];

@@ -336,7 +336,7 @@ export function MemoryScreen(): React.JSX.Element {
   );
 
   return (
-    <ScreenScaffold title="Memory" actions={headerActions} screen="memory" layout="dashboard" icon={<BrainIcon size={14} />}>
+    <ScreenScaffold title="Memory" actions={headerActions} screen="memory" layout="dashboard" icon={<BrainIcon size={16} />}>
       <div className="min-w-0 max-w-full space-y-4 text-foreground">
         {/* Segmented view toggle */}
         <div className="inline-flex rounded-lg bg-muted/50 p-0.5" role="tablist" aria-label="Knowledge category">

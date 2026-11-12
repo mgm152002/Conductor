@@ -4,7 +4,8 @@ import { useComposerStore, useTaskStore, useUiStore, useWorkspaceStore } from '.
 import { isWorkingState } from '../../lib/thread-status';
 import { useThreadNavigation } from '../../hooks/useThreadNavigation';
 import { cn } from '../../lib/cn';
-import { ArrowUpIcon, ClockIcon, FolderIcon, LayersIcon, SparklesIcon, Spinner, StopIcon, XIcon } from '../ui/icons';
+import { ArrowUpIcon, ClockIcon, FolderIcon, LayersIcon, MonitorIcon, SparklesIcon, Spinner, StopIcon, XIcon } from '../ui/icons';
+import { SANDBOX_AGENT_PREFIX, sandboxAgentIdFrom, useSandboxAgentStore } from '../../stores/sandbox-agent-store';
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import { ProviderAvatar, agentBrand } from '../ui/BrandMarks';
 import { MenuSelect } from '../ui/MenuSelect';
@@ -12,11 +13,11 @@ import { useAgents } from '../../hooks/useAgents';
 import type { RunOptions } from '@shared/agent-models';
 import { preferredAgent } from '@shared/agent-preference';
 import { ModelEffortPicker } from './ModelEffortPicker';
-import { AttachmentTray, useAttachmentDraft } from '../attachments';
+import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 
-// The chat composer, a ticket waiting to be punched: a squared floating
-// surface with a hard offset shadow, an auto-growing prompt, a footer with
-// the project controls, and a squared send button
+// The chat composer: a raised surface with an auto-growing prompt, a footer
+// with the project and agent controls, and the one accent-coloured button on
+// the screen, Send,
 // that turns into Stop while the focused task is running. Enter sends;
 // Shift+Enter inserts a newline.
 //
@@ -41,8 +42,15 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   const agents = useAgents();
   const agentId = useComposerStore((s) => s.agentId);
   const setAgentId = useComposerStore((s) => s.setAgentId);
-  const planMode = useUiStore((s) => s.planMode);
+  const planModeSetting = useUiStore((s) => s.planMode);
   const setPlanMode = useUiStore((s) => s.setPlanMode);
+  // Sandbox agents can start a new thread (not continue one: a thread keeps
+  // the agent it was started with). Their composer value is prefixed.
+  const sandboxAgents = useSandboxAgentStore((s) => s.agents);
+  const newThreadDraft = !(task !== null && variant === 'docked');
+  const sandboxAgent = newThreadDraft ? sandboxAgents.find((agent) => agent.id === sandboxAgentIdFrom(agentId)) : undefined;
+  // An agent runs its own task; plan mode doesn't apply to it.
+  const planMode = planModeSetting && sandboxAgent === undefined;
   // In plan mode the picker chooses the planner, so it always names an agent.
   // Without an explicit pick, use the shared preference order (OpenCode first),
   // never the first entry in whatever order the agent list happened to arrive.
@@ -59,12 +67,15 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   // message never clears any of them. Empty means Auto: Conductor picks by
   // how demanding the work is.
   const agentChoices = useComposerStore((s) => s.agentChoices);
+  const sandboxLoaded = useSandboxAgentStore((s) => s.loaded);
   const setAgentChoice = useComposerStore((s) => s.setAgentChoice);
   const [subAgentsOpen, setSubAgentsOpen] = useState(false);
   useEffect(() => {
     if (agents.length === 0 || agentId === '' || agents.some((agent) => agent.id === agentId && agent.available)) return;
+    // A sandbox agent pick stays while the agent exists (checked once loaded).
+    if (sandboxAgentIdFrom(agentId) !== undefined && (!sandboxLoaded || sandboxAgents.some((agent) => `${SANDBOX_AGENT_PREFIX}${agent.id}` === agentId))) return;
     setAgentId(defaultAgentId ?? '');
-  }, [agentId, agents, defaultAgentId, setAgentId]);
+  }, [agentId, agents, defaultAgentId, setAgentId, sandboxAgents, sandboxLoaded]);
   const customSubAgents = Object.values(agentChoices).filter((c) => Object.keys(c).length > 0).length;
   const mainChoice = effectiveAgent !== undefined ? agentChoices[effectiveAgent.id] ?? {} : {};
   const runOptions: RunOptions = {
@@ -135,13 +146,18 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
         workspaceId: activeWorkspaceId,
         objective: trimmed,
         ...(task !== null && variant === 'docked' ? { parentTaskId: task.id } : {}),
-        ...(chosenAgent !== undefined ? { agentId: chosenAgent.id } : {}),
+        ...(sandboxAgent !== undefined ? { sandboxAgentId: sandboxAgent.id } : chosenAgent !== undefined ? { agentId: chosenAgent.id } : {}),
         ...(planMode ? { plan: true } : {}),
         ...(Object.keys(runOptions).length > 0 ? { runOptions } : {}),
         ...(attachmentDraft.attachmentIds.length > 0 ? { attachmentIds: attachmentDraft.attachmentIds } : {}),
       });
       useTaskStore.getState().upsert(created);
       useTaskStore.getState().focus(created.id);
+      if (sandboxAgent !== undefined) {
+        void useSandboxAgentStore.getState().refresh();
+        // Back to normal routing for the next new thread.
+        setAgentId('');
+      }
       useUiStore.getState().setDraft(false);
       setObjective('');
       attachmentDraft.reset();
@@ -201,7 +217,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           ))}
         </ul>
       ) : null}
-      <div className="relative rounded-2xl border border-border bg-surface-raised shadow-[4px_4px_0_0_var(--shadow-hard-color)] backdrop-blur-xl transition-colors focus-within:border-ring/50">
+      <div className="relative rounded-2xl border border-border-strong bg-surface-raised shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-3 focus-within:ring-ring/15">
         {planMode && subAgentsOpen ? (
           <div className="border-b border-border px-4 pt-3 pb-2.5">
             <p className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground"><LayersIcon size={12} /> Sub-agents</p>
@@ -236,7 +252,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           }}
           className={cn(
             'block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed',
-            variant === 'hero' ? 'min-h-20' : 'min-h-11',
+            variant === 'hero' ? 'min-h-24' : 'min-h-12',
           )}
         />
 
@@ -245,6 +261,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             attachments={attachmentDraft.attachments}
             onRemove={(id) => { void attachmentDraft.remove(id); }}
             onPick={() => { void attachmentDraft.pick(); }}
+            picker={false}
             busy={attachmentDraft.busy}
             disabled={submitting || activeWorkspaceId === null}
             progress={attachmentDraft.progress}
@@ -255,6 +272,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
 
         <div className="flex items-end gap-2 px-2.5 pt-1 pb-2.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" aria-label="Task options">
+          <AttachButton onPick={() => { void attachmentDraft.pick(); }} count={attachmentDraft.attachments.length} disabled={attachmentDraft.busy || submitting || activeWorkspaceId === null} />
           <div className="min-w-0 max-w-full">
             <MenuSelect
               label="Project"
@@ -271,7 +289,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           <div className="min-w-0 max-w-full">
             <MenuSelect
               label="Agent"
-              value={chosenAgent?.id ?? ''}
+              value={sandboxAgent !== undefined ? `${SANDBOX_AGENT_PREFIX}${sandboxAgent.id}` : chosenAgent?.id ?? ''}
               onChange={(next) => { setAgentId(next); }}
               title={planMode ? 'Planner' : task !== null && variant === 'docked' ? 'Agent for the next message' : 'Auto agent'}
               className="max-w-full sm:max-w-44"
@@ -292,11 +310,22 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
                   ...(agent.available ? {} : { hint: 'Unavailable' }),
                   mark: <ProviderAvatar brand={agentBrand(agent.id)} label={agent.name} size={13} />,
                 })),
+                ...(newThreadDraft && !planModeSetting ? sandboxAgents.map((agent) => ({
+                  value: `${SANDBOX_AGENT_PREFIX}${agent.id}`,
+                  label: agent.name,
+                  hint: 'Agent with a sandbox',
+                  mark: <span aria-hidden="true" className="flex size-[13px] items-center justify-center rounded-[4px] text-[7px] font-bold text-white" style={{ background: agent.color }}>{agent.name.slice(0, 1).toUpperCase()}</span>,
+                })) : []),
               ]}
             />
           </div>
-          {effectiveAgent !== undefined ? <ModelEffortPicker agentId={effectiveAgent.id} value={mainChoice} onChange={(choice) => { setAgentChoice(effectiveAgent.id, choice); }} {...(planMode ? { label: 'Planner' } : {})} /> : null}
-          <button
+          {sandboxAgent !== undefined ? (
+            <span className="flex h-7 items-center gap-1.5 rounded-full bg-primary/10 px-2.5 text-2xs font-medium text-primary" title={`Runs on ${sandboxAgent.clis.join(' → ')} with its own sandbox`}>
+              <MonitorIcon size={12} />Sandbox
+            </span>
+          ) : null}
+          {sandboxAgent === undefined && effectiveAgent !== undefined ? <ModelEffortPicker agentId={effectiveAgent.id} value={mainChoice} onChange={(choice) => { setAgentChoice(effectiveAgent.id, choice); }} {...(planMode ? { label: 'Planner' } : {})} /> : null}
+          {sandboxAgent === undefined ? <button
             type="button"
             onClick={() => { setPlanMode(!planMode); }}
             aria-pressed={planMode}
@@ -306,7 +335,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           >
             <LayersIcon size={13} />
             Plan
-          </button>
+          </button> : null}
           {planMode ? (
             <button
               type="button"
@@ -336,11 +365,11 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           ) : null}
           {trimmed.length > MAX_OBJECTIVE * 0.9 ? <span className="mr-1 text-3xs text-muted-foreground tabular-nums">{trimmed.length.toLocaleString()} / {MAX_OBJECTIVE.toLocaleString()}</span> : null}
           {showStop ? (
-            <button type="button" onClick={() => { void stop(); }} disabled={stopping} aria-label="Stop task" title="Stop" className="flex size-8 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-85 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            <button type="button" onClick={() => { void stop(); }} disabled={stopping} aria-label="Stop task" title="Stop" className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-85 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
               {stopping ? <Spinner size={14} /> : <StopIcon size={14} />}
             </button>
           ) : (
-            <button type="submit" disabled={!canSubmit} aria-label={submitting ? 'Sending…' : busy ? (deliveryMode === 'steer' ? 'Steer agent' : 'Queue message') : 'Start task'} title={busy ? (deliveryMode === 'steer' ? 'Steer (Enter): stop current work and run this next' : 'Queue (Enter): run this after current work') : 'Send (Enter)'} className="flex size-8 cursor-pointer items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--shadow-hard-color)] transition-[opacity,transform] duration-150 hover:opacity-90 active:scale-90 disabled:cursor-not-allowed disabled:opacity-30 disabled:shadow-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            <button type="submit" disabled={!canSubmit} aria-label={submitting ? 'Sending…' : busy ? (deliveryMode === 'steer' ? 'Steer agent' : 'Queue message') : 'Start task'} title={busy ? (deliveryMode === 'steer' ? 'Steer (Enter): stop current work and run this next' : 'Queue (Enter): run this after current work') : 'Send (Enter)'} className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-[filter,transform,background-color] duration-150 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
               {submitting ? <Spinner size={14} /> : <ArrowUpIcon size={16} />}
             </button>
           )}

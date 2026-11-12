@@ -3,152 +3,158 @@
 /* Dark mode follows the `dark` class set by useSystemAppearance (macOS). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — "the dispatch ledger".
-   Conductor is a desk where work is dispatched to agents and every task is
-   a ticket on the board. The identity is built from that world, not from a
-   generic SaaS kit: sage ledger paper, deep pine ink, and one punch-red
-   reserved for the action that starts work and the mark that shows where
-   you are. References (PostHog's plain-spoken product grouping,
-   bengaluru.fyi's ink-on-paper directness) informed the tone only; the
-   palette, type and shapes below are Conductor's own.
+/* Design tokens — "Score".
+   Conductor directs several agents at once, so the interface is laid out
+   like a concert hall rather than a ledger: one dark bar across the top
+   for every destination, and the whole window below it as the stage —
+   a board of threads, or the one thread you opened. Surfaces are cool graphite and
+   porcelain with a faint aubergine cast; one orchid accent marks the single
+   primary action, the current selection and anything that is live.
+   Depth comes from stacked surfaces and hairlines, never offset shadows.
    Components reference these through the semantic utilities declared in
    @theme inline (bg-background, text-muted-foreground, border-border, …). */
 :root {
-  /* Ledger paper: cool sage, never cream. Cards sit one step lighter,
-     the sidebar is a green-tinted board the tickets are pinned to. */
-  --background: #e8eae1;
-  --foreground: #1d2822;
-  --card: #f3f4ed;
-  --surface-raised: #fafbf5;
-  --muted: #dde1d2;
-  --muted-foreground: #5b695f;
-  --accent: #e1e5d7;
-  --border: rgb(29 40 34 / 15%);
-  --border-strong: rgb(29 40 34 / 32%);
-  --input: rgb(29 40 34 / 22%);
-  /* Punch red: the colour of the stamp, not a brand gradient. */
-  --primary: #b23f16;
-  --primary-foreground: #fff8ee;
-  --ring: #b23f16;
-  --message: #edefe5;
-  --message-foreground: #1d2822;
+  --background: #f5f4f8;
+  --foreground: #1a1822;
+  --card: #ffffff;
+  --surface-raised: #ffffff;
+  --muted: #eceaf2;
+  --muted-foreground: #656175;
+  --accent: #ebe9f1;
+  --border: rgb(26 24 34 / 10%);
+  --border-strong: rgb(26 24 34 / 19%);
+  --input: rgb(26 24 34 / 17%);
+  --primary: #ae1f7b;
+  --primary-foreground: #ffffff;
+  --ring: #ae1f7b;
+  --message: #e8e5f0;
+  --message-foreground: #1a1822;
   --destructive: var(--color-red-600);
   --destructive-foreground: var(--color-red-700);
-  --success: #27714a;
-  --warning: #9a6a12;
-  --info: #2f4fc4;
-  --sidebar: #dee3d2;
-  --sidebar-foreground: #1d2822;
-  --sidebar-muted-foreground: #5b695f;
-  --sidebar-border: rgb(29 40 34 / 14%);
-  --sidebar-row-hover: rgb(29 40 34 / 6%);
-  --sidebar-row-active: #f7f8f0;
-  --code: #e6e9dc;
-  --scrollbar-thumb: rgb(29 40 34 / 22%);
-  --scrollbar-thumb-hover: rgb(29 40 34 / 36%);
-  --shadow-composer-color: rgb(29 40 34 / 28%);
-  --shadow-hard-color: rgb(29 40 34 / 16%);
+  --success: #1c7a4d;
+  --warning: #96640a;
+  --info: #3050c8;
+  --rail: #e4e1ec;
+  --sidebar: #eeecf4;
+  --sidebar-foreground: #1a1822;
+  --sidebar-muted-foreground: #656175;
+  --sidebar-border: rgb(26 24 34 / 9%);
+  --sidebar-row-hover: rgb(26 24 34 / 5%);
+  --sidebar-row-active: #ffffff;
+  --code: #efedf5;
+  --scrollbar-thumb: rgb(26 24 34 / 20%);
+  --scrollbar-thumb-hover: rgb(26 24 34 / 34%);
+  --shadow-composer-color: rgb(26 24 34 / 22%);
+  /* Kept for older call sites; nothing draws a hard offset shadow now. */
+  --shadow-hard-color: transparent;
+  --shadow-pop: 0 1px 2px rgb(26 24 34 / 6%), 0 12px 32px -8px rgb(26 24 34 / 22%);
+  --shadow-lift: 0 1px 2px rgb(26 24 34 / 7%);
   --chat-max: 48rem;
   --topbar-height: 48px;
+  --bar-height: 44px;
 }
 
 .dark {
-  /* The same desk after hours: near-green black, paper becomes slate-pine,
-     punch red lifts so it stays legible as a stamp on the dark board. */
-  --background: #121814;
-  --foreground: #e6ede3;
-  --card: #202a21;
-  --surface-raised: #2a362a;
+  --background: #121117;
+  --foreground: #edebf3;
+  --card: #1a1920;
+  --surface-raised: #23212b;
   --muted: oklch(1 0 0 / 5%);
-  --muted-foreground: #9aa99d;
+  --muted-foreground: #9d99ac;
   --accent: oklch(1 0 0 / 7%);
-  --border: oklch(1 0 0 / 12%);
-  --border-strong: oklch(1 0 0 / 26%);
-  --input: oklch(1 0 0 / 13%);
-  --primary: #e2703a;
-  --primary-foreground: #1c1108;
-  --ring: #e2703a;
-  --message: oklch(1 0 0 / 6%);
-  --message-foreground: #e6ede3;
+  --border: oklch(1 0 0 / 9%);
+  --border-strong: oklch(1 0 0 / 18%);
+  --input: oklch(1 0 0 / 14%);
+  --primary: #f27ccf;
+  --primary-foreground: #2b0a22;
+  --ring: #f27ccf;
+  --message: #2a2834;
+  --message-foreground: #edebf3;
   --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
   --destructive-foreground: var(--color-red-400);
   --success: var(--color-emerald-400);
   --warning: var(--color-amber-300);
-  --info: #93a7f5;
-  --sidebar: #0b100d;
-  --sidebar-foreground: #e6ede3;
-  --sidebar-muted-foreground: #8d9c90;
-  --sidebar-border: oklch(1 0 0 / 8%);
+  --info: #9db2ff;
+  --rail: #0c0b10;
+  --sidebar: #16151c;
+  --sidebar-foreground: #edebf3;
+  --sidebar-muted-foreground: #918da1;
+  --sidebar-border: oklch(1 0 0 / 7%);
   --sidebar-row-hover: oklch(1 0 0 / 5%);
-  --sidebar-row-active: oklch(1 0 0 / 8%);
+  --sidebar-row-active: oklch(1 0 0 / 9%);
   --code: oklch(1 0 0 / 4%);
   --scrollbar-thumb: rgb(255 255 255 / 12%);
   --scrollbar-thumb-hover: rgb(255 255 255 / 22%);
   --shadow-composer-color: rgb(0 0 0 / 70%);
-  --shadow-hard-color: rgb(0 0 0 / 32%);
+  --shadow-pop: 0 0 0 1px oklch(1 0 0 / 6%), 0 16px 40px -8px rgb(0 0 0 / 70%);
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / 40%);
 }
 
 /* Accent themes, chosen in Settings > Appearance and persisted on this
-   machine. Only the punch colour (primary actions, selection marks, focus
-   ring) changes; surfaces and ink stay put so every theme keeps the same
-   contrast relationships. `punch` is the default and needs no overrides. */
+   machine. Only the accent (primary action, selection, focus ring, live
+   marks) changes; surfaces and ink stay put so every theme keeps the same
+   contrast relationships. `orchid` is the default and needs no overrides. */
 :root[data-accent='cobalt'] {
-  --primary: #2f4fc4;
-  --ring: #2f4fc4;
-  --primary-foreground: #f5f7ff;
+  --primary: #2f55d4;
+  --ring: #2f55d4;
+  --primary-foreground: #ffffff;
 }
 :root.dark[data-accent='cobalt'] {
-  --primary: #8ba3f7;
-  --ring: #8ba3f7;
-  --primary-foreground: #101736;
-}
-:root[data-accent='plum'] {
-  --primary: #7431c8;
-  --ring: #7431c8;
-  --primary-foreground: #faf5ff;
-}
-:root.dark[data-accent='plum'] {
-  --primary: #b795f2;
-  --ring: #b795f2;
-  --primary-foreground: #21103d;
+  --primary: #8eaaff;
+  --ring: #8eaaff;
+  --primary-foreground: #0d1638;
 }
 :root[data-accent='pine'] {
-  --primary: #1e7046;
-  --ring: #1e7046;
-  --primary-foreground: #f2fbf5;
+  --primary: #17754a;
+  --ring: #17754a;
+  --primary-foreground: #ffffff;
 }
 :root.dark[data-accent='pine'] {
-  --primary: #57bd85;
-  --ring: #57bd85;
-  --primary-foreground: #0c2417;
+  --primary: #5fcf95;
+  --ring: #5fcf95;
+  --primary-foreground: #08241a;
 }
 :root[data-accent='marigold'] {
-  --primary: #9c6a0a;
-  --ring: #9c6a0a;
-  --primary-foreground: #fffaeb;
+  --primary: #96650a;
+  --ring: #96650a;
+  --primary-foreground: #ffffff;
 }
 :root.dark[data-accent='marigold'] {
-  --primary: #e0af45;
-  --ring: #e0af45;
+  --primary: #e6b450;
+  --ring: #e6b450;
   --primary-foreground: #261b04;
+}
+:root[data-accent='ember'] {
+  --primary: #c2410c;
+  --ring: #c2410c;
+  --primary-foreground: #ffffff;
+}
+:root.dark[data-accent='ember'] {
+  --primary: #ff9466;
+  --ring: #ff9466;
+  --primary-foreground: #2c1004;
 }
 
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  /* Ledger hand: a native serif for headings and the wordmark. No webfont —
-     the app is local-first and must render identically offline. */
-  --font-display: ui-serif, 'New York', 'Iowan Old Style', Georgia, serif;
   --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
-  /* Squared, ticket-like corners. The scale is deliberately tighter than
-     the rounded SaaS default: stubs and ledger cards, not pills. */
-  --radius-xs: 0.1875rem;
-  --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.625rem;
-  --radius-2xl: 0.75rem;
-  --radius-3xl: 1rem;
-  --radius-4xl: 1.25rem;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.25rem;
+  --radius-4xl: 1.5rem;
+}
+
+/* Display voice: the system face on its expanded width axis (SF Pro
+   Expanded on macOS). Wide, tight and heavy, like the title line of a
+   score — and still a system font, so it renders identically offline. */
+@utility font-display {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-stretch: 122%;
+  letter-spacing: -0.015em;
 }
 
 @theme inline {
@@ -172,6 +178,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-rail: var(--rail);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
@@ -183,7 +190,9 @@
   --text-2xs--line-height: calc(1 / 0.6875);
   --text-3xs: 0.625rem;
   --text-3xs--line-height: calc(0.875 / 0.625);
-  --shadow-composer: 0 12px 28px -18px var(--shadow-composer-color);
+  --shadow-composer: 0 18px 40px -22px var(--shadow-composer-color);
+  --shadow-pop: var(--shadow-pop);
+  --shadow-lift: var(--shadow-lift);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
@@ -209,38 +218,31 @@ body {
   overflow: hidden;
 }
 
-/* ---- Dispatch-ledger shared surfaces ------------------------------------
-   Grouped cards read as entries in a ledger: a serif group heading, a card
-   lifted off the paper with a hard offset shadow (a ticket on the desk,
-   not a floating SaaS tile), and hairline-divided rows. Segmented controls
-   are squared stubs; quota tracks keep their stamp stripes. Components use
-   these so every screen shares one look instead of inventing its own. */
+/* ---- Score shared surfaces ------------------------------------------------
+   Every screen is built from the same few parts: a quiet section label, a
+   flat card one step above the stage, hairline-divided rows, a segmented
+   control whose active stop is a raised key, and fields that sit level with
+   the card. Components use these so no screen invents its own look. */
 @layer components {
   .group-label {
-    font-family: var(--font-display);
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--foreground);
-    margin-bottom: 0.375rem;
+    color: var(--muted-foreground);
+    margin-bottom: 0.5rem;
   }
   .group-card {
     background: var(--card);
-    border: 1px solid var(--border-strong);
-    border-radius: 0.5rem;
-    box-shadow: 2px 2px 0 0 var(--shadow-hard-color);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
     overflow: hidden;
   }
-  /* Conversation bars (thread environment, work log, diagnostics). These
-     sit directly on the canvas between prose, so a grouped card is too
-     quiet for them: raised surface, strong edge, and the punch mark at
-     the left so the eye lands on them first. */
+  /* Conversation bars (thread environment, pinned plan, diagnostics): one
+     step brighter than a card so they read as chrome, not as a message. */
   .bar-card {
     background: var(--surface-raised);
-    border: 1px solid var(--border-strong);
-    border-radius: 0.5rem;
-    box-shadow:
-      inset 3px 0 0 0 var(--primary),
-      2px 2px 0 0 var(--shadow-hard-color);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
+    box-shadow: var(--shadow-lift);
     overflow: hidden;
   }
   .group-row {
@@ -257,18 +259,17 @@ body {
     align-items: center;
     gap: 2px;
     padding: 3px;
-    border-radius: 0.5rem;
+    border-radius: 0.625rem;
     background: var(--muted);
-    border: 1px solid var(--border);
   }
   .seg-item {
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-    height: 1.5rem;
-    padding: 0 0.65rem;
-    border-radius: 0.3125rem;
-    font-size: 0.6875rem;
+    height: 1.625rem;
+    padding: 0 0.7rem;
+    border-radius: 0.4375rem;
+    font-size: 0.75rem;
     font-weight: 500;
     color: var(--muted-foreground);
     cursor: pointer;
@@ -279,40 +280,145 @@ body {
   .seg-item[data-active='true'] {
     background: var(--surface-raised);
     color: var(--foreground);
-    box-shadow: inset 0 -2px 0 0 var(--primary);
+    box-shadow: var(--shadow-lift), 0 0 0 1px var(--border);
   }
   .inset-field {
-    background: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    background: var(--card);
+    border: 1px solid var(--input);
+    border-radius: 0.5rem;
     color: var(--foreground);
     outline: none;
+    transition: border-color 120ms, box-shadow 120ms;
   }
+  .inset-field:hover { border-color: var(--border-strong); }
   .inset-field:focus-visible {
     border-color: var(--ring);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 25%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
   }
   .limit-track {
     position: relative;
     height: 1.75rem;
     border-radius: 0.5rem;
     overflow: hidden;
-    background:
-      repeating-linear-gradient(-45deg, oklch(1 0 0 / 7%) 0 6px, transparent 6px, transparent 12px),
-      var(--muted);
+    background: var(--muted);
     border: 1px solid var(--border);
   }
   .limit-fill {
     position: absolute;
     inset: 0 auto 0 0;
-    background:
-      repeating-linear-gradient(-45deg, oklch(1 0 0 / 14%) 0 6px, transparent 6px, transparent 12px),
-      color-mix(in srgb, var(--foreground) 22%, transparent);
-    border-right: 2px solid var(--foreground);
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+    border-right: 2px solid var(--primary);
   }
+
+  /* Top-bar tabs. Primary tabs (the two working surfaces) carry an icon
+     and a filled active state; the rest are plain text tabs. */
+  .bar-tab {
+    display: inline-flex;
+    height: 1.75rem;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0 0.625rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--sidebar-muted-foreground);
+    white-space: nowrap;
+    cursor: pointer;
+    outline: none;
+    transition: color 120ms, background 120ms;
+  }
+  .bar-tab:hover { color: var(--sidebar-foreground); background: var(--sidebar-row-hover); }
+  .bar-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .bar-tab[data-active='true'] { color: var(--sidebar-foreground); background: var(--sidebar-row-active); }
+  .bar-tab[data-primary='true'] { font-weight: 600; }
+  .bar-tab[data-primary='true'][data-active='true'] {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    color: var(--primary);
+  }
+  .bar-icon {
+    display: inline-flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    color: var(--sidebar-muted-foreground);
+    cursor: pointer;
+    outline: none;
+    transition: color 120ms, background 120ms;
+  }
+  .bar-icon:hover { color: var(--sidebar-foreground); background: var(--sidebar-row-hover); }
+  .bar-icon:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .bar-icon[data-active='true'] { color: var(--sidebar-foreground); background: var(--sidebar-row-active); }
+
+  /* Plan progress as measures: one segment per task. */
+  .measures {
+    display: flex;
+    gap: 2px;
+    height: 4px;
+  }
+  .measures > span {
+    flex: 1 1 0;
+    min-width: 3px;
+    border-radius: 2px;
+    background: var(--border-strong);
+  }
+  .measures > span[data-state='done'] { background: var(--success); }
+  .measures > span[data-state='running'] { background: var(--primary); animation: conductor-pulse-dot 1.4s ease-in-out infinite; }
+  .measures > span[data-state='failed'] { background: var(--destructive); }
 }
 
-/* Thin, unobtrusive scrollbars in the pine ink. */
+/* ---- Agent characters ----------------------------------------------------
+   Static: the face carries the mood, a small badge carries the status. */
+.agent-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: flex;
+  width: 34%;
+  height: 34%;
+  min-width: 10px;
+  min-height: 10px;
+  max-width: 18px;
+  max-height: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 2px solid var(--background);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: white;
+}
+.agent-badge-done { background: var(--success); }
+.agent-badge-error { background: var(--destructive); }
+.agent-badge-working { background: var(--info); }
+.agent-badge-waiting { background: var(--color-amber-500); }
+
+/* Live marker: three bars that move while agents are working. */
+.eq-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 9px;
+}
+.eq-bars > span {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: bottom;
+  animation: conductor-eq 900ms ease-in-out infinite;
+}
+.eq-bars > span:nth-child(2) { animation-delay: -300ms; }
+.eq-bars > span:nth-child(3) { animation-delay: -600ms; }
+@keyframes conductor-eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* Thin, unobtrusive scrollbars. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -384,7 +490,7 @@ body {
 
 /* ---- Motion -------------------------------------------------------------
    One orchestrated moment per navigation: the incoming page rises a few
-   pixels and settles, like a ticket sliding onto the desk. Everything else
+   pixels and settles. Everything else
    is feedback for an action the user just took (press, open, expand).
    All of it is transform/opacity only, so it never triggers layout and the
    app stays fast on low-end hardware. */
@@ -429,6 +535,19 @@ body {
 .animate-slide-in {
   animation: conductor-slide-in 200ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
 }
+@keyframes conductor-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-slide-in-left {
+  animation: conductor-slide-in-left 180ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
+}
 
 /* Cards in a list arrive in a short cascade. The delay is capped by the
    nth-child rules below so a 100-row list never keeps the user waiting. */
@@ -459,22 +578,21 @@ body {
 /* Projects: a pinboard of project cards, not a settings list. */
 [data-screen='projects'] ul:has(> li > button[aria-pressed]) {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
   gap: 0.75rem;
   border: none;
   overflow: visible;
 }
 [data-screen='projects'] ul:has(> li > button[aria-pressed]) > li {
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: 0.875rem;
   background: var(--card);
-  box-shadow: 2px 2px 0 0 var(--shadow-hard-color);
   overflow: hidden;
-  transition: transform 140ms ease, box-shadow 140ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 [data-screen='projects'] ul:has(> li > button[aria-pressed]) > li:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0 0 var(--shadow-hard-color);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lift);
 }
 
 [data-screen='projects'] form[aria-label='Create workspace'] {
@@ -506,7 +624,10 @@ body {
   .animate-page-in,
   .animate-pop-in,
   .animate-slide-in,
-  .row-in {
+  .animate-slide-in-left,
+  .row-in,
+  .eq-bars > span,
+  .measures > span[data-state='running'] {
     animation: none;
   }
   .text-shimmer {

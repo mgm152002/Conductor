@@ -83,6 +83,16 @@ app.whenReady().then(async () => {
   services.connectorRuntime.start();
   services.suggestionEvents.setWebContentsResolver(getWebContents);
   services.mcp.startHealthChecks();
+  // Sandbox containers left from a previous run (a crash or force quit).
+  void services.sandboxes.cleanupOrphans();
+  // When the user has turned auto-sync on, copy MCP servers installed in one
+  // agent CLI into the others (add-only, respects per-CLI removals). It is off
+  // by default. Delayed so it never competes with first paint.
+  setTimeout(() => {
+    void services.cliMcp.overview({ sync: true }).catch((error: unknown) => {
+      console.warn('MCP sync failed:', error instanceof Error ? error.message : 'unavailable');
+    });
+  }, 8_000).unref?.();
   services.quotaPolling.start();
   services.modelPricing.start();
   services.learningCron.start();
@@ -93,6 +103,8 @@ app.whenReady().then(async () => {
     services.quotaPolling.stop();
     services.modelPricing.stop();
     void services.mcp.stop();
+    services.sandboxGateway.close();
+    void services.sandboxes.stopAll();
   });
 
   app.on('activate', () => {

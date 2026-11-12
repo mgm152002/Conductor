@@ -3,6 +3,7 @@ import type { Task } from '@shared/domain';
 import type { ArtifactPreview, ArtifactSummary, TaskDetails } from '@shared/task-view';
 import { FileTextIcon } from '../ui/icons';
 import { RegionCard } from './RegionCard';
+import { ArtifactCard, ArtifactPanel, formatBytes } from '../chat/GeneratedArtifact';
 
 /** An output the agent produced, handed back in the chat as a document
  *  card: what it is, when, and its contents on Open. */
@@ -21,26 +22,46 @@ export function ArtifactRow({ taskId, artifact }: { taskId: string; artifact: Ar
     catch (err) { setError(err instanceof Error ? err.message : 'Could not read artifact'); }
     finally { setLoading(false); }
   }
+  const name = artifact.name ?? 'Document';
+  const meta = `${artifact.mimeType ?? 'Document'}${artifact.sizeBytes === undefined ? '' : `, ${formatBytes(artifact.sizeBytes)}`}`;
   return (
-    <li className="rounded-lg border border-border bg-transparent">
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
-          <FileTextIcon size={17} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-foreground" title={artifact.name ?? artifact.id}>{artifact.name ?? 'Document'}</p>
-          <p className="mt-0.5 truncate text-3xs text-muted-foreground">{artifact.mimeType ?? 'Document'}{artifact.sizeBytes === undefined ? '' : ` · ${artifact.sizeBytes.toLocaleString()} bytes`} · <time dateTime={artifact.createdAt}>{new Date(artifact.createdAt).toLocaleString()}</time></p>
-        </div>
-        <button type="button" onClick={() => { void inspect(); }} disabled={loading} aria-expanded={expanded} className="shrink-0 cursor-pointer rounded-md bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">{loading ? 'Opening…' : expanded ? 'Close' : 'Open'}</button>
-      </div>
-      {expanded && error !== null ? <p role="alert" className="px-3 pb-2.5 text-2xs text-destructive-foreground">{error}</p> : null}
+    <li>
+      <ArtifactCard
+        icon={<FileTextIcon size={17} />}
+        title={name}
+        meta={error !== null ? error : loading ? 'Opening…' : `${meta}. Click to open`}
+        error={error !== null}
+        busy={loading}
+        open={expanded && preview !== null}
+        onOpen={() => { void inspect(); }}
+        label={`${expanded ? 'Close' : 'Open'} ${name}`}
+      />
       {expanded && preview !== null ? (
-        <div className="border-t border-border">
-          <pre className="max-h-72 overflow-auto bg-code px-3 py-2.5 font-mono text-2xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">{preview.text || '(Empty artifact)'}</pre>
-          {preview.truncated ? <p className="px-3 py-1.5 text-3xs text-muted-foreground">Preview truncated.</p> : null}
-        </div>
+        <ArtifactPanel
+          title={name}
+          meta={<>{meta}, <time dateTime={artifact.createdAt}>{new Date(artifact.createdAt).toLocaleString()}</time></>}
+          icon={<FileTextIcon size={14} />}
+          onClose={() => { setExpanded(false); }}
+          actions={<CopyButton text={preview.text} />}
+        >
+          <pre className="rounded-xl border border-border bg-code px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground/85">{preview.text || '(Empty artifact)'}</pre>
+          {preview.truncated ? <p className="mt-2 text-2xs text-muted-foreground">Preview truncated.</p> : null}
+        </ArtifactPanel>
       ) : null}
     </li>
+  );
+}
+
+function CopyButton({ text }: { text: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); window.setTimeout(() => { setCopied(false); }, 1500); }).catch(() => undefined); }}
+      className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border-strong bg-card px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   );
 }
 

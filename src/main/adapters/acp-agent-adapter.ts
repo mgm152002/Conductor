@@ -87,12 +87,15 @@ export const OPENCODE_ASK_CONFIG = {
   experimental: { continue_loop_on_deny: true },
 };
 
-function openCodeConfig(existing: string | undefined): string {
+/** Tools a sandbox agent never gets locally: its shell, file edits and web access are the sandbox's. */
+const OPENCODE_SANDBOX_DENY = { bash: 'deny', edit: 'deny', write: 'deny', patch: 'deny', webfetch: 'deny', websearch: 'deny' } as const;
+
+function openCodeConfig(existing: string | undefined, sandboxOnly = false): string {
   let base: Json = {};
   try { base = obj(JSON.parse(existing ?? '{}')) ?? {}; } catch { /* replace an invalid value */ }
   return JSON.stringify({
     ...base,
-    permission: { ...(obj(base['permission']) ?? {}), ...OPENCODE_ASK_CONFIG.permission },
+    permission: { ...(obj(base['permission']) ?? {}), ...OPENCODE_ASK_CONFIG.permission, ...(sandboxOnly ? OPENCODE_SANDBOX_DENY : {}) },
     experimental: { ...(obj(base['experimental']) ?? {}), ...OPENCODE_ASK_CONFIG.experimental },
   });
 }
@@ -307,13 +310,15 @@ export interface AcpAgentSpec {
   /** Command that signs the user in, for error messages. */
   loginHint: string;
   /** Extra environment for a run. */
-  env?: (mode: GatedLive['data']['mode']) => Record<string, string> | undefined;
+  env?: (mode: GatedLive['data']['mode'], sandboxOnly: boolean) => Record<string, string> | undefined;
 }
 
 export const ACP_AGENTS: Record<string, AcpAgentSpec> = {
   opencode: {
     args: ['acp'], modelKey: 'opencode', loginHint: 'opencode auth login',
-    env: (mode) => (mode === 'trusted_automation' ? undefined : { OPENCODE_CONFIG_CONTENT: openCodeConfig(process.env['OPENCODE_CONFIG_CONTENT']) }),
+    // Trusted automation normally runs without prompts; a sandbox agent still
+    // gets the config, which hard-denies its local shell, edits and web tools.
+    env: (mode, sandboxOnly) => (mode === 'trusted_automation' && !sandboxOnly ? undefined : { OPENCODE_CONFIG_CONTENT: openCodeConfig(process.env['OPENCODE_CONFIG_CONTENT'], sandboxOnly) }),
   },
   kiro: { args: ['acp'], modelKey: 'kiro', loginHint: 'kiro-cli login' },
 };
@@ -324,7 +329,7 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
   }
 
   protected async prepare(live: GatedLive): Promise<Launch> {
-    const env = this.spec.env?.(live.data.mode);
+    const env = this.spec.env?.(live.data.mode, live.data.sandboxOnly === true);
     return { args: this.spec.args, cwd: live.data.rootPath, ...(env !== undefined ? { env } : {}) };
   }
 

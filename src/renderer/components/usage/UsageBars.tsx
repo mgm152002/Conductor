@@ -58,9 +58,9 @@ export function UsageBarGroup({
 }): React.JSX.Element {
   const total = rows.reduce((sum, row) => sum + row.value, 0);
   return (
-    <section className={cn('flex flex-col gap-2', className)} aria-label={title}>
+    <section className={cn('group-card flex flex-col gap-1 p-4', className)} aria-label={title}>
       <header className="flex items-baseline gap-2">
-        <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
+        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
         {description !== undefined ? (
           <span className="truncate text-3xs text-muted-foreground/80">{description}</span>
         ) : null}
@@ -93,7 +93,7 @@ export function UsageBarGroup({
                   aria-valuemax={100}
                   aria-valuenow={percent}
                   aria-valuetext={`${percent}% of ${title.toLowerCase()}`}
-                  className="h-[3px] w-full overflow-hidden rounded-full bg-muted"
+                  className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
                 >
                   <div
                     className={cn('h-full rounded-full transition-[width]', BAR_FILL[tone])}
@@ -125,9 +125,9 @@ export function UsageTokenMix({ totals }: { totals: UsageRow }): React.JSX.Eleme
   const outputPercent = counted > 0 ? 100 - inputPercent : 0;
 
   return (
-    <div className="flex flex-col gap-2 py-1">
+    <div className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
-        <h3 className="text-[13px] font-medium text-foreground">Token mix</h3>
+        <h3 className="text-2xs font-medium text-muted-foreground">Token mix</h3>
         <span className="ml-auto text-3xs text-muted-foreground tabular-nums">
           {compactNumber(totals.inputTokens)} in · {compactNumber(totals.outputTokens)} out
         </span>

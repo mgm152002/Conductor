@@ -1,7 +1,7 @@
 import type { AdapterStreamEvent } from '@shared/adapter';
 import type { AdapterRecord } from '@shared/domain';
 import type {
-  UsageClient, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
+  UsageClient, UsageLimitStatus, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
 } from '@shared/usage';
 import type { Store } from '../db/types';
 import { estimateCostUsd, type PriceLookup } from './pricing';
@@ -191,6 +191,8 @@ export interface UsageSummaryOptions {
    * cost — harness-reported cost is never used as a fallback.
    */
   pricing?: PriceLookup;
+  /** Why a CLI's latest quota probe reported nothing, keyed by adapter id. */
+  limitStatuses?: Readonly<Record<string, UsageLimitStatus>>;
 }
 
 const SUMS = `COUNT(*) AS sessions, SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(output_tokens) AS output,
@@ -249,19 +251,35 @@ export function usageSummary(
   }
 
   const used = new Map(byAgent.map((a) => [a.key, a]));
+  // Most recent session per CLI at any time (ignores the selected range), so
+  // a CLI with nothing in range can still say when it was last used.
+  const lastUsed = new Map(
+    (store.db.prepare(`SELECT adapter_id AS adapter, MAX(created_at) AS at FROM agent_usage u
+      ${input.workspaceId !== undefined ? 'WHERE u.workspace_id = ?' : ''} GROUP BY adapter_id`)
+      .all(...(input.workspaceId !== undefined ? [input.workspaceId] : [])) as Array<{ adapter: string; at: string | null }>)
+      .map((row) => [row.adapter, row.at] as const),
+  );
+  const extras = (id: string): Pick<UsageClient, 'limits' | 'lastUsedAt' | 'limitStatus'> => {
+    const limits = limitsByAdapter.get(id) ?? [];
+    const at = lastUsed.get(id);
+    const status = options.limitStatuses?.[id];
+    return {
+      limits,
+      ...(typeof at === 'string' ? { lastUsedAt: at } : {}),
+      // A status explains missing windows; it is moot once windows exist.
+      ...(limits.length === 0 && status !== undefined ? { limitStatus: status } : {}),
+    };
+  };
   const clients = new Map<string, UsageClient>();
   for (const adapter of options.adapters ?? []) {
     if (adapter.class !== 'local_cli_agent') continue;
     const aggregate = used.get(adapter.id) ?? emptyAggregate(adapter.id);
-    clients.set(adapter.id, {
-      ...toRow(aggregate, adapter.name || agentName(adapter.id)),
-      limits: limitsByAdapter.get(adapter.id) ?? [],
-    });
+    clients.set(adapter.id, { ...toRow(aggregate, adapter.name || agentName(adapter.id)), ...extras(adapter.id) });
   }
   // Keep historical usage from CLIs that are no longer registered visible.
   for (const aggregate of byAgent) {
     if (clients.has(aggregate.key)) continue;
-    clients.set(aggregate.key, { ...toRow(aggregate, agentName(aggregate.key)), limits: limitsByAdapter.get(aggregate.key) ?? [] });
+    clients.set(aggregate.key, { ...toRow(aggregate, agentName(aggregate.key)), ...extras(aggregate.key) });
   }
   const clientList = [...clients.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
 

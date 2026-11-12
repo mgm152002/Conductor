@@ -99,6 +99,25 @@ const system: SystemBridge = {
 const integrations: IntegrationsBridge = {
   agents: { list: () => invoke('agents.list'), models: (agentId, refresh) => invoke('agents.models', { agentId, ...(refresh ? { refresh: true } : {}) }) },
   secrets: { list: () => invoke('secret.list'), delete: (id) => invoke('secret.delete', { id }) },
+  sandboxAgents: {
+    list: () => invoke('agents.sandbox.list'),
+    create: (input) => invoke('agents.sandbox.create', input),
+    update: (input) => invoke('agents.sandbox.update', input),
+    remove: (id) => invoke('agents.sandbox.remove', { id }),
+    threads: () => invoke('agents.sandbox.threads'),
+    groups: () => invoke('agents.group.list'),
+    workspace: () => invoke('agents.workspace'),
+    createGroup: (input) => invoke('agents.group.create', input),
+    removeGroup: (id) => invoke('agents.group.remove', { id }),
+    groupMessages: (groupId) => invoke('agents.group.messages', { groupId }),
+    sendGroup: (input) => invoke('agents.group.send', input),
+  },
+  sandbox: {
+    status: () => invoke('sandbox.status'),
+    pull: () => invoke('sandbox.pull'),
+    stop: (agentId) => invoke('sandbox.stop', { agentId }),
+    openViewer: (agentId) => invoke('sandbox.viewer', { agentId }),
+  },
   mcp: {
     list: () => invoke('mcp.list'), discover: () => invoke('mcp.discover'), add: (input) => invoke('mcp.add', input),
     approve: (id) => invoke('mcp.approve', { id }), disable: (id) => invoke('mcp.disable', { id }),
@@ -111,6 +130,15 @@ const integrations: IntegrationsBridge = {
     cancelOAuth: (id) => invoke('mcp.oauth.cancel', { id }),
     setSecret: (input) => invoke('mcp.setSecret', input),
     clearSecret: (input) => invoke('mcp.clearSecret', input),
+    cli: {
+      overview: (options) => invoke('mcp.cli.overview', options?.sync === true ? { sync: true } : undefined),
+      sync: () => invoke('mcp.cli.sync'),
+      setAutoSync: (enabled) => invoke('mcp.cli.setAutoSync', { enabled }),
+      add: (input) => invoke('mcp.cli.add', input),
+      install: (input) => invoke('mcp.cli.install', input),
+      remove: (input) => invoke('mcp.cli.remove', input),
+      removeEverywhere: (key) => invoke('mcp.cli.removeEverywhere', { key }),
+    },
   },
   remote: {
     list: () => invoke('remote.list'), add: (input) => invoke('remote.add', input), remove: (id) => invoke('remote.remove', { id }),
@@ -268,6 +296,8 @@ const conductor = {
       plan?: boolean;
       /** Model/effort choices; omitted means Auto (by difficulty). */
       runOptions?: RunOptions;
+      /** Start a new thread run by this sandbox agent. */
+      sandboxAgentId?: string;
     }): Promise<Task> => invoke('task.create', input),
     cancel: (id: string): Promise<void> => invoke('task.cancel', { id }),
     /** Send a message while this task is working: steer it or queue behind it. */

@@ -164,7 +164,7 @@ export function StepRows({ steps, onChange }: {
         {steps.map((step, index) => (
           <li key={index} role="group" aria-label={`Step ${index + 1}`} className="rounded-lg border border-border bg-background/40 p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">Step {index + 1}</span>
+              <span className="text-2xs font-semibold text-muted-foreground">Step {index + 1}</span>
               <RemoveRow label={`Remove step ${index + 1}`} onClick={() => onChange(steps.filter((_, current) => current !== index))} />
             </div>
             <textarea

@@ -28,7 +28,7 @@ function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }
   const checks = item.criteria.filter((criterion) => criterion !== 'response: nonempty');
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] min-w-0 rounded-2xl bg-message p-3 text-message-foreground">
+      <div className="relative max-w-[80%] min-w-0 rounded-2xl rounded-br-md bg-message px-3.5 py-2.5 text-message-foreground">
         <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{item.text}</p>
         {item.attachments.length > 0 ? (
           <div className="mt-3">
@@ -68,8 +68,8 @@ function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JS
         : null;
   const content = (
     <>
-      <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-primary" />
-      {entry.source !== undefined ? <span className="shrink-0 rounded border border-border-strong bg-accent px-1 py-px text-3xs font-medium text-foreground/80">{entry.source}</span> : null}
+      <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-muted-foreground" />
+      {entry.source !== undefined ? <span className="shrink-0 rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-foreground/80">{entry.source}</span> : null}
       <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'running' && live ? 'text-shimmer' : entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
       {toneIcon}
       {expandable ? <ChevronRightIcon size={12} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} /> : null}
@@ -106,12 +106,12 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
   // Short groups and the live group stay expanded, like T3 Code's work log.
   const expanded = open || live || entries.length <= 3;
   return (
-    <div className="bg-transparent">
+    <div className="border-l-2 border-border pl-1.5">
       {entries.length > 3 && !live ? (
-        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded} className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 text-left text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded} className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           <ChevronRightIcon size={12} className={cn('transition-transform', expanded && 'rotate-90')} />
-          <span className="shrink-0 font-medium whitespace-nowrap">Work log</span>
-          <span className="shrink-0 whitespace-nowrap text-muted-foreground/70">· {entries.length} steps{summaryParts.length > 0 ? ` · ${summaryParts.join(', ')}` : ''}</span>
+          <span className="shrink-0 font-medium whitespace-nowrap text-foreground/85">Work log</span>
+          <span className="shrink-0 whitespace-nowrap">{entries.length} steps{summaryParts.length > 0 ? ` — ${summaryParts.join(', ')}` : ''}</span>
           {!expanded ? <span className="ml-auto min-w-0 truncate text-muted-foreground/70">{last.label}</span> : null}
         </button>
       ) : null}
@@ -156,7 +156,7 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
           ) : null}
           {item.kind === 'notice' ? (
             <div role="status" className="flex items-start gap-2 bg-transparent px-1 py-2 text-xs text-muted-foreground">
-              <SparklesIcon size={13} className="mt-0.5 shrink-0 text-primary" />
+              <SparklesIcon size={13} className="mt-0.5 shrink-0" />
               <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{item.text}</p>
             </div>
           ) : null}

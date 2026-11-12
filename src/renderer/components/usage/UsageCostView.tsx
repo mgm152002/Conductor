@@ -34,30 +34,33 @@ export function UsageCostView({
 
   return (
     <section className="flex flex-col gap-6" aria-label="Cost usage">
-      <div>
-        <p className="text-4xl font-medium tracking-tight text-foreground tabular-nums">{totalCost}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+        <div className="group-card flex flex-col justify-between gap-5 p-5">
+          <div>
+            <p className="text-2xs font-medium text-muted-foreground">Estimated cost</p>
+            <p className="mt-1 font-display text-[40px] leading-none font-semibold text-foreground tabular-nums">{totalCost}</p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
           {totals.sessions} sessions · {rangeLabel(range)}{costPriced ? ' · estimated at public models.dev prices' : ' · no public pricing for the models used'}
           {loading ? <span role="status" aria-live="polite"> · Refreshing…</span> : null}
         </p>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-4 border-y border-border py-3 sm:grid-cols-3">
-        <UsageMetric label="Processed tokens" value={compactNumber(totals.totalTokens)} />
+          </div>
+          <UsageTokenMix totals={totals} />
+        </div>
+        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+          <UsageMetric label="Processed tokens" value={compactNumber(totals.totalTokens)} />
         <UsageMetric label="Agent sessions" value={String(totals.sessions)} />
         <UsageMetric label="Total tokens" value={compactNumber(totals.totalTokens)} />
-      </dl>
-
-      <UsageTokenMix totals={totals} />
+        </dl>
+      </div>
 
       <section className="flex flex-col" aria-label="Cost by CLI">
-        <header className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-medium text-foreground">By CLI</h3>
+        <header className="mb-2 flex items-baseline gap-2">
+          <h3 className="text-xs font-semibold text-muted-foreground">By CLI</h3>
           <span className="text-3xs text-muted-foreground/80">
             {costPriced ? 'Share of estimated cost' : 'Share of tokens'}
           </span>
         </header>
-        <div className="flex flex-col">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {clients.map((client) => (
             <UsageClientCard
               key={client.key}
@@ -75,8 +78,8 @@ export function UsageCostView({
         </div>
       </section>
 
-      <UsageBreakdownTable title="By agent" rows={summary.byAgent} />
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid items-start gap-3 lg:grid-cols-3">
+        <UsageBreakdownTable title="By agent" rows={summary.byAgent} />
         <UsageBreakdownTable title="By project" rows={summary.byProject} />
         <UsageBreakdownTable title="By model" rows={summary.byModel} />
       </div>

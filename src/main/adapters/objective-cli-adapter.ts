@@ -48,6 +48,12 @@ export interface ObjectiveInput {
   resume?: { adapterId: string; sessionId: string };
   /** MCP servers approved in Conductor, passed to Codex as config overrides. */
   mcpServers?: CodexMcpServer[];
+  /**
+   * A sandbox agent's run: the CLI's own shell, file-editing and web tools
+   * are switched off (or declined at the gate) so its work happens in the
+   * sandbox, through the sandbox MCP server.
+   */
+  sandboxOnly?: boolean;
   /** Model per agent (agent id → model slug): composer, Settings or Auto routing. */
   models?: Record<string, string>;
   /** Reasoning effort per agent (agent id → level). */

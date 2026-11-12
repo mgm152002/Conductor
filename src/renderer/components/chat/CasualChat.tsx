@@ -14,11 +14,13 @@ import { ChatPendingApprovals } from './PendingApprovalPanel';
 import { DeleteChatDialog } from '../threads/DeleteChatDialog';
 import { RenameChatDialog } from '../threads/RenameChatDialog';
 import { SpaceNameDialog } from '../threads/SpaceDialogs';
-import { ArrowUpIcon, MessageIcon, PencilIcon, PlusIcon, StopIcon, TrashIcon } from '../ui/icons';
+import { ArrowLeftIcon, ArrowUpIcon, MessageIcon, PanelLeftIcon, PencilIcon, PlusIcon, StopIcon, TrashIcon } from '../ui/icons';
+import { useUiStore } from '../../stores/ui-store';
+import { relativeTime } from '../../lib/time';
 import { EntityIcon } from '../ui/EntityIcon';
 import { ProviderAvatar, agentBrand } from '../ui/BrandMarks';
 import { MenuSelect } from '../ui/MenuSelect';
-import { AttachmentTray, useAttachmentDraft } from '../attachments';
+import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
 import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
@@ -138,11 +140,33 @@ export function CasualChat(): React.JSX.Element {
   }
 
   const hasMessages = (conversation?.messages.length ?? 0) > 0;
+  const panelCollapsed = useUiStore((state) => state.panelCollapsed);
+  const recent = [...threads].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      <header className="app-drag flex h-(--topbar-height) shrink-0 items-center gap-3 border-b border-border px-5">
+      <header className={cn('flex h-(--topbar-height) shrink-0 items-center gap-2 px-4', hasMessages || conversation !== undefined ? 'border-b border-border' : '')}>
+        <button
+          type="button"
+          onClick={() => { useUiStore.getState().setPanelCollapsed(!panelCollapsed); }}
+          aria-pressed={!panelCollapsed}
+          aria-label={panelCollapsed ? 'Show chat list' : 'Hide chat list'}
+          title="Chat list (⌘B)"
+          className={cn('flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring', !panelCollapsed && 'bg-accent text-foreground')}
+        >
+          <PanelLeftIcon size={15} />
+        </button>
+        {selectedId !== null ? (
+          <button
+            type="button"
+            onClick={() => { useChatStore.getState().select(null); }}
+            title="Back to the Chat start page"
+            className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-2 pl-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <ArrowLeftIcon size={13} />Chats
+          </button>
+        ) : null}
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          <h1 className="min-w-0 truncate text-sm font-medium">{conversation?.thread.title ?? 'Chat'}</h1>
+          <h1 className={cn('min-w-0 truncate text-sm font-semibold', conversation === undefined && 'sr-only')}>{conversation?.thread.title ?? 'New chat'}</h1>
           {conversation !== undefined ? (
             <>
               <button
@@ -195,7 +219,7 @@ export function CasualChat(): React.JSX.Element {
       ) : null}
       {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
-      <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className={hasMessages ? 'min-h-0 flex-1 overflow-y-auto' : 'shrink-0 pt-[clamp(0.5rem,6vh,3.5rem)]'}>
         {hasMessages ? (
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">
             {conversation?.messages.map((message, index) => {
@@ -223,7 +247,7 @@ export function CasualChat(): React.JSX.Element {
                     reason="The CLI or model changed between replies"
                   />
                 ) : null}
-              <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl bg-accent px-4 py-3')}>
+              <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-message px-3.5 py-2.5 text-message-foreground')}>
                 {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Thinking…'}</p> : null}
                 {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 px-1 text-xs text-muted-foreground"><span className="text-shimmer">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Working…'}</span></p> : null}
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
@@ -242,29 +266,30 @@ export function CasualChat(): React.JSX.Element {
             })}
           </div>
         ) : (
-          <div className="flex h-full min-h-44 flex-col items-center justify-center gap-3 px-6 text-center">
-            <h2 className="font-display text-3xl font-semibold tracking-tight">What’s on your mind?</h2>
-            <p className="max-w-sm text-[13px] text-muted-foreground">Ask anything.</p>
+          <div className="flex flex-col items-center gap-2 px-6 pb-5 text-center">
+            <h2 className="font-display text-[26px] leading-tight font-semibold">What’s on your mind?</h2>
+            <p className="max-w-sm text-[13px] text-muted-foreground">Ask anything. No project needed.</p>
           </div>
         )}
       </div>
-      <div className="mx-auto w-full max-w-(--chat-max) shrink-0 px-5 pb-5">
+      <div className={cn('mx-auto w-full max-w-(--chat-max) px-5 pb-5', hasMessages ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto pt-1')}>
         {loading ? <p role="status" className="mb-2 text-xs text-muted-foreground">Loading conversation…</p> : null}
         {error ? <p role="alert" className="mb-2 text-xs text-destructive-foreground [overflow-wrap:anywhere]">{error} {loadFailed ? <button type="button" onClick={() => { setRevision((value) => value + 1); }} className="underline">Retry loading</button> : null}</p> : null}
         {!agents.length ? <p className="mb-3 text-xs text-muted-foreground">Connect a local agent in <NavLink to="/connected-apps" className="underline">Connections</NavLink> to start chatting. No project is needed.</p> : null}
         <Mem0OfflineNotice />
         {selectedId !== null ? <PendingQuestionPanel scopeId={selectedId} /> : null}
         {selectedId !== null ? <ChatPendingApprovals threadId={selectedId} /> : null}
-        <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-border bg-card p-3 shadow-xs focus-within:border-ring/50">
+        <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-border-strong bg-surface-raised p-3 shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-3 focus-within:ring-ring/15">
           <label htmlFor="casual-message" className="sr-only">Message</label>
           <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
-          }} placeholder="Ask anything…" rows={2} className="block max-h-45 min-h-16 w-full resize-none bg-transparent px-1 py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground" />
+          }} placeholder="Ask anything…" rows={2} className="block max-h-45 min-h-16 w-full resize-none bg-transparent px-1.5 py-1 text-[15px] leading-relaxed outline-none placeholder:text-muted-foreground/60" />
           <div className="px-1 pt-1">
             <AttachmentTray
               attachments={attachmentDraft.attachments}
               onRemove={(id) => { void attachmentDraft.remove(id); }}
               onPick={() => { void attachmentDraft.pick(); }}
+              picker={false}
               busy={attachmentDraft.busy}
               disabled={submitting}
               progress={attachmentDraft.progress}
@@ -274,6 +299,7 @@ export function CasualChat(): React.JSX.Element {
           </div>
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <AttachButton onPick={() => { void attachmentDraft.pick(); }} count={attachmentDraft.attachments.length} disabled={attachmentDraft.busy || submitting} />
               <MenuSelect
                 label="Chat agent"
                 value={selectedAgent}
@@ -294,10 +320,48 @@ export function CasualChat(): React.JSX.Element {
               />
               {selectedAgent ? <ModelEffortPicker agentId={selectedAgent} value={runChoice} onChange={(choice) => { setChatChoice(selectedAgent, choice); }} /> : null}
             </div>
-            {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[2px_2px_0_0_var(--shadow-hard-color)] transition-transform duration-150 active:scale-90 disabled:cursor-default disabled:opacity-30 disabled:shadow-none"><ArrowUpIcon size={17} /></button>}
+            {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-[filter,transform,background-color] duration-150 hover:brightness-110 active:scale-90 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground/60"><ArrowUpIcon size={16} /></button>}
           </div>
         </form>
         <p className="mt-2 text-center text-3xs text-muted-foreground">{currentSpace !== null ? `Sharing context with ${spaceSiblingCount} other ${spaceSiblingCount === 1 ? 'chat' : 'chats'} in Space "${currentSpace.name}" · No project context` : 'No project context · Use Work for project threads'}</p>
+        {!hasMessages && selectedId === null && recent.length > 0 ? (
+          <section aria-label="Recent chats" className="mt-8">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-xs font-semibold text-muted-foreground">Pick up where you left off</h2>
+              {threads.length > recent.length ? (
+                <button type="button" onClick={() => { useUiStore.getState().setPanelCollapsed(false); }} className="cursor-pointer rounded-md px-1.5 py-0.5 text-2xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                  All {threads.length} chats
+                </button>
+              ) : null}
+            </div>
+            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {recent.map((thread) => {
+                const space = spaces.find((item) => item.id === thread.spaceId);
+                return (
+                  <li key={thread.id}>
+                    <button
+                      type="button"
+                      onClick={() => { useChatStore.getState().select(thread.id); }}
+                      title={thread.title}
+                      className="flex h-full w-full cursor-pointer flex-col gap-2 rounded-xl border border-border bg-card p-3 text-left transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-border-strong hover:shadow-lift focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+                    >
+                      <span className="line-clamp-2 min-h-[2.4em] text-[13px] leading-snug font-medium break-words text-foreground">{thread.title}</span>
+                      <span className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
+                        {space !== undefined ? (
+                          <span className="flex min-w-0 items-center gap-1">
+                            <EntityIcon icon={space.icon ?? null} name={space.name} kind="space" size={14} />
+                            <span className="truncate">{space.name}</span>
+                          </span>
+                        ) : null}
+                        <span className="ml-auto shrink-0 tabular-nums">{relativeTime(thread.updatedAt)}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
       </div>
     </div>
   );

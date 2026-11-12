@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CliCatalog } from '../components/connected-apps';
 import { FolderConnectors } from '../components/connected-apps/FolderConnectors';
 import { McpServers } from '../components/connected-apps/McpServers';
+import { CliMcpServers } from '../components/connected-apps/CliMcpServers';
 import { RemoteHosts } from '../components/connected-apps/RemoteHosts';
 import { ScreenScaffold } from './ScreenScaffold';
 import { LayersIcon, PlugIcon } from '../components/ui/icons';
@@ -21,7 +22,7 @@ export function ConnectedAppsScreen(): React.JSX.Element {
       title="Connections"
       screen="connected-apps"
       layout="wide"
-      icon={<PlugIcon size={14} />}
+      icon={<PlugIcon size={16} />}
     >
       <div className="mb-6 flex">
         <div className="seg-control" role="tablist" aria-label="Connections sections">
@@ -49,8 +50,9 @@ export function ConnectedAppsScreen(): React.JSX.Element {
           <RemoteHosts />
         </div>
       ) : (
-        <div role="tabpanel" aria-label="MCP servers">
-          <McpServers />
+        <div role="tabpanel" aria-label="MCP servers" className="flex flex-col gap-10">
+          <CliMcpServers />
+          <McpServers legacy />
         </div>
       )}
     </ScreenScaffold>
