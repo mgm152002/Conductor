@@ -4,6 +4,7 @@ import { compareAgentPreference } from '@shared/agent-preference';
 import { INTEGRATION_SCHEMAS, type RemoteHostView } from '@shared/integrations-contract';
 import type { Registry } from '../registry/registry';
 import type { SecretStore } from '../secrets/secret-store';
+import type { CliMcpManager } from '../mcp/cli-mcp';
 import type { McpService } from '../mcp/mcp-service';
 import type { RemoteHost, RemoteHostService } from '../adapters/remote-hosts';
 import type { ProactiveAssistant } from '../domain/proactive-assistant-service';
@@ -28,6 +29,8 @@ export class IpcSuggestionEmitter implements SuggestionEmitter {
 }
 
 export interface IntegrationDeps {
+  /** MCP servers in each agent CLI's own configuration. */
+  cliMcp: CliMcpManager;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -76,6 +79,18 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('mcp.oauth.cancel', S['mcp.oauth.cancel'], (_e, input) => { deps.mcp.cancelOAuth(input.id); });
   router.handle('mcp.setSecret', S['mcp.setSecret'], (_e, input) => deps.mcp.setSecret(input.id, input.name, input.value));
   router.handle('mcp.clearSecret', S['mcp.clearSecret'], (_e, input) => deps.mcp.clearSecret(input.id, input.name));
+  router.handle('mcp.cli.overview', S['mcp.cli.overview'], (_e, input) => deps.cliMcp.overview({ sync: input?.sync === true }));
+  router.handle('mcp.cli.sync', S['mcp.cli.sync'], () => deps.cliMcp.sync());
+  router.handle('mcp.cli.setAutoSync', S['mcp.cli.setAutoSync'], (_e, input) => deps.cliMcp.setAutoSync(input.enabled));
+  router.handle('mcp.cli.add', S['mcp.cli.add'], (_e, input) => deps.cliMcp.add({
+    name: input.name, endpoint: input.endpoint,
+    ...(input.env !== undefined ? { env: input.env } : {}),
+    ...(input.headers !== undefined ? { headers: input.headers } : {}),
+    ...(input.clis !== undefined ? { clis: input.clis } : {}),
+  }));
+  router.handle('mcp.cli.install', S['mcp.cli.install'], (_e, input) => deps.cliMcp.installExisting(input.key, input.cli));
+  router.handle('mcp.cli.remove', S['mcp.cli.remove'], (_e, input) => deps.cliMcp.removeFromCli(input.key, input.cli));
+  router.handle('mcp.cli.removeEverywhere', S['mcp.cli.removeEverywhere'], (_e, input) => deps.cliMcp.removeEverywhere(input.key));
 
   router.handle('remote.list', S['remote.list'], () => deps.remote.list().map(remoteView));
   router.handle('remote.add', S['remote.add'], (_e, input) => remoteView(deps.remote.add(input)));

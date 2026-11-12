@@ -61,6 +61,7 @@ import { SlackConnectorLifecycle } from './connectors/slack-connector';
 import { McpRegistry } from './mcp/mcp-registry';
 import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
+import { CliMcpManager } from './mcp/cli-mcp';
 import { GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
 import { configuredDeviceOAuthProviders, GitHubDeviceOAuthProvider, McpOAuthService } from './mcp/mcp-oauth';
 import { ElectronMarketplaceCatalog } from './mcp/marketplace-catalog';
@@ -118,6 +119,7 @@ export interface AppServices {
   learningLoop: LearningLoop;
   learningCron: LearningCronService;
   mcp: McpService;
+  cliMcp: CliMcpManager;
   remoteHosts: RemoteHostService;
   secrets: SecretStore;
   /** The renderer emitter proactive suggestions are surfaced through. */
@@ -247,6 +249,9 @@ export async function bootstrap(): Promise<AppServices> {
     delete: (id) => secretStore.delete(id),
     resolve: (id) => keychainResolver.resolve(id),
   }, mcpOAuth);
+  // MCP servers live in each agent CLI's own config; Conductor installs them
+  // there and keeps the CLIs in step (sync preferences beside the DB).
+  const cliMcp = new CliMcpManager({ statePath: join(app.getPath('userData'), 'mcp-cli-sync.json') });
 
   // Managed_Local_Storage for artifacts persisted during step execution lives
   // beside the DB under userData.
@@ -668,7 +673,7 @@ export async function bootstrap(): Promise<AppServices> {
   registerGitHubHandlers(router, github);
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);
@@ -723,6 +728,7 @@ export async function bootstrap(): Promise<AppServices> {
     learningLoop,
     learningCron,
     mcp,
+    cliMcp,
     remoteHosts,
     secrets: secretStore,
     suggestionEvents,

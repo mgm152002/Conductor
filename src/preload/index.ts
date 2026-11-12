@@ -111,6 +111,15 @@ const integrations: IntegrationsBridge = {
     cancelOAuth: (id) => invoke('mcp.oauth.cancel', { id }),
     setSecret: (input) => invoke('mcp.setSecret', input),
     clearSecret: (input) => invoke('mcp.clearSecret', input),
+    cli: {
+      overview: (options) => invoke('mcp.cli.overview', options?.sync === true ? { sync: true } : undefined),
+      sync: () => invoke('mcp.cli.sync'),
+      setAutoSync: (enabled) => invoke('mcp.cli.setAutoSync', { enabled }),
+      add: (input) => invoke('mcp.cli.add', input),
+      install: (input) => invoke('mcp.cli.install', input),
+      remove: (input) => invoke('mcp.cli.remove', input),
+      removeEverywhere: (key) => invoke('mcp.cli.removeEverywhere', { key }),
+    },
   },
   remote: {
     list: () => invoke('remote.list'), add: (input) => invoke('remote.add', input), remove: (id) => invoke('remote.remove', { id }),

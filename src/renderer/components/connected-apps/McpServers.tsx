@@ -111,10 +111,13 @@ function ToolRunner({ server, onClose }: { server: McpServer | null; onClose: ()
   );
 }
 
-function Marketplace({ servers, busy, onInstall }: {
+export function Marketplace({ servers, busy, onInstall, isInstalled, installLabel }: {
   servers: McpServer[];
   busy: string | null;
   onInstall: (entry: McpMarketplaceEntry) => void;
+  /** Overrides the installed check (e.g. against the CLIs' servers). */
+  isInstalled?: ((entry: McpMarketplaceEntry) => boolean) | undefined;
+  installLabel?: string | undefined;
 }): React.JSX.Element {
   const [catalog, setCatalog] = useState<readonly McpMarketplaceEntry[]>([]);
   const [query, setQuery] = useState('');
@@ -147,7 +150,7 @@ function Marketplace({ servers, busy, onInstall }: {
           ))}
         </div>
       </form>
-      <p className="text-3xs text-muted-foreground">Live catalog from mcpservers.org. <VerifiedBadge size={11} /> marks servers mcpservers.org lists as official. Installing never starts a server — Approve does.</p>
+      <p className="text-3xs text-muted-foreground">Live catalog from mcpservers.org. <VerifiedBadge size={11} /> marks servers mcpservers.org lists as official. {isInstalled !== undefined ? 'Install opens the add form with its settings filled in.' : 'Installing never starts a server — Approve does.'}</p>
       {loadError !== null ? <p role="alert" className="text-xs text-destructive-foreground">Could not reach mcpservers.org: {loadError} <button type="button" className="underline" onClick={() => { void load(query); }}>Retry</button></p> : null}
       {loading && catalog.length === 0 ? <p role="status" className="text-2xs text-muted-foreground">Loading the registry catalog…</p> : null}
       {!loading && visible.length === 0 ? <p className="text-2xs text-muted-foreground">No registry servers match. Try another search.</p> : (
@@ -155,7 +158,9 @@ function Marketplace({ servers, busy, onInstall }: {
         <p className="text-3xs text-muted-foreground">{visible.length} server{visible.length === 1 ? '' : 's'}{category !== 'All' ? ` in ${category}` : ''} — scroll the catalog or search to narrow it down.</p>
         <ul className="grid max-h-[520px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((entry) => {
-            const installed = (entry.endpoint !== '' && installedEndpoints.has(entry.endpoint)) || servers.some((s) => s.name === entry.name);
+            const installed = isInstalled !== undefined
+              ? isInstalled(entry)
+              : (entry.endpoint !== '' && installedEndpoints.has(entry.endpoint)) || servers.some((s) => s.name === entry.name);
             return (
               <li key={entry.id} className="flex gap-3 rounded-xl border border-border bg-card p-3.5">
                 <MarketplaceIcon entry={entry} />
@@ -170,7 +175,7 @@ function Marketplace({ servers, busy, onInstall }: {
                   <div className="mt-2 flex items-center gap-2">
                     {installed
                       ? <Badge tone="success">Installed</Badge>
-                      : <Button size="xs" variant="primary" disabled={busy !== null || !entry.installable} title={entry.installable ? `Install ${entry.name}` : entry.authNote} onClick={() => { onInstall(entry); }}>{busy === `install:${entry.id}` ? 'Installing…' : entry.installable ? 'Install' : 'Needs manual setup'}</Button>}
+                      : <Button size="xs" variant="primary" disabled={busy !== null || !entry.installable} title={entry.installable ? `Install ${entry.name}` : entry.authNote} onClick={() => { onInstall(entry); }}>{busy === `install:${entry.id}` || busy === `draft:${entry.id}` ? 'Opening…' : entry.installable ? (installLabel ?? 'Install') : 'Needs manual setup'}</Button>}
                     <span className="truncate font-mono text-3xs text-muted-foreground" title={entry.websiteUrl}>{entry.id}</span>
                   </div>
                 </div>
@@ -184,7 +189,12 @@ function Marketplace({ servers, busy, onInstall }: {
   );
 }
 
-export function McpServers(): React.JSX.Element {
+/**
+ * Servers registered in Conductor itself (the older model, before servers were
+ * installed into the CLIs). With `legacy`, it only lists existing ones so they
+ * can still be managed or removed, and renders nothing when there are none.
+ */
+export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React.JSX.Element | null {
   const [servers, setServers] = useState<McpServer[]>([]);
   const [catalogEntries, setCatalogEntries] = useState<readonly McpMarketplaceEntry[]>([]);
   const [discovered, setDiscovered] = useState<McpDiscoveryEntry[] | null>(null);
@@ -262,14 +272,18 @@ export function McpServers(): React.JSX.Element {
 
   const registered = new Set(servers.map((s) => s.endpoint));
 
+  if (legacy && servers.length === 0) return null;
+
   return (
-    <section aria-label="MCP servers" className="flex flex-col gap-3">
+    <section aria-label={legacy ? 'Servers registered in Conductor' : 'MCP servers'} className="flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />MCP servers</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Approved servers are exposed to every agent — Codex, Claude Code, OpenCode, Kiro and Antigravity — in Work and Chat.</p>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />{legacy ? 'Servers registered in Conductor' : 'MCP servers'}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{legacy
+            ? 'Added before servers were installed into the CLIs. Conductor still hands approved ones to agents for each run; add them above to put them in the CLIs themselves.'
+            : 'Approved servers are exposed to every agent — Codex, Claude Code, OpenCode, Kiro and Antigravity — in Work and Chat.'}</p>
         </div>
-        <div className="flex gap-1.5">
+        <div className={legacy ? 'hidden' : 'flex gap-1.5'}>
           <Button size="sm" variant="outline" onClick={() => { setGithubOpen(true); }} title={githubSaved === '' ? 'Add your GitHub OAuth App client ID' : 'GitHub sign-in is configured'}>GitHub sign-in{githubSaved === '' ? '' : ' ✓'}</Button>
           <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void act('discover', async () => { setDiscovered(await window.conductor.mcp.discover()); }); }}><SearchIcon size={13} />Find installed</Button>
           <Button size="sm" variant="primary" onClick={() => { setName(''); setEndpoint(''); setAdding(true); }}><PlusIcon size={13} />Add server</Button>
@@ -281,7 +295,7 @@ export function McpServers(): React.JSX.Element {
           {/OAuth App client ID/i.test(error) ? <Button size="xs" variant="outline" onClick={() => { setGithubOpen(true); }}>Set GitHub client ID</Button> : null}
         </p>
       ) : null}
-      <Marketplace servers={servers} busy={busy} onInstall={(entry) => { void install(entry); }} />
+      {legacy ? null : <Marketplace servers={servers} busy={busy} onInstall={(entry) => { void install(entry); }} />}
       {discovered !== null ? (
         <div className="rounded-xl border border-border p-3">
           <div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium">Found in other apps’ MCP configs</p><Button size="xs" variant="ghost" onClick={() => { setDiscovered(null); }}>Hide</Button></div>

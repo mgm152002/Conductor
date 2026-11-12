@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpDiscoveryEntry, McpInstallResult, McpInvocationResult, McpOAuthChallenge, McpServer } from './mcp';
 import type { McpMarketplaceEntry } from './mcp-marketplace';
+import type { CliMcpOverview, CliMcpSyncReport } from './cli-mcp';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
 import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
@@ -12,6 +13,8 @@ import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } 
 
 const id = z.string().trim().min(1).max(200);
 const uuid = z.string().uuid();
+const mcpCli = z.enum(['claude-code', 'codex', 'opencode', 'antigravity', 'kiro']);
+const mcpKey = z.string().trim().regex(/^[a-z0-9][a-z0-9_.-]{0,63}$/);
 
 export const INTEGRATION_SCHEMAS = {
   'agents.list': z.void(),
@@ -35,6 +38,20 @@ export const INTEGRATION_SCHEMAS = {
   'mcp.oauth.cancel': z.object({ id }),
   'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/), value: z.string().min(1).max(65536) }),
   'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/) }),
+  // MCP servers in each agent CLI's own configuration.
+  'mcp.cli.overview': z.object({ sync: z.boolean().optional() }).optional(),
+  'mcp.cli.sync': z.void(),
+  'mcp.cli.setAutoSync': z.object({ enabled: z.boolean() }),
+  'mcp.cli.add': z.object({
+    name: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/),
+    endpoint: z.string().trim().min(1).max(4096),
+    env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/), z.string().max(8192)).optional(),
+    headers: z.record(z.string().regex(/^[A-Za-z0-9-]{1,128}$/), z.string().max(8192)).optional(),
+    clis: z.array(mcpCli).min(1).max(5).optional(),
+  }),
+  'mcp.cli.install': z.object({ key: mcpKey, cli: mcpCli }),
+  'mcp.cli.remove': z.object({ key: mcpKey, cli: mcpCli }),
+  'mcp.cli.removeEverywhere': z.object({ key: mcpKey }),
 
   'remote.list': z.void(),
   'remote.add': z.object({
@@ -107,6 +124,16 @@ export interface IntegrationsBridge {
     setSecret(input: IntegrationRequest<'mcp.setSecret'>): Promise<McpServer>;
     /** Remove a saved credential from the Keychain. */
     clearSecret(input: IntegrationRequest<'mcp.clearSecret'>): Promise<McpServer>;
+    cli: {
+      /** Servers in every installed CLI; `sync` first copies missing ones across. */
+      overview(options?: { sync?: boolean }): Promise<CliMcpOverview>;
+      sync(): Promise<CliMcpSyncReport>;
+      setAutoSync(enabled: boolean): Promise<CliMcpOverview>;
+      add(input: IntegrationRequest<'mcp.cli.add'>): Promise<CliMcpOverview>;
+      install(input: IntegrationRequest<'mcp.cli.install'>): Promise<CliMcpOverview>;
+      remove(input: IntegrationRequest<'mcp.cli.remove'>): Promise<CliMcpOverview>;
+      removeEverywhere(key: string): Promise<CliMcpOverview>;
+    };
   };
   remote: {
     list(): Promise<RemoteHostView[]>;
