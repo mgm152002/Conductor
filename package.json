@@ -33,6 +33,7 @@
     "mammoth": "1.13.0",
     "mermaid": "12.2.0",
     "pdfjs-dist": "6.4.299",
+    "qrcode-generator": "2.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-markdown": "10.1.0",

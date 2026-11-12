@@ -12,6 +12,7 @@ export default tseslint.config(
       'coverage/**',
       '.conductor/**',
       '.superpowers/**',
+      'src/main/phone/web/**',
     ],
   },
   eslint.configs.recommended,
