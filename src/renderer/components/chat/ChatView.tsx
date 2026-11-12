@@ -5,7 +5,7 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { betweenTurnHandoff, buildTimeline, isAgentFallbackEvent, isModelFallbackEvent, latestActivity, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
+import { betweenTurnHandoff, buildTimeline, latestActivity, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { Alert, Button } from '../ui/primitives';
@@ -25,12 +25,13 @@ import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanResults, runLabel } from './PlanCard';
 import { PlanDock } from './PlanDock';
+import { WorkBoard } from './WorkBoard';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
-// The main surface, in the T3 Code shape: a thread header, a centred message
+// The main surface: a thread header, a centred message
 // timeline, and the composer docked at the bottom, with an optional details
-// panel on the right. With no thread selected it shows a draft hero with the
-// composer centred; with no project it prompts to add one.
+// panel on the right. With no thread selected it shows the Work board (the
+// composer over every thread as cards); with no project it prompts to add one.
 
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -59,10 +60,11 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
         : undefined;
     return (
       <div className="flex min-w-0 items-center gap-2 px-1 text-[13px]" role="status">
+        <span aria-hidden="true" className="eq-bars shrink-0 text-primary"><span /><span /><span /></span>
         <span className="min-w-0 truncate text-shimmer font-medium" title={label}>
           {label}…
         </span>
-        {source !== undefined ? <span className="shrink-0 rounded border border-border/70 px-1 py-px text-3xs text-muted-foreground">{source}</span> : null}
+        {source !== undefined ? <span className="shrink-0 rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-foreground/80">{source}</span> : null}
         <span className="ml-auto shrink-0 text-2xs text-muted-foreground tabular-nums">{formatDuration(now - Date.parse(task.createdAt))}</span>
       </div>
     );
@@ -93,8 +95,9 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
 }): React.JSX.Element {
   const { details, loading, error, refresh } = useTaskDetails(task);
   // A plan's tasks run in parallel, so their output is shown per task in the
-  // plan card; the main timeline keeps the message, task-level events, and
-  // agent-switch notices (which must stay visible in the conversation).
+  // plan card; the main timeline keeps the message and task-level events.
+  // A step's agent/model fallback is shown on that task's row and in the
+  // pinned plan summary, where it says which task it happened to.
   const planned = details?.plan != null;
   const ownRun = useMemo(() => turnRun(details !== null && planned ? null : details), [details, planned]);
   useEffect(() => {
@@ -102,7 +105,7 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
   }, [ownRun, onRun, task.id]);
   const items = useMemo(() => {
     const built = buildTimeline(task, details !== null && planned
-      ? { ...details, events: details.events.filter((e) => e.stepId === undefined || e.kind === 'transition' || isAgentFallbackEvent(e) || isModelFallbackEvent(e)) }
+      ? { ...details, events: details.events.filter((e) => e.stepId === undefined || e.kind === 'transition') }
       : details);
     // Between-turn switch (e.g. Muse → DeepSeek in the composer): show the
     // handoff divider right after the user's message, as chat threads do.
@@ -250,38 +253,13 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
   );
 }
 
-function DraftHero(): React.JSX.Element {
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
-  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const project = workspaces.find((w) => w.id === activeWorkspaceId);
-  const planMode = useUiStore((s) => s.planMode);
-  return (
-    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-5 py-8">
-      <div className="my-auto w-full max-w-(--chat-max) shrink-0">
-        <p className="mb-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-          <FolderIcon size={13} />{project?.name ?? 'No project'}
-        </p>
-        <h2 className="mb-6 text-center text-[28px] font-medium tracking-tight text-foreground">What should we build in <span className="underline decoration-dotted decoration-muted-foreground/60 underline-offset-4">{project?.name ?? 'Conductor'}</span>?</h2>
-        <AgentSetupNotice />
-        <Mem0OfflineNotice />
-        <Composer task={null} autoFocus variant="hero" />
-        {planMode ? (
-          <p className="mt-3 text-center text-2xs text-muted-foreground/80">
-            Plan mode: the planner writes requirements and a task list to .conductor/plans, then each task runs on its agent. Tasks that don’t depend on each other run in parallel.
-          </p>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
 function NoProjects(): React.JSX.Element {
   const setAddProjectOpen = useUiStore((s) => s.setAddProjectOpen);
   const loading = useWorkspaceStore((s) => s.loading);
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 pb-[10vh] text-center">
-      <div className="mb-4 flex size-12 items-center justify-center rounded-2xl border border-border bg-card text-muted-foreground"><FolderIcon size={22} /></div>
-      <h2 className="text-lg font-semibold text-foreground">{loading ? 'Loading projects…' : 'Add a project to get started'}</h2>
+      <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary/12 text-primary"><FolderIcon size={22} /></div>
+      <h2 className="font-display text-lg font-semibold text-foreground">{loading ? 'Loading projects…' : 'Add a project to get started'}</h2>
       <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">A project is a folder your agents work in. Threads, memory and indexed files are kept per project.</p>
       <Button className="mt-5" size="md" variant="primary" onClick={() => { setAddProjectOpen(true); }}><PlusIcon size={14} />Add project</Button>
     </div>
@@ -299,17 +277,11 @@ export function ChatView(): React.JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       {workspaces.length === 0 ? (
-        <>
-          <div className="app-drag h-(--topbar-height) shrink-0 border-b border-border" />
-          <NoProjects />
-        </>
+        <NoProjects />
       ) : showThread ? (
         <Thread key={threadKey(task)} focused={task} project={project} />
       ) : (
-        <>
-          <ChatHeader project={project} task={null} />
-          <DraftHero />
-        </>
+        <WorkBoard />
       )}
     </div>
   );

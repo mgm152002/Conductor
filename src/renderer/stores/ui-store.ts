@@ -22,6 +22,12 @@ interface UiState {
   setOnboardingOpen: (open: boolean) => void;
   /** Composer plan mode: a planner agent splits the message across agents. */
   planMode: boolean;
+  /** The thread drawer at the left of Work and Chat is hidden. */
+  panelCollapsed: boolean;
+  setPanelCollapsed: (collapsed: boolean) => void;
+  /** The ⌘K command palette. */
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
   notice: string | null;
   setNotice: (notice: string | null) => void;
   setDraft: (draft: boolean) => void;
@@ -32,7 +38,21 @@ interface UiState {
   setPlanMode: (on: boolean) => void;
 }
 
+const PANEL_KEY = 'conductor.drawer.hidden';
+
+function loadPanelCollapsed(): boolean {
+  // The boards are the default way in; the drawer is opt-in.
+  try { return window.localStorage.getItem(PANEL_KEY) !== '0'; } catch { return true; }
+}
+
 export const useUiStore = create<UiState>((set) => ({
+  panelCollapsed: loadPanelCollapsed(),
+  setPanelCollapsed: (panelCollapsed): void => {
+    try { window.localStorage.setItem(PANEL_KEY, panelCollapsed ? '1' : '0'); } catch { /* session-only */ }
+    set({ panelCollapsed });
+  },
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen): void => { set({ paletteOpen }); },
   draft: false,
   detailsOpen: false,
   detailsTab: 'files',

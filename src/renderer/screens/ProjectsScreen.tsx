@@ -8,7 +8,7 @@ export function ProjectsScreen(): React.JSX.Element {
       title="Projects"
       screen="projects"
       layout="wide"
-      icon={<FolderIcon size={14} />}
+      icon={<FolderIcon size={16} />}
     >
       <WorkspaceManager />
     </ScreenScaffold>

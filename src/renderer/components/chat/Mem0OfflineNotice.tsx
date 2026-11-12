@@ -9,7 +9,7 @@ export function Mem0OfflineNotice({ className }: { className?: string }): React.
   const mem0 = useMem0Health();
   if (!mem0 || mem0.reachable) return null;
   return (
-    <p role="status" className={className ?? 'mb-2 flex items-center gap-1.5 text-xs text-muted-foreground'}>
+    <p role="status" className={className ?? 'mx-auto mb-2 flex w-full max-w-(--chat-max) items-center gap-1.5 px-1 text-xs text-muted-foreground'}>
       <span aria-hidden className="inline-block size-1.5 shrink-0 rounded-full bg-destructive-foreground" />
       <span className="[overflow-wrap:anywhere]">Memory context is offline, so replies won’t use remembered details. {mem0.detail ?? 'The memory service is unreachable.'}</span>
     </p>

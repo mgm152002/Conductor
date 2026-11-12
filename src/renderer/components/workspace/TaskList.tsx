@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useTaskStore, isTerminalTask, tasksForWorkspace } from '../../stores/task-store';
 import { useWorkspaceStore } from '../../stores/workspace-store';
 import { useUiStore } from '../../stores/ui-store';
+import { threadStatus, threadTitle } from '../../lib/thread-status';
+import { relativeTime } from '../../lib/time';
+import { cn } from '../../lib/cn';
+import { Alert, Button, EmptyState } from '../ui/primitives';
+import { FolderIcon, RotateIcon, SquarePenIcon, TicketIcon } from '../ui/icons';
 
 export function TaskList({ history = false }: { history?: boolean }): React.JSX.Element {
   const workspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
@@ -79,30 +84,59 @@ export function TaskList({ history = false }: { history?: boolean }): React.JSX.
   return (
     <section className="flex flex-col gap-3" aria-label={history ? 'Task history' : 'Running tasks'}>
       <header className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">{history ? 'Task history' : 'In progress'} <span className="text-muted-foreground/80">({tasks.length})</span></h2>
-        <button type="button" onClick={refresh} disabled={loading || workspaceId === null} className="rounded-md border border-input px-3 py-1 text-xs disabled:opacity-40">{loading ? 'Loading…' : 'Refresh'}</button>
+        <h2 className="text-sm font-semibold text-foreground">{history ? 'Task history' : 'In progress'} <span className="ml-1 font-normal text-muted-foreground tabular-nums">{tasks.length}</span></h2>
+        <Button size="sm" variant="ghost" onClick={refresh} disabled={loading || workspaceId === null}><RotateIcon size={12} />{loading ? 'Loading…' : 'Refresh'}</Button>
       </header>
-      {error !== null ? <p role="alert" className="text-sm text-destructive-foreground">{error}</p> : null}
-      {workspaceId === null ? <p className="text-sm text-muted-foreground">Select a workspace in Projects to see its tasks.</p> : tasks.length === 0 && !loading ? <p className="text-sm text-muted-foreground">{history ? 'No task history in this workspace yet.' : 'No active tasks in this workspace.'}</p> : null}
+      {error !== null ? <Alert>{error}</Alert> : null}
+      {workspaceId === null ? (
+        <div className="group-card"><EmptyState icon={<FolderIcon size={20} />} title="No project selected" description="Select a project to see its tasks."><Button size="md" variant="outline" onClick={() => { navigate('/projects'); }}>Open Projects</Button></EmptyState></div>
+      ) : tasks.length === 0 && !loading ? (
+        <div className="group-card">
+          <EmptyState
+            icon={<TicketIcon size={20} />}
+            title={history ? 'No task history yet' : 'Nothing is running'}
+            description={history ? 'Tasks you run in this project are listed here.' : 'Agents working in this project show up here while they run, wait on you, or are paused.'}
+          >
+            {history ? null : <Button size="md" variant="primary" onClick={() => { focus(null); useUiStore.getState().setDraft(true); navigate('/work'); }}><SquarePenIcon size={14} />New thread</Button>}
+          </EmptyState>
+        </div>
+      ) : null}
       <ul className="flex flex-col gap-2">
-        {tasks.map((task) => (
-          <li key={task.id} className="row-in flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-[3px_3px_0_0_var(--shadow-hard-color)]">
+        {tasks.map((task) => {
+          const status = threadStatus(task, false);
+          const acting = retrying !== null || cancelling !== null || resuming !== null;
+          return (
+          <li key={task.id} className="row-in group-card flex flex-col gap-3 p-4">
             <div className="flex items-start gap-3">
-            <button type="button" className="flex min-w-0 flex-1 flex-col gap-1 text-left" onClick={() => { focus(task.id); useUiStore.getState().setDraft(false); navigate('/work'); }}>
-              <span className="whitespace-pre-wrap break-words text-sm font-medium text-foreground">{task.objective}</span>
-              <span className="text-xs text-muted-foreground">{task.state.toLowerCase().replace(/_/g, ' ')} · <time dateTime={task.updatedAt}>{new Date(task.updatedAt).toLocaleString()}</time></span>
+            <button type="button" title="Open this thread" className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1.5 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={() => { focus(task.id); useUiStore.getState().setDraft(false); navigate('/work'); }}>
+              <span className="line-clamp-3 break-words text-sm font-medium text-foreground">{threadTitle(task)}</span>
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <span className={cn('flex items-center gap-1.5 font-medium', status.colorClass)}>
+                  <span aria-hidden="true" className={cn('size-1.5 rounded-full', status.dotClass, status.pulse && 'animate-status-pulse')} />
+                  {status.label}
+                </span>
+                <time dateTime={task.updatedAt} title={new Date(task.updatedAt).toLocaleString()}>{relativeTime(task.updatedAt)}</time>
+              </span>
               {task.recommendedNextAction ? <span className="text-xs text-muted-foreground">{task.recommendedNextAction}</span> : null}
-              <span className="text-xs text-primary">Inspect task →</span>
             </button>
-            <div className="flex shrink-0 flex-col gap-2">
-              {task.state === 'BLOCKED' ? <button type="button" disabled={retrying !== null || cancelling !== null || resuming !== null} onClick={() => { void retryTask(task.id); }} className="rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground disabled:opacity-40">{retrying === task.id ? 'Retrying…' : 'Retry'}</button> : null}
-              {task.state === 'RECOVERABLE_INTERRUPTION' || task.state === 'BLOCKED' ? <button type="button" disabled={retrying !== null || cancelling !== null || resuming !== null} onClick={() => { void resumeTask(task.id); }} className="rounded-md border border-input px-3 py-1.5 text-xs disabled:opacity-40">{resuming === task.id ? 'Resuming…' : 'Resume'}</button> : null}
-              {!isTerminalTask(task) ? <button type="button" disabled={cancelling !== null || retrying !== null || resuming !== null} onClick={() => { void cancel(task.id); }} className="rounded-md border border-input px-3 py-1.5 text-xs disabled:opacity-40">{cancelling === task.id ? 'Cancelling…' : 'Cancel'}</button> : null}
+            <div className="flex shrink-0 items-center gap-1.5">
+              {task.state === 'BLOCKED' ? <Button size="sm" variant="primary" disabled={acting} onClick={() => { void retryTask(task.id); }}>{retrying === task.id ? 'Retrying…' : 'Retry'}</Button> : null}
+              {task.state === 'RECOVERABLE_INTERRUPTION' || task.state === 'BLOCKED' ? <Button size="sm" variant="outline" disabled={acting} onClick={() => { void resumeTask(task.id); }}>{resuming === task.id ? 'Resuming…' : 'Resume'}</Button> : null}
+              {!isTerminalTask(task) ? <Button size="sm" variant="ghost" disabled={acting} onClick={() => { void cancel(task.id); }}>{cancelling === task.id ? 'Cancelling…' : 'Cancel'}</Button> : null}
             </div>
             </div>
-            {pendingResumeId === task.id ? <div role="alertdialog" aria-label="Confirm resume" className="rounded-md border border-warning/30 bg-warning/6 p-3 text-xs text-foreground"><p>Resuming will re-execute an unfinished consequential action, such as a command, write, external message, or payment. Continue?</p><div className="mt-2 flex gap-2"><button type="button" disabled={resuming !== null} onClick={() => { void resumeTask(task.id, true); }} className="rounded-md bg-amber-700 px-3 py-1.5 font-medium text-white disabled:opacity-40">Confirm resume</button><button type="button" disabled={resuming !== null} onClick={() => { setPendingResumeId(null); }} className="rounded-md border border-warning/40 px-3 py-1.5 disabled:opacity-40">Keep paused</button></div></div> : null}
+            {pendingResumeId === task.id ? (
+              <div role="alertdialog" aria-label="Confirm resume" className="rounded-lg border border-warning/30 bg-warning/6 p-3 text-xs text-foreground">
+                <p>Resuming will re-execute an unfinished consequential action, such as a command, write, external message, or payment. Continue?</p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="default" disabled={resuming !== null} onClick={() => { void resumeTask(task.id, true); }}>Confirm resume</Button>
+                  <Button size="sm" variant="ghost" disabled={resuming !== null} onClick={() => { setPendingResumeId(null); }}>Keep paused</Button>
+                </div>
+              </div>
+            ) : null}
           </li>
-        ))}
+          );
+        })}
       </ul>
       {history && tasks.length >= 500 ? <p className="text-xs text-muted-foreground">Showing up to 500 recent tasks in this workspace.</p> : null}
     </section>

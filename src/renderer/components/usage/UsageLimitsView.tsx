@@ -59,6 +59,8 @@ export function UsageLimitsView({
   }
 
   const reportingClients = summary.clients.filter((client) => client.limits.length > 0);
+  // CLIs whose latest probe gave a concrete reason for having no windows.
+  const explained = summary.clients.filter((client) => client.limits.length === 0 && client.limitStatus !== undefined);
   const reporting = reportingClients.length;
   const bars = summary.clients.map((client) => ({
     key: client.key,
@@ -102,6 +104,25 @@ export function UsageLimitsView({
           free-model Daily window, whose percentage OpenCode does not publish); Antigravity
           reports Weekly only.
         </p>
+
+        {explained.length > 0 ? (
+          <ul aria-label="CLIs without limit data" className="group-card flex flex-col">
+            {explained.map((client) => (
+              <li key={client.key} className="group-row items-start">
+                <span className="mt-0.5"><CliIcon id={client.key} /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-foreground">
+                    {clientLabel(client)}
+                    <span className={client.limitStatus!.state === 'signed-out' ? 'rounded-full bg-warning/12 px-1.5 py-px text-3xs font-medium text-warning' : 'rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-muted-foreground'}>
+                      {client.limitStatus!.state === 'signed-out' ? 'Signed out' : client.limitStatus!.state === 'no-subscription' ? 'No quota plan' : 'No answer'}
+                    </span>
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{client.limitStatus!.detail}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : null}
 
         <div className="flex flex-col gap-3">
           {reportingClients.map((client) => {

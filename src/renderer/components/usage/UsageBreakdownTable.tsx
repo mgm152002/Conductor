@@ -68,7 +68,7 @@ export function UsageClientCard({
   return (
     <article
       aria-label={`${clientLabel(client)} usage`}
-      className="flex flex-col gap-2 border-b border-border py-3.5 last:border-b-0"
+      className="group-card flex flex-col gap-2 p-4"
     >
       <header className="flex items-center gap-2">
         {agentBrand(client.key) !== null
@@ -82,29 +82,30 @@ export function UsageClientCard({
         </span>
       </header>
 
-      <div className="flex items-baseline gap-2 pl-4">
-        <span className="text-2xs text-muted-foreground">{primaryLabel} · {percent}% of total</span>
+      <div className="flex items-baseline gap-2">
+        <span className="text-2xs text-muted-foreground">{primaryLabel}, {percent}% of total</span>
       </div>
 
-      <div className="ml-4 h-[3px] w-auto overflow-hidden rounded-full bg-muted">
+      <div className="h-1.5 w-auto overflow-hidden rounded-full bg-muted">
         {empty ? null : (
-          <div className="h-full rounded-full bg-foreground/70" style={{ width: `${Math.max(2, percent)}%` }} />
+          <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(2, percent)}%` }} />
         )}
       </div>
 
-      <p className="pl-4 text-3xs text-muted-foreground">
+      <p className="text-3xs text-muted-foreground">
         {compactNumber(client.inputTokens)} input
         {' · '}{compactNumber(client.outputTokens)} output
         {client.cachedInputTokens > 0 ? ` · ${compactNumber(client.cachedInputTokens)} cached` : ''}
         {client.reasoningTokens > 0 ? ` · ${compactNumber(client.reasoningTokens)} reasoning` : ''}
       </p>
       {primaryHint !== undefined ? (
-        <p className="pl-4 text-3xs text-muted-foreground/80">{primaryHint}</p>
+        <p className="text-3xs text-muted-foreground">{primaryHint}</p>
       ) : null}
 
       {empty ? (
-        <p className="pl-4 text-3xs text-muted-foreground">
+        <p className="text-3xs text-muted-foreground">
           No usage recorded for this CLI in the selected range.
+          {client.lastUsedAt !== undefined ? ` Last used ${new Date(client.lastUsedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}; choose a longer range to include it.` : ''}
         </p>
       ) : null}
     </article>
@@ -124,13 +125,13 @@ export function UsageMetric({
   emphasis?: boolean;
 }): React.JSX.Element {
   return (
-    <div className="py-1">
-      <dt className="text-2xs text-muted-foreground">{label}</dt>
+    <div className="group-card flex flex-col justify-center px-4 py-3.5">
+      <dt className="text-2xs font-medium text-muted-foreground">{label}</dt>
       <dd
         className={
           emphasis
-            ? 'mt-0.5 text-xl font-medium text-foreground tabular-nums'
-            : 'mt-0.5 text-base font-medium text-foreground tabular-nums'
+            ? 'mt-1 text-2xl font-semibold text-foreground tabular-nums'
+            : 'mt-1 text-xl font-semibold text-foreground tabular-nums'
         }
       >
         {value}

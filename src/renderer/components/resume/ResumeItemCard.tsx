@@ -92,7 +92,7 @@ export function ResumeItemCard({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+    <div className="group-card flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm font-medium text-foreground">
@@ -128,7 +128,7 @@ export function ResumeItemCard({
               onClick={() => {
                 void run(pending.action, true);
               }}
-              className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-7 cursor-pointer items-center rounded-lg bg-destructive px-2.5 text-xs font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
             >
               {pending.action === 'discard'
                 ? 'Confirm discard'
@@ -140,7 +140,7 @@ export function ResumeItemCard({
               onClick={() => {
                 setPending(null);
               }}
-              className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent disabled:opacity-40"
+              className="inline-flex h-7 cursor-pointer items-center rounded-lg px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:opacity-40"
             >
               Cancel
             </button>
@@ -208,12 +208,12 @@ function ActionButton({
   destructive,
 }: ActionButtonProps): React.JSX.Element {
   const base =
-    'rounded-md px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40';
+    'inline-flex h-7 cursor-pointer items-center rounded-lg px-2.5 text-xs font-medium transition-[background-color,filter] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40';
   const variant = primary
-    ? 'bg-primary text-primary-foreground hover:opacity-90   '
+    ? 'bg-primary font-semibold text-primary-foreground hover:brightness-110'
     : destructive
-      ? 'border border-destructive/30 text-destructive-foreground hover:bg-destructive/10   '
-      : 'border border-input text-foreground/80 hover:bg-accent   ';
+      ? 'text-destructive-foreground hover:bg-destructive/10'
+      : 'border border-border-strong bg-card text-foreground hover:bg-accent';
   return (
     <button
       type="button"

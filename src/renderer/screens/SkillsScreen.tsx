@@ -29,7 +29,7 @@ export function SkillsScreenView({ controller }: { controller: SkillsController 
       title="Skills"
       screen="skills"
       layout="dashboard"
-      icon={<SparklesIcon size={14} />}
+      icon={<SparklesIcon size={16} />}
       actions={screenTab === 'skills' ? (
         <Button variant="primary" size="sm" onClick={createNew} disabled={busy}>
           <PlusIcon size={13} />

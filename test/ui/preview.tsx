@@ -60,7 +60,18 @@ const publish = (snapshot: ChatConversation): void => {
   localStorage.setItem('ui-casual-chats', JSON.stringify(chats));
   for (const listener of listeners.get('chat.updated') ?? []) listener(structuredClone(snapshot));
 };
-window.conductor = {
+// Anything the fixture does not model rejects, so a screen shows its own
+// error or empty state instead of crashing the whole preview.
+const unmodelled = (path: string) => async (): Promise<never> => { throw new Error(`${path} is not available in the UI fixture`); };
+const withFallback = <T extends object>(target: T, path: string): T => new Proxy(target, {
+  get(object, key) {
+    const value = (object as Record<string | symbol, unknown>)[key];
+    if (typeof key === 'symbol') return value;
+    if (value === undefined) return path === 'conductor' ? withFallback({}, `${path}.${key}`) : unmodelled(`${path}.${key}`);
+    return typeof value === 'object' && value !== null && path === 'conductor' ? withFallback(value, `${path}.${key}`) : value;
+  },
+});
+window.conductor = withFallback({
   on: (event: string, listener: (payload: unknown) => void) => {
     const group = listeners.get(event) ?? new Set(); group.add(listener); listeners.set(event, group);
     return () => { group.delete(listener); };
@@ -138,6 +149,7 @@ window.conductor = {
   task: {
     list: async () => [task], listActive: async () => [], get: async () => task, details: async () => details, thread: async () => [task],
     renameThread: async (_threadId: string, title: string) => ({ ...task, title }),
+    queueList: async () => [], queueCancel: async () => {},
   },
   approval: { list: async () => [], resolve: async () => {} },
   question: { list: async () => [], answer: async () => {} },

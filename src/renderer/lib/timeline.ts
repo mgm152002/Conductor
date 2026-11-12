@@ -58,6 +58,42 @@ export function isModelFallbackEvent(event: TaskEvent): boolean {
   return event.kind === 'log' && obj(event.payload)?.['modelFallback'] === true;
 }
 
+/** One agent or model switch Conductor made while running a plan step. */
+export interface StepFallback {
+  id: string;
+  /** `agent`: another CLI took over; `model`: same CLI retried on its fallback model. */
+  kind: 'agent' | 'model';
+  fromAgentId?: string;
+  fromAgent?: string;
+  fromModel?: string;
+  toAgentId: string;
+  toAgent: string;
+  toModel?: string;
+  reason?: string;
+  at: string;
+}
+
+/** Every fallback recorded for one step, oldest first. */
+export function stepFallbacks(events: readonly TaskEvent[], stepId: string): StepFallback[] {
+  const out: StepFallback[] = [];
+  for (const event of events) {
+    if (event.stepId !== stepId || !(isAgentFallbackEvent(event) || isModelFallbackEvent(event))) continue;
+    const handoff = obj(obj(event.payload)?.['handoff']);
+    const toAgentId = str(handoff?.['toAgentId']);
+    const toAgent = str(handoff?.['toAgent']);
+    if (handoff === null || toAgentId === undefined || toAgent === undefined) continue;
+    const pick = (key: string): Record<string, string> => {
+      const value = str(handoff[key]);
+      return value !== undefined ? { [key]: value } : {};
+    };
+    out.push({
+      id: event.id, kind: isAgentFallbackEvent(event) ? 'agent' : 'model', toAgentId, toAgent, at: event.createdAt,
+      ...pick('fromAgentId'), ...pick('fromAgent'), ...pick('fromModel'), ...pick('toModel'), ...pick('reason'),
+    });
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+
 /** The CLI/model one Work turn ran with (single-step turns only), for between-turn handoffs. */
 export interface TurnRun { agentId: string; model?: string }
 
