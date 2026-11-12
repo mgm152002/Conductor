@@ -390,3 +390,19 @@ describe('breakdown totals', () => {
     expect(summary.byModel).toHaveLength(4);
   });
 });
+
+describe('chat usage', () => {
+  it('counts Chat replies alongside task runs, under a Chat project', async () => {
+    const { recordChatUsage } = await import('@main/usage/usage');
+    const store = await freshStore();
+    insertWorkspace(store, 'w1', 'Alpha');
+    insertTask(store, 't1', 'w1');
+    insertUsage(store, { sessionId: 's1', adapterId: 'claude-code', workspaceId: 'w1', taskId: 't1', createdAt: NOW.toISOString(), total: 100 });
+    recordChatUsage(store, { sessionId: 'c1', threadId: 'th', adapterId: 'claude-code', sample: { model: 'claude-sonnet-5-5', inputTokens: 50, outputTokens: 10 } });
+    const summary = usageSummary(store, { range: 'all' }, AGENT_NAME);
+    expect(summary.totals.sessions).toBe(2);
+    expect(summary.totals.totalTokens).toBe(160);
+    expect(summary.byProject.map((row) => row.label).sort()).toEqual(['Alpha', 'Chat']);
+    expect(usageSummary(store, { range: 'all', workspaceId: 'w1' }, AGENT_NAME).totals.sessions).toBe(1);
+  });
+});

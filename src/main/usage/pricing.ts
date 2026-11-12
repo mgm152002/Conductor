@@ -18,6 +18,8 @@ export interface ModelPrice {
   inputPerMillion: number;
   outputPerMillion: number;
   cacheReadPerMillion?: number;
+  /** Writing to the prompt cache (Anthropic bills this above plain input). */
+  cacheWritePerMillion?: number;
 }
 
 /** Look up a model's public price; `adapterId` hints the provider. */
@@ -72,17 +74,22 @@ function modelCandidates(model: string): string[] {
 export interface PricedTokens {
   inputTokens: number;
   cachedInputTokens: number;
+  /** Cache-write tokens, a subset of input tokens. */
+  cacheWriteTokens?: number;
   outputTokens: number;
 }
 
 /** Estimated USD cost of one usage row at a model's public prices. */
 export function estimateCostUsd(modelPrice: ModelPrice, tokens: PricedTokens): number {
   const cached = Math.min(Math.max(tokens.cachedInputTokens, 0), Math.max(tokens.inputTokens, 0));
-  const uncached = Math.max(tokens.inputTokens, 0) - cached;
+  const written = Math.min(Math.max(tokens.cacheWriteTokens ?? 0, 0), Math.max(tokens.inputTokens, 0) - cached);
+  const uncached = Math.max(tokens.inputTokens, 0) - cached - written;
   const cachePrice = modelPrice.cacheReadPerMillion ?? modelPrice.inputPerMillion;
+  const writePrice = modelPrice.cacheWritePerMillion ?? modelPrice.inputPerMillion;
   return (
     uncached * modelPrice.inputPerMillion
     + cached * cachePrice
+    + written * writePrice
     + Math.max(tokens.outputTokens, 0) * modelPrice.outputPerMillion
   ) / 1_000_000;
 }
@@ -113,10 +120,12 @@ export class PricingCatalog {
         const output = price(cost['output']);
         if (input === undefined || output === undefined) continue;
         const cacheRead = price(cost['cache_read']);
+        const cacheWrite = price(cost['cache_write']);
         const entry: ModelPrice = {
           inputPerMillion: input,
           outputPerMillion: output,
           ...(cacheRead !== undefined ? { cacheReadPerMillion: cacheRead } : {}),
+          ...(cacheWrite !== undefined ? { cacheWritePerMillion: cacheWrite } : {}),
         };
         const qualifiedId = `${providerId}/${normalizeModelId(modelId)}`;
         qualified.set(qualifiedId, entry);

@@ -137,3 +137,13 @@ describe('ModelPricingService', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('cache-write pricing', () => {
+  it('bills cache writes at the cache-write price, reads at the read price', async () => {
+    const { estimateCostUsd } = await import('@main/usage/pricing');
+    const price = { inputPerMillion: 2, outputPerMillion: 10, cacheReadPerMillion: 0.1, cacheWritePerMillion: 2.5 };
+    // 1M input = 200k plain + 300k written + 500k read; 100k output.
+    const cost = estimateCostUsd(price, { inputTokens: 1_000_000, cachedInputTokens: 500_000, cacheWriteTokens: 300_000, outputTokens: 100_000 });
+    expect(cost).toBeCloseTo(0.2 * 2 + 0.3 * 2.5 + 0.5 * 0.1 + 0.1 * 10, 6);
+  });
+});

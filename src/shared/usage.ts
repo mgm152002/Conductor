@@ -59,6 +59,24 @@ export interface UsageRow {
 export interface UsageClient extends UsageRow {
   /** Latest quota samples; empty when the CLI does not report limits. */
   limits: UsageLimitWindow[];
+  /**
+   * ISO timestamp of this CLI's most recent recorded session at any time,
+   * so a CLI with nothing in the selected range can say when it was last used.
+   */
+  lastUsedAt?: string;
+  /** Why the last quota probe produced no windows, when that is known. */
+  limitStatus?: UsageLimitStatus;
+}
+
+/**
+ * The outcome of the latest quota probe for a CLI that has no current
+ * windows. `detail` is a complete sentence the Usage screen shows as is.
+ */
+export interface UsageLimitStatus {
+  state: 'signed-out' | 'no-subscription' | 'unavailable';
+  detail: string;
+  /** ISO timestamp of the probe. */
+  checkedAt: string;
 }
 
 export interface UsageSummary {

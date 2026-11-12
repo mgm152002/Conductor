@@ -18,6 +18,7 @@ import {
   type NormalizedQuotaSample,
   type QuotaRecorder,
 } from './quota';
+import type { UsageLimitStatus } from '@shared/usage';
 
 type Json = Record<string, unknown>;
 
@@ -202,6 +203,10 @@ export class QuotaPollingService {
   private inFlight: Promise<void> | undefined;
   private stopped = false;
   private lastClaudeProbe: number | undefined;
+  /** Why the latest probe of a CLI produced no windows, keyed by adapter id. */
+  private readonly statuses = new Map<string, UsageLimitStatus>();
+  /** Outcome of the latest OpenCode Go request, combined with the free tier. */
+  private openCodeGo: 'ok' | 'no-key' | 'no-subscription' | 'error' = 'no-key';
 
   constructor(options: QuotaPollingServiceOptions) {
     this.quota = options.quota;
@@ -236,6 +241,19 @@ export class QuotaPollingService {
     return refresh;
   }
 
+  /**
+   * Known reasons a CLI has no quota windows after its latest probe (signed
+   * out, no subscription, probe failed). A CLI that reported, or that was
+   * never probed, has no entry.
+   */
+  limitStatuses(): Record<string, UsageLimitStatus> {
+    return Object.fromEntries(this.statuses);
+  }
+
+  private setStatus(adapterId: string, state: UsageLimitStatus['state'], detail: string): void {
+    this.statuses.set(adapterId, { state, detail, checkedAt: this.now().toISOString() });
+  }
+
   stop(): void {
     if (this.interval !== undefined) clearInterval(this.interval);
     this.interval = undefined;
@@ -267,7 +285,19 @@ export class QuotaPollingService {
     if (this.stopped) return;
     for (const result of results) {
       if (result.status !== 'fulfilled' || result.value === undefined) continue;
+      this.statuses.delete(result.value.adapterId);
       this.quota.record({ adapterId: result.value.adapterId, sample: result.value.sample });
+    }
+    // OpenCode has two sources; explain the gap only when neither reported.
+    const openCodeReported = results.slice(3).some((result) => result.status === 'fulfilled' && result.value !== undefined);
+    if (!openCodeReported && discoverOnPath('opencode', this.env) !== undefined) {
+      if (this.openCodeGo === 'no-subscription') {
+        this.setStatus('opencode', 'no-subscription', 'This OpenCode account has no active Go subscription, so it has no session or weekly limits. The free-model daily window appears after a free model is used.');
+      } else if (this.openCodeGo === 'no-key') {
+        this.setStatus('opencode', 'no-subscription', 'OpenCode Go is not connected, so there are no session or weekly limits. The free-model daily window appears after a free model is used.');
+      } else if (this.openCodeGo === 'error') {
+        this.setStatus('opencode', 'unavailable', 'OpenCode did not answer the limits request. It is retried every 5 minutes.');
+      }
     }
   }
 
@@ -336,13 +366,25 @@ export class QuotaPollingService {
         });
         return sample === undefined ? undefined : { adapterId: 'codex', sample };
       };
-      const timeout = new Promise<undefined>((resolve) => {
-        timer = setTimeout(() => resolve(undefined), this.timeoutMs);
+      const timeout = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), this.timeoutMs);
       });
-      return await Promise.race([workflow(), timeout]);
-    } catch {
+      const outcome = await Promise.race([workflow(), timeout]);
+      if (outcome === 'timeout') {
+        this.setStatus('codex', 'unavailable', 'Codex did not answer the limits request in time. It is retried every 5 minutes.');
+        return undefined;
+      }
+      if (outcome === undefined) this.setStatus('codex', 'unavailable', 'Codex answered without any limit windows for this account.');
+      return outcome;
+    } catch (error) {
       // Absence, old app-server builds, auth errors, and malformed replies must
       // not turn a last-known valid snapshot into a dashboard failure.
+      const message = error instanceof Error ? error.message : '';
+      if (/authentication required|not logged in|unauthorized/i.test(message)) {
+        this.setStatus('codex', 'signed-out', 'Codex is signed out, so its limits cannot be read. Run `codex login` in a terminal, then refresh.');
+      } else {
+        this.setStatus('codex', 'unavailable', 'Codex could not report its limits. It is retried every 5 minutes.');
+      }
       return undefined;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
@@ -405,7 +447,8 @@ export class QuotaPollingService {
     // `opencode auth export` is the CLI's documented way to read the credential
     // the user configured. The key stays in memory and is never logged.
     const key = await this.openCodeApiKey();
-    if (key === undefined) return undefined;
+    if (key === undefined) { this.openCodeGo = 'no-key'; return undefined; }
+    this.openCodeGo = 'error';
 
     const controller = new AbortController();
     this.activeRequests.add(controller);
@@ -422,7 +465,10 @@ export class QuotaPollingService {
       });
       // A user without a Go subscription gets 401/403. That is an unsupported
       // source, not a reason to erase a snapshot from an earlier subscription.
-      if (!response.ok) return undefined;
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) this.openCodeGo = 'no-subscription';
+        return undefined;
+      }
       payload = await response.json().catch(() => undefined);
     } finally {
       clearTimeout(timer);
@@ -433,6 +479,7 @@ export class QuotaPollingService {
       source: 'opencode',
       now: this.now(),
     });
+    if (sample !== undefined) this.openCodeGo = 'ok';
     return sample === undefined ? undefined : { adapterId: 'opencode', sample };
   }
 

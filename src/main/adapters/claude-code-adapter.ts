@@ -354,14 +354,20 @@ export function claudeUsage(envelope: Json, pinned?: string): Record<string, unk
   if (usage === null) return undefined;
   const n = (v: unknown): number => (typeof v === 'number' ? v : 0);
   const cacheRead = n(usage['cache_read_input_tokens']);
-  const input = n(usage['input_tokens']) + n(usage['cache_creation_input_tokens']) + cacheRead;
+  const cacheWrite = n(usage['cache_creation_input_tokens']);
+  const input = n(usage['input_tokens']) + cacheWrite + cacheRead;
   const output = n(usage['output_tokens']);
-  const models = Object.keys(obj(envelope['modelUsage']) ?? {});
-  const model = models[0] ?? pinned;
+  // The model that did most of the work (a run can also call a small helper
+  // model); its price is what the whole run is estimated at.
+  const byModel = Object.entries(obj(envelope['modelUsage']) ?? {}).map(([name, value]) => {
+    const m = obj(value) ?? {};
+    return { name, weight: n(m['inputTokens']) + n(m['outputTokens']) + n(m['cacheReadInputTokens']) + n(m['cacheCreationInputTokens']) };
+  }).sort((a, b) => b.weight - a.weight);
+  const model = byModel[0]?.name ?? pinned;
   // `total_cost_usd` is deliberately not forwarded: cost is estimated from
   // these tokens at public prices, never taken from the harness report.
   return {
-    inputTokens: input, cachedInputTokens: cacheRead, outputTokens: output,
+    inputTokens: input, cachedInputTokens: cacheRead, cacheWriteTokens: cacheWrite, outputTokens: output,
     reasoningTokens: n(obj(usage['output_tokens_details'])?.['thinking_tokens']), totalTokens: input + output,
     ...(model ? { model } : {}),
   };

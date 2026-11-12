@@ -1540,6 +1540,33 @@ const migration038: Migration = {
   },
 };
 
+// Migration 39 — cache-write tokens (priced above plain input by Claude) and
+// usage for Chat conversations, which are not tasks and had no usage rows.
+const migration039: Migration = {
+  version: 39,
+  name: 'chat_usage_cache_writes',
+  up({ db }: Tx): void {
+    db.exec(`
+      ALTER TABLE agent_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
+      CREATE TABLE chat_usage (
+        session_id            TEXT PRIMARY KEY NOT NULL,
+        thread_id             TEXT NOT NULL,
+        adapter_id            TEXT NOT NULL,
+        model                 TEXT,
+        input_tokens          INTEGER NOT NULL DEFAULT 0,
+        cached_input_tokens   INTEGER NOT NULL DEFAULT 0,
+        cache_write_tokens    INTEGER NOT NULL DEFAULT 0,
+        output_tokens         INTEGER NOT NULL DEFAULT 0,
+        reasoning_tokens      INTEGER NOT NULL DEFAULT 0,
+        total_tokens          INTEGER NOT NULL DEFAULT 0,
+        created_at            TEXT NOT NULL,
+        updated_at            TEXT NOT NULL
+      );
+      CREATE INDEX idx_chat_usage_created ON chat_usage (created_at);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1580,4 +1607,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration036,
   migration037,
   migration038,
+  migration039,
 ];
