@@ -1453,6 +1453,93 @@ const migration034: Migration = {
   },
 };
 
+// Migration 35 — sandbox agents: named agents that run on the user's CLIs
+// (in fallback order) with tools from an AIO Sandbox container, and the link
+// from a thread's root task to the agent that runs it.
+const migration035: Migration = {
+  version: 35,
+  name: 'sandbox_agents',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE sandbox_agents (
+        id           TEXT PRIMARY KEY NOT NULL,
+        name         TEXT NOT NULL,
+        description  TEXT NOT NULL DEFAULT '',
+        instructions TEXT NOT NULL DEFAULT '',
+        clis         TEXT NOT NULL DEFAULT '[]',
+        tools        TEXT NOT NULL DEFAULT '[]',
+        approval     TEXT NOT NULL DEFAULT 'risky' CHECK (approval IN ('risky', 'all', 'none')),
+        color        TEXT NOT NULL DEFAULT '#c9379a',
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+      );
+      CREATE TABLE thread_sandbox_agents (
+        thread_id  TEXT PRIMARY KEY NOT NULL,
+        agent_id   TEXT NOT NULL REFERENCES sandbox_agents(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL
+      );
+    `);
+  },
+};
+
+// Migration 36 — group chats with several sandbox agents. A group message is
+// sent to some or all members; each member answers in its own thread for the
+// group (so its CLI session and sandbox carry on), and the group view merges
+// them back into one conversation through these links.
+const migration036: Migration = {
+  version: 36,
+  name: 'agent_group_chats',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_groups (
+        id         TEXT PRIMARY KEY NOT NULL,
+        name       TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE agent_group_members (
+        group_id  TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
+        agent_id  TEXT NOT NULL REFERENCES sandbox_agents(id) ON DELETE CASCADE,
+        thread_id TEXT,
+        PRIMARY KEY (group_id, agent_id)
+      );
+      CREATE TABLE agent_group_messages (
+        id         TEXT PRIMARY KEY NOT NULL,
+        group_id   TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
+        text       TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE agent_group_replies (
+        message_id TEXT NOT NULL REFERENCES agent_group_messages(id) ON DELETE CASCADE,
+        agent_id   TEXT NOT NULL,
+        task_id    TEXT NOT NULL,
+        PRIMARY KEY (message_id, agent_id)
+      );
+      CREATE INDEX idx_agent_group_messages ON agent_group_messages (group_id, created_at);
+    `);
+  },
+};
+
+// Migration 37 — hidden workspaces: an internal place for agent chats that
+// the user did not attach to a project. Hidden workspaces never appear in
+// project lists, so those conversations stay out of Projects and Work.
+const migration037: Migration = {
+  version: 37,
+  name: 'hidden_workspaces',
+  up({ db }: Tx): void {
+    db.exec(`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`);
+  },
+};
+
+// Migration 38 — a model (and effort) per CLI for each sandbox agent.
+const migration038: Migration = {
+  version: 38,
+  name: 'sandbox_agent_models',
+  up({ db }: Tx): void {
+    db.exec(`ALTER TABLE sandbox_agents ADD COLUMN models TEXT NOT NULL DEFAULT '{}';`);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1489,4 +1576,8 @@ export const MIGRATIONS: readonly Migration[] = [
   migration032,
   migration033,
   migration034,
+  migration035,
+  migration036,
+  migration037,
+  migration038,
 ];

@@ -81,6 +81,8 @@ export const TaskCreateRequest = z.object({
   agentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
   /** Plan mode: `agentId` writes a plan and the plan's tasks run on their agents. */
   plan: z.boolean().optional(),
+  /** Start a new thread run by this sandbox agent (its CLIs, sandbox and instructions). */
+  sandboxAgentId: z.string().uuid().optional(),
   /** Model and effort for the agent (or planner) and, in plan mode, per sub-agent. Omitted = Auto. */
   runOptions: z.object({
     main: RunChoiceSchema.optional(),

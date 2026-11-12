@@ -27,6 +27,13 @@ const events: TaskEvent[] = running ? [
   { id: 'event-2', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Bash', kind: 'execute', detail: 'npm test -- plan-dock', key: 'tool-1', status: 'running', source: 'Codex' } },
   { id: 'event-3', taskId: task.id, kind: 'log', createdAt, payload: { message: 'Edited src/renderer/components/workspace/FilesRegion.tsx', kind: 'edit', status: 'completed', source: 'Claude Code' } },
 ] : [];
+// `fallback=1` records a quota fallback on the second plan task (Codex → Claude Code).
+if (params.has('fallback')) {
+  events.push({ id: 'event-fallback', taskId: task.id, stepId: 'second', kind: 'log', createdAt, payload: {
+    message: 'Codex is out of capacity, so Claude Code is taking over this step.', phase: 'execution', agentFallback: true,
+    handoff: { fromAgentId: 'codex', fromAgent: 'Codex', fromModel: 'gpt-6.1-sol', toAgentId: 'claude-code', toAgent: 'Claude Code', toModel: 'sonnet', reason: 'Codex is out of capacity: weekly limit reached' },
+  } });
+}
 const details: TaskDetails = {
   task, events, approvals: [], artifacts: [], verification: null,
   steps: [
@@ -141,7 +148,53 @@ window.conductor = {
   permissions: { getProfile: async () => 'assisted_execution' },
   dataControl: { listConsents: async () => agents.map((agent) => ({ provider: agent.id })) },
   suggestions: { list: async () => [] },
-} as unknown as typeof window.conductor;
+  sandboxAgents: (() => {
+    const agents = params.has('no-agents') ? [] : [
+      { id: 'agent-1', name: 'Web researcher', description: 'Researches a topic on the web and writes up what it found, with sources.', instructions: 'Cite sources.', clis: ['claude-code', 'codex', 'opencode'], tools: ['browser', 'documents', 'files'], approval: 'risky', color: '#4a6fe8', createdAt, updatedAt: createdAt },
+      { id: 'agent-2', name: 'QA tester', description: 'Clicks through a web app like a user and reports what breaks.', instructions: '', clis: ['codex', 'claude-code'], tools: ['browser', 'shell'], approval: 'all', color: '#2a9763', createdAt, updatedAt: createdAt },
+    ];
+    const groups = params.has('no-agents') ? [] : [{ id: 'group-1', name: 'Launch crew', agentIds: ['agent-1', 'agent-2'], createdAt, updatedAt: createdAt }];
+    return {
+      list: async () => agents,
+      threads: async () => ({ [task.id]: 'agent-1' }),
+      groups: async () => ({ groups, groupThreadIds: [] }),
+      groupMessages: async () => [{ id: 'm1', text: 'What should we check before launch?', createdAt, replies: { 'agent-1': task.id } }],
+      createGroup: async (input: object) => ({ ...input, id: 'group-new', createdAt, updatedAt: createdAt }),
+      removeGroup: async () => {}, sendGroup: async () => ({ id: 'm2', text: 'x', createdAt, replies: {} }),
+      create: async (input: object) => ({ ...input, id: 'agent-new', createdAt, updatedAt: createdAt }), update: async (input: object) => input, remove: async () => {},
+    };
+  })(),
+  sandbox: {
+    status: async () => ({
+      docker: 'ready', image: params.has('no-image') ? 'missing' : 'present', imageRef: 'ghcr.io/agent-infra/sandbox:1.11.0',
+      memory: { total: 4.1 * 1024 ** 3, used: 2.3 * 1024 ** 3 },
+      running: params.has('no-image') ? [] : [{ agentId: 'agent-1', agentName: 'Web researcher', startedAt: createdAt, state: 'ready' }],
+    }),
+    pull: async () => ({ docker: 'ready', image: 'pulling', pullProgress: 0.42, imageRef: 'ghcr.io/agent-infra/sandbox:1.11.0', running: [] }),
+    stop: async () => {}, openViewer: async () => {},
+  },
+  mcp: {
+    list: async () => [],
+    marketplace: async () => [],
+    cli: (() => {
+      const clis = (['claude-code', 'codex', 'opencode', 'antigravity', 'kiro'] as const).map((id) => ({
+        id, name: { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', antigravity: 'Antigravity', kiro: 'Kiro' }[id], installed: true, configPath: `~/.${id}`,
+      }));
+      const overview = {
+        autoSync: false, clis,
+        servers: [
+          { key: 'github', name: 'github', transport: 'stdio', endpoint: 'npx -y @modelcontextprotocol/server-github', envNames: ['GITHUB_TOKEN'], headerNames: [], portable: true,
+            presence: { 'claude-code': { state: 'installed', entry: {} }, codex: { state: 'installed', entry: {} }, opencode: { state: 'installed', entry: {} }, antigravity: { state: 'missing' }, kiro: { state: 'excluded' } } },
+          { key: 'atlassian', name: 'atlassian', transport: 'http', endpoint: 'https://mcp.atlassian.com/v1/sse', envNames: [], headerNames: [], portable: true,
+            presence: { 'claude-code': { state: 'installed', entry: {} }, codex: { state: 'installed', entry: {} }, opencode: { state: 'installed', entry: {} }, antigravity: { state: 'installed', entry: {} }, kiro: { state: 'installed', entry: {} } } },
+          { key: 'computer-use', name: 'computer-use', transport: 'stdio', endpoint: './Computer Use.app/client mcp', envNames: [], headerNames: [], portable: false, note: 'Runs from a working directory only this CLI knows.',
+            presence: { codex: { state: 'installed', entry: {} } } },
+        ],
+      };
+      return { overview: async () => overview, sync: async () => ({ installed: [], failed: [] }), setAutoSync: async () => overview };
+    })(),
+  },
+}, 'conductor') as unknown as typeof window.conductor;
 useWorkspaceStore.setState({ workspaces: projects, activeWorkspaceId: projects[0]?.id ?? null });
 useTaskStore.setState({ tasks: projects.length ? { [task.id]: task } : {}, focusedTaskId: projects.length ? task.id : null });
 useUiStore.setState({ draft: params.has('draft') });

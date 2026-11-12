@@ -36,6 +36,11 @@ export interface ToolGateOptions {
    * applies to sessions that were already running when it was switched on.
    */
   autoApprove?: () => boolean;
+  /**
+   * A sandbox agent's run: the CLI's own commands and file changes are always
+   * declined, even with auto-approve, so work happens in the sandbox.
+   */
+  sandboxOnly?: boolean;
 }
 
 /** Asks the user (through Conductor's approval UI) and resolves with their decision. */
@@ -95,6 +100,7 @@ export class ToolGate {
     // Reads and searches never ask, and the auto-approve toggle covers every
     // tool, including ones a read-only profile would otherwise decline.
     if (request.readOnly === true) return 'accept';
+    if (this.options.sandboxOnly === true && (request.kind === 'command' || request.kind === 'file_change')) return 'decline';
     if (this.options.autoApprove?.() === true) return 'accept';
     if (this.mode === 'trusted_automation') return 'accept';
     const asks = this.mode === 'assisted_execution'
