@@ -1,4 +1,5 @@
 import type { AttachmentService } from '../attachments/attachment-service';
+import { recordChatUsage, usageFromEvent } from '../usage/usage';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -766,6 +767,18 @@ export class ChatService {
       const codex = run.adapter.record.id === 'codex';
       let lastSnapshotWrite = 0;
       for await (const event of run.adapter.stream(run.handle)) {
+        // Chat replies count towards Usage like task runs do.
+        const sample = usageFromEvent(event);
+        if (sample !== undefined) {
+          const model = input.models?.[run.adapter.record.id];
+          try {
+            recordChatUsage(this.store, {
+              sessionId: `chat:${input.stepId ?? threadId}:${run.adapter.record.id}:${model ?? ''}`,
+              threadId, adapterId: run.adapter.record.id,
+              sample: { ...(model !== undefined ? { model } : {}), ...sample },
+            });
+          } catch { /* usage is informational; never fail a reply over it */ }
+        }
         if (run.cancelled) continue;
         // Streamed reply snapshots (ACP/Codex deltas): replace the content so
         // the chat streams word-by-word, throttled to avoid a write per token.

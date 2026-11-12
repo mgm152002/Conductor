@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import type { PermissionProfile, Task } from '@shared/domain';
 import {
   SANDBOX_AGENT_COLORS, SANDBOX_MCP_KEY, SANDBOX_TOOL_GROUPS,
-  type AgentGroup, type AgentGroupMessage,
+  type AgentCliChoice, type AgentGroup, type AgentGroupMessage,
   type SandboxAgent, type SandboxAgentInput, type SandboxApprovalPolicy, type SandboxToolGroup,
 } from '@shared/sandbox-agents';
 import type { Store } from '../db/types';
@@ -17,7 +19,7 @@ import type { SandboxManager } from './sandbox-manager';
 // CLI fallback order its runs follow when one CLI runs out of usage.
 
 interface AgentRow {
-  id: string; name: string; description: string; instructions: string; clis: string; tools: string;
+  id: string; name: string; description: string; instructions: string; clis: string; models: string; tools: string;
   approval: SandboxApprovalPolicy; color: string; created_at: string; updated_at: string;
 }
 
@@ -26,10 +28,31 @@ const parseList = (text: string): string[] => {
   try { const value = JSON.parse(text) as unknown; return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
 };
 
+const MODEL_ID = /^[\w./:@-]{1,100}$/;
+const EFFORT_ID = /^[a-z]{2,12}$/;
+function parseModels(text: string | undefined): Record<string, AgentCliChoice> {
+  try { return cleanModels(JSON.parse(text ?? '{}') as unknown); } catch { return {}; }
+}
+/** Keeps well-formed per-CLI choices; `only` limits them to the agent's own CLIs. */
+function cleanModels(raw: unknown, only?: readonly string[]): Record<string, AgentCliChoice> {
+  const out: Record<string, AgentCliChoice> = {};
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [cli, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (only !== undefined && !only.includes(cli)) continue;
+    if (value === null || typeof value !== 'object') continue;
+    const v = value as Record<string, unknown>;
+    const choice: AgentCliChoice = {};
+    if (typeof v['model'] === 'string' && MODEL_ID.test(v['model'])) choice.model = v['model'];
+    if (typeof v['effort'] === 'string' && EFFORT_ID.test(v['effort'])) choice.effort = v['effort'];
+    if (Object.keys(choice).length > 0) out[cli] = choice;
+  }
+  return out;
+}
+
 function toAgent(row: AgentRow): SandboxAgent {
   return {
     id: row.id, name: row.name, description: row.description, instructions: row.instructions,
-    clis: parseList(row.clis), tools: parseList(row.tools).filter((t): t is SandboxToolGroup => GROUPS.has(t as SandboxToolGroup)),
+    clis: parseList(row.clis), models: parseModels(row.models), tools: parseList(row.tools).filter((t): t is SandboxToolGroup => GROUPS.has(t as SandboxToolGroup)),
     approval: row.approval, color: row.color, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -59,12 +82,26 @@ export type TaskCreator = (input: {
 }) => Promise<Task>;
 
 const MAX_GROUP_CONTEXT = 6000;
+/** Where attached files are copied inside the sandbox. */
+const SANDBOX_ATTACHMENT_DIR = '/home/gem/attachments';
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** A safe file name for the sandbox, unique within one task's files. */
+function sandboxName(path: string, taken: Set<string>): string {
+  const base = basename(path).replace(/[^\w.@+-]+/g, '_').slice(0, 120) || 'file';
+  let name = base;
+  for (let n = 2; taken.has(name); n += 1) name = `${n}-${base}`;
+  taken.add(name);
+  return name;
+}
 
 export class SandboxAgentService {
   /** Gateway sessions per task, closed when the task settles. */
   private readonly runs = new Map<string, ActiveRun[]>();
 
   private createTask: TaskCreator | undefined;
+  /** Files already copied into a running sandbox (keyed by its address and key). */
+  private readonly uploaded = new Set<string>();
 
   constructor(private readonly deps: SandboxAgentServiceDeps) {}
 
@@ -96,24 +133,24 @@ export class SandboxAgentService {
     const tools = [...new Set(input.tools)].filter((tool) => GROUPS.has(tool));
     if (tools.length === 0) throw new Error('Give the agent at least one sandbox tool.');
     const color = /^#[0-9a-f]{6}$/i.test(input.color) ? input.color : SANDBOX_AGENT_COLORS[0];
-    return { name, description: input.description.trim().slice(0, 300), instructions: input.instructions.trim().slice(0, 8000), clis, tools, approval: input.approval, color };
+    return { name, description: input.description.trim().slice(0, 300), instructions: input.instructions.trim().slice(0, 8000), clis, models: cleanModels(input.models, clis), tools, approval: input.approval, color };
   }
 
   create(input: SandboxAgentInput): SandboxAgent {
     const clean = this.validate(input);
     const now = new Date().toISOString();
     const id = randomUUID();
-    this.deps.store.db.prepare(`INSERT INTO sandbox_agents (id, name, description, instructions, clis, tools, approval, color, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, clean.name, clean.description, clean.instructions, JSON.stringify(clean.clis), JSON.stringify(clean.tools), clean.approval, clean.color, now, now);
+    this.deps.store.db.prepare(`INSERT INTO sandbox_agents (id, name, description, instructions, clis, models, tools, approval, color, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, clean.name, clean.description, clean.instructions, JSON.stringify(clean.clis), JSON.stringify(clean.models ?? {}), JSON.stringify(clean.tools), clean.approval, clean.color, now, now);
     return this.get(id)!;
   }
 
   update(id: string, input: SandboxAgentInput): SandboxAgent {
     if (this.get(id) === undefined) throw new Error('That agent no longer exists.');
     const clean = this.validate(input);
-    this.deps.store.db.prepare(`UPDATE sandbox_agents SET name=?, description=?, instructions=?, clis=?, tools=?, approval=?, color=?, updated_at=? WHERE id=?`)
-      .run(clean.name, clean.description, clean.instructions, JSON.stringify(clean.clis), JSON.stringify(clean.tools), clean.approval, clean.color, new Date().toISOString(), id);
+    this.deps.store.db.prepare(`UPDATE sandbox_agents SET name=?, description=?, instructions=?, clis=?, models=?, tools=?, approval=?, color=?, updated_at=? WHERE id=?`)
+      .run(clean.name, clean.description, clean.instructions, JSON.stringify(clean.clis), JSON.stringify(clean.models ?? {}), JSON.stringify(clean.tools), clean.approval, clean.color, new Date().toISOString(), id);
     return this.get(id)!;
   }
 
@@ -124,9 +161,14 @@ export class SandboxAgentService {
   // ---- threads --------------------------------------------------------------
 
   /** The CLI a new run of this agent starts on: its first available one. */
-  startingCli(agentId: string): string {
+  startingCli(agentId: string, preferred?: string): string {
     const agent = this.get(agentId);
     if (agent === undefined) throw new Error('That agent no longer exists.');
+    if (preferred !== undefined) {
+      if (!agent.clis.includes(preferred)) throw new Error(`${agent.name} isn’t set up to run on ${preferred}.`);
+      if (!this.deps.cliAvailable(preferred)) throw new Error(`${preferred} isn’t available right now. Check Connections, or pick another CLI.`);
+      return preferred;
+    }
     const cli = agent.clis.find((id) => this.deps.cliAvailable(id));
     if (cli === undefined) throw new Error(`None of ${agent.name}’s CLIs is available. Edit the agent or check Connections.`);
     return cli;
@@ -147,6 +189,11 @@ export class SandboxAgentService {
   threadAgents(): Record<string, string> {
     const rows = this.deps.store.db.prepare('SELECT thread_id, agent_id FROM thread_sandbox_agents').all() as Array<{ thread_id: string; agent_id: string }>;
     return Object.fromEntries(rows.map((row) => [row.thread_id, row.agent_id]));
+  }
+
+  /** The model and effort the task's agent chose for one CLI, if any. */
+  choiceFor(task: Pick<Task, 'id' | 'threadId'>, cliId: string): AgentCliChoice | undefined {
+    return this.agentForTask(task)?.models[cliId];
   }
 
   /**
@@ -258,6 +305,38 @@ export class SandboxAgentService {
 
   // ---- runs -----------------------------------------------------------------
 
+  /** The files attached to a task, as absolute paths on this Mac. */
+  private attachmentFiles(taskId: string): Array<{ path: string; name: string }> {
+    const rows = this.deps.store.db.prepare('SELECT materialized_path FROM task_attachments WHERE task_id = ? AND materialized_path IS NOT NULL ORDER BY ordinal').all(taskId) as Array<{ materialized_path: string }>;
+    const taken = new Set<string>();
+    return rows.map((row) => ({ path: row.materialized_path, name: sandboxName(row.materialized_path, taken) }));
+  }
+
+  /** Copy a task's attached files into the sandbox, once per sandbox. Never fails the run. */
+  private async uploadAttachments(taskId: string, stepId: string, agentName: string, endpoint: import('./sandbox-manager').SandboxEndpoint): Promise<void> {
+    const files = this.attachmentFiles(taskId).filter((file) => !this.uploaded.has(`${endpoint.baseUrl}|${endpoint.apiKey}|${taskId}|${file.name}`));
+    if (files.length === 0) return;
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        if ((await stat(file.path)).size > MAX_UPLOAD_BYTES) throw new Error('too large');
+        const response = await fetch(`${endpoint.baseUrl}/v1/file/write`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'X-AIO-API-Key': endpoint.apiKey },
+          body: JSON.stringify({ file: `${SANDBOX_ATTACHMENT_DIR}/${taskId.slice(0, 8)}/${file.name}`, content: (await readFile(file.path)).toString('base64'), encoding: 'base64' }),
+          signal: AbortSignal.timeout(120_000),
+        });
+        const body = await response.json().catch(() => undefined) as { success?: boolean } | undefined;
+        if (!response.ok || body?.success === false) throw new Error(`HTTP ${response.status}`);
+        this.uploaded.add(`${endpoint.baseUrl}|${endpoint.apiKey}|${taskId}|${file.name}`);
+      } catch { failed.push(file.name); }
+    }
+    this.deps.log(taskId, stepId, {
+      message: failed.length === 0 ? `Copied ${files.length} attached file${files.length === 1 ? '' : 's'} into the sandbox` : `Could not copy ${failed.join(', ')} into the sandbox`,
+      kind: 'tool', key: `sandbox-files:${stepId}`, status: failed.length === 0 ? 'completed' : 'failed', source: agentName,
+    });
+  }
+
   /**
    * Wire one step of an agent's thread: the gateway the CLI connects to (the
    * sandbox itself starts on the first tool use) and the agent's standing
@@ -282,6 +361,7 @@ export class SandboxAgentService {
           try {
             const endpoint = await this.deps.manager.acquire({ taskId: task.id, agentId: agent.id, agentName: agent.name });
             if (already === undefined) this.deps.log(task.id, stepId, { message: 'Sandbox ready', kind: 'tool', key: `sandbox-start:${stepId}`, status: 'completed', source: agent.name });
+            await this.uploadAttachments(task.id, stepId, agent.name, endpoint);
             return endpoint;
           } catch (error) {
             const text = error instanceof Error ? error.message : 'unknown error';
@@ -298,6 +378,9 @@ export class SandboxAgentService {
     const approvals = agent.approval === 'none' ? '' : agent.approval === 'all'
       ? ' Every sandbox action waits for the user to approve it.'
       : ' Commands, code, file changes and browser actions that act on a page wait for the user to approve them; if one is declined, do not retry it — continue another way or explain what you need.';
+    const files = this.attachmentFiles(task.id);
+    const fileNote = files.length === 0 ? ''
+      : `The user attached ${files.length} file${files.length === 1 ? '' : 's'}. They are copied into your sandbox as: ${files.map((file) => `${SANDBOX_ATTACHMENT_DIR}/${task.id.slice(0, 8)}/${file.name}`).join(', ')}. Work with them there.`;
     const guidance = [
       `You are "${agent.name}"${agent.description !== '' ? ` — ${agent.description}` : ''}.`,
       agent.instructions,
@@ -305,6 +388,7 @@ export class SandboxAgentService {
       + ' Do ALL of your work there: browse the web with its browser tools, run commands with its terminal, and handle files in its file tools.'
       + ' Your own shell, web search, web fetch and file-editing tools are disabled for this agent, so do not try them (no curl, no local web search).'
       + `${approvals}`,
+      fileNote,
     ].filter((line) => line.trim() !== '').join('\n\n');
     return { server: { key: SANDBOX_MCP_KEY, url: session.url }, guidance };
   }

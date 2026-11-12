@@ -20,6 +20,10 @@ const sandboxAgentInput = z.object({
   description: z.string().max(300),
   instructions: z.string().max(8000),
   clis: z.array(z.string().trim().regex(/^[\w:.-]{1,200}$/)).min(1).max(10),
+  models: z.record(z.string().regex(/^[\w:.-]{1,200}$/), z.object({
+    model: z.string().regex(/^[\w./:@-]{1,100}$/).optional(),
+    effort: z.string().regex(/^[a-z]{2,12}$/).optional(),
+  })).optional(),
   tools: z.array(z.enum(['browser', 'shell', 'files', 'code', 'documents'])).min(1).max(5),
   approval: z.enum(['risky', 'all', 'none']),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
@@ -67,6 +71,17 @@ export const INTEGRATION_SCHEMAS = {
     context: z.string().max(20_000).optional(),
     attachmentIds: AttachmentIdsSchema.optional(),
   }),
+  'threadTiers.get': z.void(),
+  'threadTiers.put': z.object({
+    key: z.string().regex(/^[\w-]{1,64}$/),
+    pref: z.object({ mode: z.enum(['settled', 'snoozed']), seenUpdatedAt: z.string().max(40), snoozedUntil: z.string().max(40).optional() }).nullable(),
+  }),
+  'threadTiers.adopt': z.record(z.string(), z.unknown()),
+  'phone.status': z.void(),
+  'phone.start': z.void(),
+  'phone.newCode': z.void(),
+  'phone.signOut': z.void(),
+  'phone.stop': z.void(),
   'sandbox.status': z.void(),
   'sandbox.pull': z.void(),
   'sandbox.stop': z.object({ agentId: uuid }),
@@ -136,6 +151,18 @@ export interface RemoteTestResult { connected: boolean; agentInstalled: boolean;
 export interface AgentStat { adapterId: string; stats: PerformanceBaseline }
 
 export interface IntegrationsBridge {
+  threadTiers: {
+    get(): Promise<Record<string, { mode: 'settled' | 'snoozed'; seenUpdatedAt: string; snoozedUntil?: string }>>;
+    put(key: string, pref: { mode: 'settled' | 'snoozed'; seenUpdatedAt: string; snoozedUntil?: string } | null): Promise<Record<string, { mode: 'settled' | 'snoozed'; seenUpdatedAt: string; snoozedUntil?: string }>>;
+    adopt(local: Record<string, unknown>): Promise<Record<string, { mode: 'settled' | 'snoozed'; seenUpdatedAt: string; snoozedUntil?: string }>>;
+  };
+  phone: {
+    status(): Promise<import('./phone-control').PhoneControlStatus>;
+    start(): Promise<import('./phone-control').PhoneControlStatus>;
+    newCode(): Promise<import('./phone-control').PhoneControlStatus>;
+    signOut(): Promise<import('./phone-control').PhoneControlStatus>;
+    stop(): Promise<import('./phone-control').PhoneControlStatus>;
+  };
   agents: { list(): Promise<AgentOption[]>; models(agentId: string, refresh?: boolean): Promise<AgentModelCatalog> };
   secrets: { list(): Promise<SecretInfo[]>; delete(id: string): Promise<void> };
   sandboxAgents: {

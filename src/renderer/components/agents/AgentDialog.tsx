@@ -3,12 +3,14 @@ import {
   SANDBOX_AGENT_COLORS, SANDBOX_TOOL_GROUPS,
   type SandboxAgent, type SandboxAgentInput, type SandboxApprovalPolicy, type SandboxToolGroup,
 } from '@shared/sandbox-agents';
+import type { RunChoice } from '@shared/agent-models';
 import type { AgentOption } from '@shared/integrations-contract';
 import { AgentMark } from '../chat/AgentMark';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Dialog, Switch, inputClassName, textareaClassName } from '../ui/primitives';
 import { ArrowUpIcon, ChevronDownIcon, PlusIcon, Spinner, XIcon } from '../ui/icons';
 import { cn } from '../../lib/cn';
+import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 
 // Creating and editing a sandbox agent: who it is, what it does, which CLIs
 // it runs on (in fallback order), its sandbox tools and its approval gate.
@@ -121,7 +123,7 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
         </div>
 
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Runs on <span className="font-normal">(in order; when one is out of usage the next takes over)</span></legend>
+          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Runs on <span className="font-normal">(in order; when one is out of usage the next takes over; pick a model for each)</span></legend>
           {form.clis.length === 0 ? <p className="text-2xs text-muted-foreground">Add at least one CLI.</p> : (
             <ol className="flex flex-col gap-1.5">
               {form.clis.map((id, index) => {
@@ -132,9 +134,19 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
                     <AgentMark agentId={id} name={nameOf(id)} size={20} />
                     <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{nameOf(id)}</span>
                     {cli !== undefined && !cli.available ? <span className="text-3xs text-warning">not available</span> : null}
+                    <ModelEffortPicker
+                      agentId={id}
+                      label={nameOf(id)}
+                      value={(form.models?.[id] ?? {}) as RunChoice}
+                      onChange={(choice) => {
+                        const models = { ...form.models };
+                        if (Object.keys(choice).length === 0) delete models[id]; else models[id] = choice;
+                        setForm({ ...form, models });
+                      }}
+                    />
                     <Button size="icon-sm" variant="ghost" aria-label={`Move ${nameOf(id)} up`} disabled={index === 0} onClick={() => { move(index, -1); }}><ArrowUpIcon size={12} /></Button>
                     <Button size="icon-sm" variant="ghost" aria-label={`Move ${nameOf(id)} down`} disabled={index === form.clis.length - 1} onClick={() => { move(index, 1); }}><ChevronDownIcon size={12} /></Button>
-                    <Button size="icon-sm" variant="ghost" aria-label={`Remove ${nameOf(id)}`} onClick={() => { setForm({ ...form, clis: form.clis.filter((c) => c !== id) }); }}><XIcon size={12} /></Button>
+                    <Button size="icon-sm" variant="ghost" aria-label={`Remove ${nameOf(id)}`} onClick={() => { const models = { ...form.models }; delete models[id]; setForm({ ...form, clis: form.clis.filter((c) => c !== id), models }); }}><XIcon size={12} /></Button>
                   </li>
                 );
               })}

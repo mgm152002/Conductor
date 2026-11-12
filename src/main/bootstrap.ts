@@ -70,6 +70,8 @@ import { GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
 import { configuredDeviceOAuthProviders, GitHubDeviceOAuthProvider, McpOAuthService } from './mcp/mcp-oauth';
 import { ElectronMarketplaceCatalog } from './mcp/marketplace-catalog';
 import { RemoteHostService } from './adapters/remote-hosts';
+import { ThreadTierStore } from './phone/thread-tier-store';
+import { PhoneControl } from './phone/phone-control';
 import { IpcSuggestionEmitter, registerIntegrationHandlers } from './ipc/register-integrations';
 import { ToolApprovalBroker } from './orchestrator/tool-approvals';
 import { AgentQuestionBroker } from './orchestrator/agent-questions';
@@ -306,7 +308,7 @@ export async function bootstrap(): Promise<AppServices> {
   // Model and effort per run: composer choice, then Settings, then Auto by
   // how demanding the request is (cheap models for quick requests).
   const modelCatalogs = new ModelCatalogService(registry);
-  const runResolver = new RunResolver(store, settings, modelCatalogs);
+  const runResolver = new RunResolver(store, settings, modelCatalogs, (task, agentId) => sandboxAgents.choiceFor(task, agentId));
 
   // Casual chat: project-free conversation that recalls personal-layer memory
   // for context and resolves its model/effort from the composer, Settings or
@@ -722,7 +724,15 @@ export async function bootstrap(): Promise<AppServices> {
   registerGitHubHandlers(router, github);
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,sandboxAgents,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  // Control from a phone (ngrok tunnel + mobile page): off until the user turns it on.
+  const tiers = new ThreadTierStore(join(app.getPath('userData'), 'thread-tiers.json'));
+  const phone = new PhoneControl({
+    invoke: (channel, payload) => router.invoke(channel, payload),
+    tiers,
+    sandboxEndpoint: (agentId) => sandboxes.endpoint(agentId),
+  });
+  app.once('before-quit', () => { void phone.stop(); });
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);

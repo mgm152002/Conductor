@@ -20,6 +20,8 @@ export interface UsageSample {
   model?: string;
   inputTokens?: number;
   cachedInputTokens?: number;
+  /** Cache-write tokens (a subset of inputTokens). */
+  cacheWriteTokens?: number;
   outputTokens?: number;
   reasoningTokens?: number;
   totalTokens?: number;
@@ -29,7 +31,10 @@ type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Json : null);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
 
-const FIELDS = ['inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens', 'totalTokens'] as const;
+/** Stands in for the project of Chat usage, which belongs to no project. */
+export const CHAT_PROJECT = '__chat__';
+
+const FIELDS = ['inputTokens', 'cachedInputTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens'] as const;
 
 /** Keep only well-formed, non-negative numbers (and a short model name). */
 export function cleanSample(value: unknown): UsageSample | undefined {
@@ -80,35 +85,67 @@ export class UsageRecorder {
     const total = sample.totalTokens ?? (sample.inputTokens !== undefined || sample.outputTokens !== undefined ? inputTokens + outputTokens : pick('totalTokens', 'total_tokens') ?? 0);
     const row = {
       model: sample.model ?? (existing?.['model'] as string | null | undefined) ?? null,
-      input: inputTokens, cached: pick('cachedInputTokens', 'cached_input_tokens') ?? 0, output: outputTokens,
+      input: inputTokens, cached: pick('cachedInputTokens', 'cached_input_tokens') ?? 0, written: pick('cacheWriteTokens', 'cache_write_tokens') ?? 0, output: outputTokens,
       reasoning: pick('reasoningTokens', 'reasoning_tokens') ?? 0, total,
     };
     if (existing !== undefined) {
       // cost_usd is cleared, not carried: legacy rows hold harness-reported
       // cost, which summaries no longer use (they price tokens publicly).
-      this.store.db.prepare(`UPDATE agent_usage SET model=?, input_tokens=?, cached_input_tokens=?, output_tokens=?, reasoning_tokens=?,
+      this.store.db.prepare(`UPDATE agent_usage SET model=?, input_tokens=?, cached_input_tokens=?, cache_write_tokens=?, output_tokens=?, reasoning_tokens=?,
         total_tokens=?, cost_usd=NULL, updated_at=? WHERE session_id=?`)
-        .run(row.model, row.input, row.cached, row.output, row.reasoning, row.total, now, input.sessionId);
+        .run(row.model, row.input, row.cached, row.written, row.output, row.reasoning, row.total, now, input.sessionId);
       return;
     }
     const task = this.store.db.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(input.taskId) as { workspace_id: string } | undefined;
     if (task === undefined) return;
     this.store.db.prepare(`INSERT INTO agent_usage (session_id, task_id, step_id, workspace_id, adapter_id, model, input_tokens,
-      cached_input_tokens, output_tokens, reasoning_tokens, total_tokens, cost_usd, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, total_tokens, cost_usd, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(input.sessionId, input.taskId, input.stepId ?? null, task.workspace_id, input.adapterId, row.model,
-        row.input, row.cached, row.output, row.reasoning, row.total, null, now, now);
+        row.input, row.cached, row.written, row.output, row.reasoning, row.total, null, now, now);
   }
 }
+
+/** Usage for Chat conversations (not tasks): one row per reply attempt. */
+export function recordChatUsage(store: Store, input: { sessionId: string; threadId: string; adapterId: string; sample: UsageSample }): void {
+  const { sample } = input;
+  const now = new Date().toISOString();
+  const existing = store.db.prepare('SELECT * FROM chat_usage WHERE session_id = ?').get(input.sessionId) as Record<string, unknown> | undefined;
+  const pick = (field: typeof FIELDS[number], column: string): number => {
+    const value = sample[field];
+    if (value !== undefined) return value;
+    const prior = existing?.[column];
+    return typeof prior === 'number' ? prior : 0;
+  };
+  const inputTokens = pick('inputTokens', 'input_tokens');
+  const outputTokens = pick('outputTokens', 'output_tokens');
+  const total = sample.totalTokens ?? (sample.inputTokens !== undefined || sample.outputTokens !== undefined ? inputTokens + outputTokens : pick('totalTokens', 'total_tokens'));
+  const model = sample.model ?? (existing?.['model'] as string | null | undefined) ?? null;
+  const values = [model, inputTokens, pick('cachedInputTokens', 'cached_input_tokens'), pick('cacheWriteTokens', 'cache_write_tokens'), outputTokens, pick('reasoningTokens', 'reasoning_tokens'), total];
+  if (existing !== undefined) {
+    store.db.prepare(`UPDATE chat_usage SET model=?, input_tokens=?, cached_input_tokens=?, cache_write_tokens=?, output_tokens=?, reasoning_tokens=?, total_tokens=?, updated_at=? WHERE session_id=?`)
+      .run(...values, now, input.sessionId);
+    return;
+  }
+  store.db.prepare(`INSERT INTO chat_usage (session_id, thread_id, adapter_id, model, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, reasoning_tokens, total_tokens, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(input.sessionId, input.threadId, input.adapterId, ...values, now, now);
+}
+
+/** All recorded usage, tasks and chats alike, as one table (chats have no project). */
+const ALL_USAGE = `(SELECT session_id, workspace_id, adapter_id, model, input_tokens, cached_input_tokens, cache_write_tokens,
+    output_tokens, reasoning_tokens, total_tokens, created_at FROM agent_usage
+  UNION ALL SELECT session_id, '${CHAT_PROJECT}' AS workspace_id, adapter_id, model, input_tokens, cached_input_tokens, cache_write_tokens,
+    output_tokens, reasoning_tokens, total_tokens, created_at FROM chat_usage)`;
 
 const RANGE_DAYS: Record<UsageRange, number | null> = { '24h': 1, '7d': 7, '30d': 30, '90d': 90, all: null };
 
 interface Aggregate {
-  key: string; sessions: number; input: number; cached: number; output: number; reasoning: number; total: number; cost?: number;
+  key: string; sessions: number; input: number; cached: number; written: number; output: number; reasoning: number; total: number; cost?: number;
 }
 
 const emptyAggregate = (key: string): Aggregate => ({
-  key, sessions: 0, input: 0, cached: 0, output: 0, reasoning: 0, total: 0,
+  key, sessions: 0, input: 0, cached: 0, written: 0, output: 0, reasoning: 0, total: 0,
 });
 
 function toRow(a: Aggregate, label: string): UsageRow {
@@ -126,6 +163,7 @@ interface UsageGroup {
   sessions: number;
   input: number;
   cached: number;
+  written: number;
   output: number;
   reasoning: number;
   total: number;
@@ -136,13 +174,14 @@ function addTo(map: Map<string, Aggregate>, group: UsageGroup, key: string, pric
   aggregate.sessions += group.sessions;
   aggregate.input += group.input;
   aggregate.cached += group.cached;
+  aggregate.written += group.written;
   aggregate.output += group.output;
   aggregate.reasoning += group.reasoning;
   aggregate.total += group.total;
   const price = pricing?.(group.model === '' ? undefined : group.model, group.adapter);
   if (price !== undefined) {
     aggregate.cost = (aggregate.cost ?? 0) + estimateCostUsd(price, {
-      inputTokens: group.input, cachedInputTokens: group.cached, outputTokens: group.output,
+      inputTokens: group.input, cachedInputTokens: group.cached, cacheWriteTokens: group.written, outputTokens: group.output,
     });
   }
   map.set(key, aggregate);
@@ -195,7 +234,7 @@ export interface UsageSummaryOptions {
   limitStatuses?: Readonly<Record<string, UsageLimitStatus>>;
 }
 
-const SUMS = `COUNT(*) AS sessions, SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(output_tokens) AS output,
+const SUMS = `COUNT(*) AS sessions, SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(cache_write_tokens) AS written, SUM(output_tokens) AS output,
   SUM(reasoning_tokens) AS reasoning, SUM(total_tokens) AS total`;
 
 /** Usage totals for a time range, by agent/project/model and per attached CLI. */
@@ -215,7 +254,7 @@ export function usageSummary(
   // granularity and roll the groups up in JS; the stored `cost_usd` column
   // (legacy harness reports) is deliberately never read.
   const groups = store.db.prepare(`SELECT adapter_id AS adapter, workspace_id AS workspace,
-      COALESCE(model, '') AS model, ${SUMS} FROM agent_usage u ${clause}
+      COALESCE(model, '') AS model, ${SUMS} FROM ${ALL_USAGE} u ${clause}
     GROUP BY adapter_id, workspace_id, model`).all(...params) as UsageGroup[];
   const totalsMap = new Map<string, Aggregate>();
   const byAgentMap = new Map<string, Aggregate>();
@@ -254,7 +293,7 @@ export function usageSummary(
   // Most recent session per CLI at any time (ignores the selected range), so
   // a CLI with nothing in range can still say when it was last used.
   const lastUsed = new Map(
-    (store.db.prepare(`SELECT adapter_id AS adapter, MAX(created_at) AS at FROM agent_usage u
+    (store.db.prepare(`SELECT adapter_id AS adapter, MAX(created_at) AS at FROM ${ALL_USAGE} u
       ${input.workspaceId !== undefined ? 'WHERE u.workspace_id = ?' : ''} GROUP BY adapter_id`)
       .all(...(input.workspaceId !== undefined ? [input.workspaceId] : [])) as Array<{ adapter: string; at: string | null }>)
       .map((row) => [row.adapter, row.at] as const),
@@ -287,7 +326,7 @@ export function usageSummary(
     range: input.range,
     totals: toRow(totals, 'All agents'),
     byAgent: byAgent.map((a) => toRow(a, agentName(a.key))),
-    byProject: byProject.map((a) => toRow(a, workspaceNames.get(a.key) ?? 'Deleted project')),
+    byProject: byProject.map((a) => toRow(a, a.key === CHAT_PROJECT ? 'Chat' : workspaceNames.get(a.key) ?? 'Deleted project')),
     byModel: byModel.map((a) => {
       const [agent, model] = a.key.split(' · ');
       return toRow(a, `${agentName(agent ?? '')} · ${model ?? ''}`);

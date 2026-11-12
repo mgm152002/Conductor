@@ -35,6 +35,8 @@ export interface IntegrationDeps {
   /** MCP servers in each agent CLI's own configuration. */
   cliMcp: CliMcpManager;
   sandboxes: SandboxManager;
+  phone: import('../phone/phone-control').PhoneControl;
+  tiers: import('../phone/thread-tier-store').ThreadTierStore;
   sandboxAgents: SandboxAgentService;
   router: IpcRouter;
   registry: Registry;
@@ -101,6 +103,14 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     ...(input.context !== undefined ? { context: input.context } : {}),
     ...(input.attachmentIds !== undefined ? { attachmentIds: input.attachmentIds } : {}),
   }));
+  router.handle('threadTiers.get', S['threadTiers.get'], () => deps.tiers.get());
+  router.handle('threadTiers.put', S['threadTiers.put'], (_e, i) => deps.tiers.put(i.key, i.pref === null ? undefined : { mode: i.pref.mode, seenUpdatedAt: i.pref.seenUpdatedAt, ...(i.pref.snoozedUntil !== undefined ? { snoozedUntil: i.pref.snoozedUntil } : {}) }));
+  router.handle('threadTiers.adopt', S['threadTiers.adopt'], (_e, i) => deps.tiers.adopt(i));
+  router.handle('phone.status', S['phone.status'], () => deps.phone.status());
+  router.handle('phone.start', S['phone.start'], () => deps.phone.start());
+  router.handle('phone.newCode', S['phone.newCode'], () => deps.phone.refreshPairing());
+  router.handle('phone.signOut', S['phone.signOut'], () => deps.phone.signOutAll());
+  router.handle('phone.stop', S['phone.stop'], () => deps.phone.stop());
   router.handle('sandbox.status', S['sandbox.status'], () => deps.sandboxes.status());
   router.handle('sandbox.pull', S['sandbox.pull'], async () => {
     // Downloads take minutes; start it and let the renderer poll status.

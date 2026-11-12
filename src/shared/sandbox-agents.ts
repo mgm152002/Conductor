@@ -26,6 +26,9 @@ export const SANDBOX_TOOL_GROUPS: ReadonlyArray<{ id: SandboxToolGroup; label: s
  */
 export type SandboxApprovalPolicy = 'risky' | 'all' | 'none';
 
+/** Model and effort an agent runs a CLI with; an omitted field means Auto. */
+export type AgentCliChoice = { model?: string; effort?: string };
+
 export interface SandboxAgent {
   id: string;
   name: string;
@@ -38,6 +41,8 @@ export interface SandboxAgent {
    * is out of usage or cannot run the model, the next one takes over.
    */
   clis: string[];
+  /** Model and effort chosen per CLI (by CLI id); a CLI not listed runs on Auto. */
+  models: Record<string, AgentCliChoice>;
   tools: SandboxToolGroup[];
   approval: SandboxApprovalPolicy;
   /** Accent for the agent's avatar. */
@@ -51,6 +56,7 @@ export interface SandboxAgentInput {
   description: string;
   instructions: string;
   clis: string[];
+  models?: Record<string, { model?: string | undefined; effort?: string | undefined }> | undefined;
   tools: SandboxToolGroup[];
   approval: SandboxApprovalPolicy;
   color: string;

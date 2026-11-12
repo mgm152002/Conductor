@@ -295,7 +295,7 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
       // thread is bound to it before the run starts, so the first step already
       // gets the agent's sandbox, instructions and fallback order.
       const sandboxAgentId = input.parentTaskId === undefined ? input.sandboxAgentId : undefined;
-      const agentId = sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? deps.sandboxAgents.startingCli(sandboxAgentId) : input.agentId;
+      const agentId = sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? deps.sandboxAgents.startingCli(sandboxAgentId, input.agentId) : input.agentId;
       return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(input.parentTaskId ? {parentTaskId:input.parentTaskId}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && sandboxAgentId === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
         ...(sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? { onCreated: (task: Task) => { deps.sandboxAgents!.bindThread(task.threadId ?? task.id, sandboxAgentId); } } : {})});
     },

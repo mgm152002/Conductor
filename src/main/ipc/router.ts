@@ -125,6 +125,7 @@ export class IpcRouter {
   private readonly ipcMain: IpcMain;
   private readonly audit: AuditSink;
   private readonly registered = new Set<InvokeChannel>();
+  private readonly handlers = new Map<string, (event: IpcMainInvokeEvent, payload: unknown) => Promise<IpcResult<unknown>>>();
 
   constructor(deps: RouterDeps) {
     this.ipcMain = deps.ipcMain;
@@ -151,10 +152,20 @@ export class IpcRouter {
       return;
     }
     this.registered.add(channel);
-    this.ipcMain.handle(
-      channel,
-      withValidation(schema, handler, { channel, audit: this.audit, ...options }),
-    );
+    const wrapped = withValidation(schema, handler, { channel, audit: this.audit, ...options });
+    this.handlers.set(channel, wrapped);
+    this.ipcMain.handle(channel, wrapped);
+  }
+
+  /**
+   * Run a registered handler from the main process (the phone bridge), with
+   * the same size limit, validation and error handling as a renderer call.
+   * There is no renderer event, so handlers must not rely on one.
+   */
+  invoke(channel: string, payload: unknown): Promise<IpcResult<unknown>> {
+    const handler = this.handlers.get(channel);
+    if (handler === undefined) return Promise.resolve(fail({ code: 'handler_error', message: 'Unknown action', channel }));
+    return handler({} as IpcMainInvokeEvent, payload);
   }
 
   /** Emit a redacted event to the renderer over an allowlisted event channel. */

@@ -112,6 +112,18 @@ const integrations: IntegrationsBridge = {
     groupMessages: (groupId) => invoke('agents.group.messages', { groupId }),
     sendGroup: (input) => invoke('agents.group.send', input),
   },
+  threadTiers: {
+    get: () => invoke('threadTiers.get'),
+    put: (key, pref) => invoke('threadTiers.put', { key, pref }),
+    adopt: (local) => invoke('threadTiers.adopt', local),
+  },
+  phone: {
+    status: () => invoke('phone.status'),
+    start: () => invoke('phone.start'),
+    newCode: () => invoke('phone.newCode'),
+    signOut: () => invoke('phone.signOut'),
+    stop: () => invoke('phone.stop'),
+  },
   sandbox: {
     status: () => invoke('sandbox.status'),
     pull: () => invoke('sandbox.pull'),

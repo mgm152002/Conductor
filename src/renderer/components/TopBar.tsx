@@ -4,7 +4,9 @@ import { useApprovalStore, useQuestionStore, useTaskStore, useUiStore } from '..
 import { isTerminalTask } from '../stores/task-store';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import { SurfaceTabs } from './SurfaceTabs';
-import { SearchIcon, SettingsIcon } from './ui/icons';
+import { useState } from 'react';
+import { PhoneIcon, SearchIcon, SettingsIcon } from './ui/icons';
+import { PhoneControlDialog } from './phone/PhoneControlDialog';
 
 // The top bar: the whole app's navigation in one line across the window.
 // The two working surfaces (Work, Chat) lead as the primary tabs, the other
@@ -30,6 +32,7 @@ function isBarEntry(id: NavEntryId): id is BarEntryId {
 }
 
 export function TopBar(): React.JSX.Element {
+  const [phoneOpen, setPhoneOpen] = useState(false);
   const tasks = useTaskStore((s) => s.tasks);
   const approvals = useApprovalStore((s) => s.pending.length);
   const questions = useQuestionStore((s) => s.pending.length);
@@ -81,6 +84,10 @@ export function TopBar(): React.JSX.Element {
         <kbd className="font-sans text-2xs">⌘K</kbd>
       </button>
       <SuggestionsInbox variant="bar" />
+      <button type="button" aria-label="Control on phone" title="Control on phone" onClick={() => { setPhoneOpen(true); }} className="bar-icon cursor-pointer">
+        <PhoneIcon size={15} />
+      </button>
+      {phoneOpen ? <PhoneControlDialog onClose={() => { setPhoneOpen(false); }} /> : null}
       <NavLink to="/settings" aria-label="Settings" title="Settings (⌘,)" data-active={pathname === '/settings'} className="bar-icon">
         <SettingsIcon size={15} />
       </NavLink>

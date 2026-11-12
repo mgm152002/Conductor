@@ -17,6 +17,10 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
+    "src/renderer/lib/timeline.ts",
+    "src/renderer/lib/thread-status.ts",
+    "src/renderer/lib/threads.ts",
+    "src/renderer/lib/thread-tiers.ts",
     "test/**/*.ts",
     "electron.vite.config.ts",
     "vitest.config.ts"

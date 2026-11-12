@@ -66,6 +66,6 @@ describe('usage parsing', () => {
 
   it('reads the Claude Code result envelope without its harness-reported cost', () => {
     expect(claudeUsage({ type: 'result', total_cost_usd: 0.02, usage: { input_tokens: 10, cache_read_input_tokens: 50, cache_creation_input_tokens: 5, output_tokens: 7, output_tokens_details: { thinking_tokens: 2 } }, modelUsage: { 'claude-sonnet-5': {} } }))
-      .toEqual({ inputTokens: 65, cachedInputTokens: 50, outputTokens: 7, reasoningTokens: 2, totalTokens: 72, model: 'claude-sonnet-5' });
+      .toEqual({ inputTokens: 65, cachedInputTokens: 50, cacheWriteTokens: 5, outputTokens: 7, reasoningTokens: 2, totalTokens: 72, model: 'claude-sonnet-5' });
   });
 });

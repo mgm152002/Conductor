@@ -270,7 +270,7 @@ export function AgentsScreen(): React.JSX.Element {
           <AgentChat
             agent={selectedAgent}
             sandboxRunning={status?.running.some((run) => run.agentId === selectedAgent.id && run.state === 'ready') === true}
-            onEdit={() => { setEditing({ id: selectedAgent.id, input: { name: selectedAgent.name, description: selectedAgent.description, instructions: selectedAgent.instructions, clis: selectedAgent.clis, tools: selectedAgent.tools, approval: selectedAgent.approval, color: selectedAgent.color } }); }}
+            onEdit={() => { setEditing({ id: selectedAgent.id, input: { name: selectedAgent.name, description: selectedAgent.description, instructions: selectedAgent.instructions, clis: selectedAgent.clis, models: selectedAgent.models, tools: selectedAgent.tools, approval: selectedAgent.approval, color: selectedAgent.color } }); }}
             onDelete={() => { setDeleting({ kind: 'agent', id: selectedAgent.id, name: selectedAgent.name }); }}
           />
         ) : selectedGroup !== undefined ? (

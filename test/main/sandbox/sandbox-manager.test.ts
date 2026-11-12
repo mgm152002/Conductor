@@ -150,6 +150,9 @@ describe('SandboxAgentService', () => {
     const subject = service(['claude-code', 'codex']);
     const agent = subject.create(input);
     expect(subject.startingCli(agent.id)).toBe('claude-code');
+    expect(subject.startingCli(agent.id, 'codex')).toBe('codex');
+    expect(() => subject.startingCli(agent.id, 'opencode')).toThrow(/available/);
+    expect(() => subject.startingCli(agent.id, 'kiro')).toThrow(/isn’t set up/);
     subject.bindThread('thread-1', agent.id);
     expect(subject.fallbackOrder({ id: 'task-2', threadId: 'thread-1' })).toEqual(['opencode', 'claude-code', 'codex']);
     expect(subject.fallbackOrder({ id: 'other' })).toBeUndefined();
@@ -181,6 +184,16 @@ describe('SandboxAgentService', () => {
     expect(Object.keys(subject.groupThreadMap())).toHaveLength(2);
     await expect(subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'x', agentIds: ['00000000-0000-4000-8000-000000000099'] })).rejects.toThrow(/Mention/);
     expect(subject.groupMessages(group.id)).toHaveLength(1);
+  });
+
+  it('keeps a model per CLI and drops choices for CLIs the agent does not use', () => {
+    const subject = service();
+    const agent = subject.create({ ...input, models: { codex: { model: 'gpt-5', effort: 'high' }, kiro: { model: 'x' }, 'claude-code': { model: 'bad model!' } } });
+    expect(agent.models).toEqual({ codex: { model: 'gpt-5', effort: 'high' } });
+    subject.bindThread('thread-1', agent.id);
+    expect(subject.choiceFor({ id: 't', threadId: 'thread-1' }, 'codex')).toEqual({ model: 'gpt-5', effort: 'high' });
+    expect(subject.choiceFor({ id: 't', threadId: 'thread-1' }, 'opencode')).toBeUndefined();
+    expect(subject.update(agent.id, { ...input, models: {} }).models).toEqual({});
   });
 
   it('gives a run the sandbox gateway and the agent’s instructions', async () => {

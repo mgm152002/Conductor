@@ -60,6 +60,8 @@ export class RunResolver {
     private readonly store: Store,
     private readonly settings: SettingsService | undefined,
     private readonly catalogs: ModelCatalogService | undefined,
+    /** A choice the task's own sandbox agent made for a CLI (used below the composer's pick). */
+    private readonly agentChoice?: (task: Task, agentId: string) => RunChoice | undefined,
   ) {}
 
   /** Save the composer's choices for a message. */
@@ -119,9 +121,10 @@ export class RunResolver {
       // behavior. New tasks bind the choice to the selected CLI; a fallback
       // provider then uses its own Settings/Auto model instead of receiving a
       // foreign model id.
-      const explicit = input.role === 'main'
+      const picked = input.role === 'main'
         ? (options.mainAgentId === undefined || options.mainAgentId === agentId ? options.main : undefined)
         : options.agents?.[agentId];
+      const explicit = picked ?? (input.role === 'main' ? this.agentChoice?.(task, agentId) : undefined);
       const run = chooseRun({ catalog: this.catalogs?.cached(agentId), difficulty, explicit, settings: this.setting(agentId) });
       runs[agentId] = run;
       if (run.model !== undefined) models[agentId] = run.model;

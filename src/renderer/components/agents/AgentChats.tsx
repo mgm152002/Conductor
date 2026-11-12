@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '@shared/domain';
+import type { RunChoice } from '@shared/agent-models';
 import type { AgentGroup, AgentGroupMessage, SandboxAgent } from '@shared/sandbox-agents';
 import { useTaskStore, useWorkspaceStore } from '../../stores';
 import { useSandboxAgentStore } from '../../stores/sandbox-agent-store';
@@ -13,6 +14,9 @@ import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments
 import { Alert, Button } from '../ui/primitives';
 import { ArrowUpIcon, FolderIcon, GlobeIcon, PencilIcon, SquarePenIcon, TrashIcon } from '../ui/icons';
 import { AgentReply } from './AgentReply';
+import { AgentMark } from '../chat/AgentMark';
+import { ModelEffortPicker } from '../chat/ModelEffortPicker';
+import { useAgents } from '../../hooks/useAgents';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
 import { message } from './AgentDialog';
 
@@ -173,6 +177,20 @@ function ProjectPicker({ value, onChange, locked }: { value: string | null; onCh
   );
 }
 
+const stickyKey = (agentId: string): string => `conductor.agent-cli.${agentId}`;
+function readSticky(agentId: string): { cli: string; choice: RunChoice } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(stickyKey(agentId)) ?? 'null') as { cli?: unknown; choice?: { model?: unknown; effort?: unknown } } | null;
+    const choice: RunChoice = {};
+    if (typeof raw?.choice?.model === 'string') choice.model = raw.choice.model;
+    if (typeof raw?.choice?.effort === 'string') choice.effort = raw.choice.effort;
+    return { cli: typeof raw?.cli === 'string' ? raw.cli : '', choice };
+  } catch { return { cli: '', choice: {} }; }
+}
+function writeSticky(agentId: string, cli: string, choice: RunChoice): void {
+  try { localStorage.setItem(stickyKey(agentId), JSON.stringify({ cli, choice })); } catch { /* remembering is optional */ }
+}
+
 // ---- 1:1 ------------------------------------------------------------------------------
 
 export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
@@ -193,6 +211,16 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
   }, [threads, groupThreads, tasks, agent.id]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [fresh, setFresh] = useState(false);
+  // The CLI and model for the next message; '' keeps the thread's current CLI
+  // (or the agent's first available one) and the agent's own model choice.
+  // Sticky: remembered per agent, across chats and restarts.
+  const [cli, setCli] = useState(() => readSticky(agent.id).cli);
+  const [choice, setChoice] = useState<RunChoice>(() => readSticky(agent.id).choice);
+  const cliOptions = useAgents();
+  useEffect(() => { const saved = readSticky(agent.id); setCli(saved.cli); setChoice(saved.choice); }, [agent.id]);
+  useEffect(() => { writeSticky(agent.id, cli, choice); }, [agent.id, cli, choice]);
+  // A remembered CLI the agent no longer runs on falls back to Auto.
+  useEffect(() => { if (cli !== '' && !agent.clis.includes(cli)) { setCli(''); setChoice({}); } }, [agent.clis, cli]);
   useEffect(() => { setThreadId(null); setFresh(false); }, [agent.id]);
   // Opened from the inbox: show that exact conversation.
   useEffect(() => {
@@ -217,13 +245,20 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
 
   async function send(text: string, attachmentIds: string[]): Promise<void> {
     if (latest !== undefined && isWorkingState(latest.state)) {
-      await window.conductor.task.enqueue({ taskId: latest.id, objective: text, mode: 'queue', ...(attachmentIds.length > 0 ? { attachmentIds } : {}) });
+      await window.conductor.task.enqueue({
+        taskId: latest.id, objective: text, mode: 'queue',
+        ...(cli !== '' ? { agentId: cli } : {}),
+        ...(cli !== '' && Object.keys(choice).length > 0 ? { runOptions: { main: choice } } : {}),
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+      });
       return;
     }
     const workspaceId = latest?.workspaceId ?? projectId ?? await agentWorkspace();
     const created = await window.conductor.task.create({
       workspaceId, objective: text,
       ...(latest !== undefined ? { parentTaskId: latest.id } : { sandboxAgentId: agent.id }),
+      ...(cli !== '' ? { agentId: cli } : {}),
+      ...(cli !== '' && Object.keys(choice).length > 0 ? { runOptions: { main: choice } } : {}),
       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
     });
     useTaskStore.getState().upsert(created);
@@ -284,6 +319,21 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
       <ChatComposer placeholder={`Message ${agent.name}`} onSend={send}>
         <div className="mb-2 flex items-center gap-2">
           <ProjectPicker value={chatProject} onChange={setProjectId} locked={turns.length > 0} />
+          <MenuSelect
+            label="CLI"
+            value={cli}
+            onChange={(next) => { setCli(next); setChoice({}); }}
+            title="Switch the CLI for this and later messages"
+            className="max-w-44"
+            options={[
+              { value: '', label: 'Auto CLI' },
+              ...agent.clis.map((id) => {
+                const option = cliOptions.find((o) => o.id === id);
+                return { value: id, label: option?.name ?? id, ...(option !== undefined && !option.available ? { hint: 'not available' } : {}), mark: <AgentMark agentId={id} name={option?.name ?? id} size={14} /> };
+              }),
+            ]}
+          />
+          {cli !== '' ? <ModelEffortPicker agentId={cli} value={choice} onChange={setChoice} label="Next message" /> : null}
         </div>
       </ChatComposer>
     </section>

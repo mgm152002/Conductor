@@ -45,6 +45,12 @@ function loadPrefs(): ThreadTierPrefs {
   }
 }
 
+/** The authoritative copy lives in the app (the phone edits it too). */
+function push(key: string, pref: ThreadTierPref | null): void {
+  if (typeof window === 'undefined') return;
+  void window.conductor?.threadTiers?.put(key, pref).catch(() => undefined);
+}
+
 function savePrefs(prefs: ThreadTierPrefs): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
@@ -59,6 +65,7 @@ export const useThreadTierStore = create<ThreadTierState>((set) => ({
     set((state) => {
       const prefs = { ...state.prefs, [threadKey]: { mode: 'settled' as const, seenUpdatedAt } };
       savePrefs(prefs);
+      push(threadKey, prefs[threadKey]!);
       return { prefs };
     });
   },
@@ -69,6 +76,7 @@ export const useThreadTierStore = create<ThreadTierState>((set) => ({
         [threadKey]: { mode: 'snoozed' as const, seenUpdatedAt, ...(until !== undefined ? { snoozedUntil: until } : {}) },
       };
       savePrefs(prefs);
+      push(threadKey, prefs[threadKey]!);
       return { prefs };
     });
   },
@@ -78,6 +86,7 @@ export const useThreadTierStore = create<ThreadTierState>((set) => ({
       const prefs = { ...state.prefs };
       delete prefs[threadKey];
       savePrefs(prefs);
+      push(threadKey, null);
       return { prefs };
     });
   },
@@ -86,3 +95,23 @@ export const useThreadTierStore = create<ThreadTierState>((set) => ({
     set({ prefs: {} });
   },
 }));
+
+// Keep this window in step with the app's copy: adopt what this window had
+// before the move once, then follow changes made on the phone.
+let synced = false;
+function syncFromApp(): void {
+  const bridge = typeof window === 'undefined' ? undefined : window.conductor?.threadTiers;
+  if (bridge === undefined) return;
+  const apply = (prefs: ThreadTierPrefs): void => {
+    if (JSON.stringify(prefs) === JSON.stringify(useThreadTierStore.getState().prefs)) return;
+    savePrefs(prefs);
+    useThreadTierStore.setState({ prefs });
+  };
+  const pull = (): void => { void bridge.get().then((prefs) => { apply(prefs as ThreadTierPrefs); }).catch(() => undefined); };
+  if (!synced) {
+    synced = true;
+    void bridge.adopt(useThreadTierStore.getState().prefs).then((prefs) => { apply(prefs as ThreadTierPrefs); }).catch(() => undefined);
+    setInterval(pull, 4000);
+  }
+}
+syncFromApp();
