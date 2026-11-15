@@ -315,6 +315,8 @@ export function Markdown({ text, children, className, live = false }: MarkdownPr
       });
       return { ...segment, spec: { ...spec, slides } };
     }
+    // Only laid-out documents embed diagrams; text files and archives stay as written.
+    if (spec.kind !== 'pdf' && spec.kind !== 'document') return segment;
     return { ...segment, spec: { ...spec, content: `${spec.content ?? ''}\n${replyVisuals.map((svg) => `\`\`\`svg\n${svg}\n\`\`\``).join('\n')}` } };
   };
 

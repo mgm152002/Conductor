@@ -11,6 +11,8 @@ export interface ArtifactSummary {
   sizeBytes?: number;
   stepId?: string;
   createdAt: string;
+  /** True for a file the agent handed back on purpose (not a stored copy of its output). */
+  delivered?: boolean;
 }
 
 export interface TaskCriterionResult {
