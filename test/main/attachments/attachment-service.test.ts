@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SqliteStore } from '@main/db/store';
@@ -45,5 +45,29 @@ describe('clipboard attachment ingestion', () => {
 
     expect(result.attachments).toEqual([]);
     expect(result.rejected[0]).toMatchObject({ fileName: 'pretend.png', code: 'unsupported' });
+  });
+});
+
+describe('zip attachments', () => {
+  it('accepts a zip, keeps it as an archive, and delivers its contents as text with the file itself', async () => {
+    const service = await setup();
+    const { default: JSZip } = await import('jszip');
+    const zip = new JSZip();
+    zip.file('data/rows.csv', 'id,name\n1,Ada\n');
+    const dir = roots[roots.length - 1]!;
+    const path = join(dir, 'export.zip');
+    writeFileSync(path, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+
+    const result = await service.ingest([path]);
+    expect(result.rejected).toEqual([]);
+    expect(result.attachments).toEqual([expect.objectContaining({ name: 'export.zip', kind: 'archive', mimeType: 'application/zip' })]);
+    const id = result.attachments[0]!.id;
+    expect(service.validate([id])[0]!.kind).toBe('archive');
+    expect(await service.preview(id)).toMatchObject({ format: 'markdown' });
+
+    // Other zip-based files that cannot be read stay refused.
+    const deck = join(dir, 'deck.pptx');
+    writeFileSync(deck, Buffer.from('PK\x03\x04not a deck'));
+    expect((await service.ingest([deck])).rejected[0]).toMatchObject({ code: 'unsupported' });
   });
 });

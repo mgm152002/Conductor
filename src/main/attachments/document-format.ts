@@ -12,6 +12,7 @@ import {
 } from '../../shared/attachments';
 import { redact } from '../ipc/redaction';
 import { formatPdfWithMacos, recognizeImageWithMacos } from './macos-vision';
+import { hasZipSignature, listZipEntries, readZipEntry } from './zip-reader';
 
 const run = promisify(execFile);
 export interface DetectedDocumentFormat { kind: AttachmentKind; mimeType: string }
@@ -32,6 +33,7 @@ const images: Record<string, string> = {
   '.heic': 'image/heic', '.heif': 'image/heif', '.tif': 'image/tiff', '.tiff': 'image/tiff',
   '.avif': 'image/avif',
 };
+const archive: DetectedDocumentFormat = { kind: 'archive', mimeType: 'application/zip' };
 const unsupported: DetectedDocumentFormat = { kind: 'unsupported', mimeType: 'application/octet-stream' };
 
 /** Strong signatures take precedence over misleading extensions. SVG is deliberately not served. */
@@ -56,8 +58,11 @@ export function detectDocumentFormat(name: string, bytes: Uint8Array): DetectedD
   if (starts('d0cf11e0a1b11ae1')) return ext === '.docx' ? types['.docx']! : types['.doc']!;
   if (starts('504b0304')) {
     // ZIP entries retain their names even when their contents are compressed.
-    return ext === '.docx' || b.includes(Buffer.from('word/document.xml')) ? types['.docx']! : unsupported;
+    if (ext === '.docx' || b.includes(Buffer.from('word/document.xml'))) return types['.docx']!;
+    // Other Office files are zips too, but are not readable as archives of documents.
+    return ext === '.zip' ? archive : unsupported;
   }
+  if (ext === '.zip' && hasZipSignature(b)) return archive;
   if (images[ext]) return image(images[ext]);
   if (types[ext]) return types[ext];
   try {
@@ -113,6 +118,54 @@ export function htmlToSafeMarkdown(html: string): string {
 async function temporary<T>(action: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), 'conductor-preview-'));
   try { return await action(dir); } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+const ARCHIVE_LISTED = 200;
+const ARCHIVE_ENTRY_BYTES = 512 * 1024;
+const ARCHIVE_ENTRY_CHARS = 20_000;
+const size = (bytes: number): string => (bytes < 1024 ? `${bytes} B` : bytes < 1024 ** 2 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`);
+
+/**
+ * A zip as readable text: what is in it, then the contents of its text
+ * files, read in memory (nothing is unpacked to disk). This is what the
+ * preview shows and what a model is given, so it is bounded throughout.
+ */
+function describeArchive(bytes: Buffer): string | undefined {
+  const listing = listZipEntries(bytes);
+  if (listing === null) return undefined;
+  const files = listing.entries.filter((entry) => !entry.directory);
+  const total = files.reduce((sum, entry) => sum + entry.sizeBytes, 0);
+  // Entry names come from the archive: keep them on one line and out of Markdown syntax.
+  const name = (path: string): string => path.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/[`|]/g, '_').slice(0, 300);
+  const lines = [
+    `Zip archive: ${listing.entryCount} ${listing.entryCount === 1 ? 'entry' : 'entries'}, ${size(total)} unpacked.`,
+    '',
+    '| File | Size |', '| --- | --- |',
+    ...files.slice(0, ARCHIVE_LISTED).map((entry) => `| ${name(entry.path)} | ${size(entry.sizeBytes)} |`),
+  ];
+  if (files.length > ARCHIVE_LISTED || listing.entryCount > listing.entries.length) lines.push('', `Only the first ${Math.min(files.length, ARCHIVE_LISTED)} files are listed.`);
+  let budget = MAX_ATTACHMENT_EXTRACTED_CHARS;
+  let skipped = 0;
+  for (const entry of files) {
+    if (budget <= 0) { skipped += 1; continue; }
+    const data = readZipEntry(bytes, entry, ARCHIVE_ENTRY_BYTES);
+    let text: string | undefined;
+    if (data !== null && data.length > 0) {
+      try {
+        const decoded = new TextDecoder('utf-8', { fatal: true }).decode(data);
+        if (!/[\x00-\x08\x0e-\x1f]/.test(decoded)) text = decoded;
+      } catch { /* not text */ }
+    }
+    if (text === undefined) { skipped += 1; continue; }
+    const shown = text.slice(0, Math.min(ARCHIVE_ENTRY_CHARS, budget));
+    budget -= shown.length;
+    // A fence longer than any run of backticks in the file, so it cannot close early.
+    const fence = '`'.repeat(Math.max(3, ...(shown.match(/`+/g) ?? []).map((run) => run.length + 1)));
+    lines.push('', `### ${name(entry.path)}`, '', fence, shown, fence);
+    if (shown.length < text.length) lines.push('', '(cut short)');
+  }
+  if (skipped > 0) lines.push('', `${skipped} ${skipped === 1 ? 'file is' : 'files are'} not shown above (not text, too large, or protected).`);
+  return lines.join('\n');
 }
 
 /** Accept bytes from the trusted attachment service, never a renderer-supplied path. */
@@ -203,6 +256,11 @@ export async function formatDocument(bytes: Uint8Array, attachment: AttachmentSu
           catch { /* The visual preview remains useful when native OCR is unavailable. */ }
         }
         return { attachment, format: 'image', dataUrl: image.toDataURL(), width, height, truncated: false, ...(recognizedText ? { recognizedText } : {}) };
+      }
+      case 'archive': {
+        const markdown = describeArchive(buffer);
+        if (markdown === undefined) return fail('error', 'The zip archive is corrupt or uses a format that cannot be read.');
+        return textPreview(markdown, 'markdown');
       }
       default: return fail('unsupported', 'This file type does not support a preview.');
     }

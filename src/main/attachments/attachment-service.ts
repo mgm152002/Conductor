@@ -29,7 +29,14 @@ const copyName = (name: string): string => {
   }
   return result;
 };
-const summary = (r: Row): AttachmentSummary => ({ id: r.id, name: safeName(r.name), kind: r.kind, mimeType: r.mime_type, sizeBytes: r.size_bytes });
+// The attachments table only allows the kinds it was created with, and
+// changing that means rebuilding a table other tables point at. Unsupported
+// files are never stored, so a zip is kept under that kind with its own media
+// type and read back as an archive.
+const ZIP_MIME = 'application/zip';
+const storedKind = (kind: AttachmentRef['kind']): AttachmentRef['kind'] => (kind === 'archive' ? 'unsupported' : kind);
+const kindOf = (r: Row): AttachmentRef['kind'] => (r.kind === 'unsupported' && r.mime_type === ZIP_MIME ? 'archive' : r.kind);
+const summary = (r: Row): AttachmentSummary => ({ id: r.id, name: safeName(r.name), kind: kindOf(r), mimeType: r.mime_type, sizeBytes: r.size_bytes });
 const ref = (r: Row): AttachmentRef => ({ ...summary(r), sha256: r.sha256, createdAt: r.created_at });
 const location = (owner: Owner) => 'taskId' in owner
   ? { table: 'task_attachments', key: 'task_id', id: owner.taskId }
@@ -84,7 +91,7 @@ export class AttachmentService {
         const id = randomUUID();
         try {
           this.store.db.prepare('INSERT INTO attachments (id,name,kind,mime_type,size_bytes,sha256,blob_id,created_at) VALUES (?,?,?,?,?,?,?,?)')
-            .run(id, name, format.kind, format.mimeType, length, sha256, blobId, new Date().toISOString());
+            .run(id, name, storedKind(format.kind), format.mimeType, length, sha256, blobId, new Date().toISOString());
         } catch (error) { if (!existing) this.storage.delete(blobId); throw error; }
         total += length;
         attachments.push(summary(this.row(id)));
