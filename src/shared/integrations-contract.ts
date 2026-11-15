@@ -3,7 +3,7 @@ import type { McpDiscoveryEntry, McpInstallResult, McpInvocationResult, McpOAuth
 import type { McpMarketplaceEntry } from './mcp-marketplace';
 import type { CliMcpOverview, CliMcpSyncReport } from './cli-mcp';
 import { AttachmentIdsSchema } from './attachments';
-import type { AgentGroup, AgentGroupMessage, SandboxAgent, SandboxStatus } from './sandbox-agents';
+import { AGENT_ICON_PATTERN, MAX_AGENT_ICON_CHARS, type AgentGroup, type AgentGroupMessage, type SandboxAgent, type SandboxStatus } from './sandbox-agents';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
 import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
@@ -27,6 +27,7 @@ const sandboxAgentInput = z.object({
   tools: z.array(z.enum(['browser', 'shell', 'files', 'code', 'documents'])).min(1).max(5),
   approval: z.enum(['risky', 'all', 'none']),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  icon: z.string().max(MAX_AGENT_ICON_CHARS).regex(AGENT_ICON_PATTERN).optional(),
 });
 const mcpCli = z.enum(['claude-code', 'codex', 'opencode', 'antigravity', 'kiro']);
 const mcpKey = z.string().trim().regex(/^[a-z0-9][a-z0-9_.-]{0,63}$/);
@@ -70,6 +71,8 @@ export const INTEGRATION_SCHEMAS = {
     agentIds: z.array(uuid).min(1).max(12).optional(),
     context: z.string().max(20_000).optional(),
     attachmentIds: AttachmentIdsSchema.optional(),
+    /** For members still working: steer stops them to answer now, queue waits (the default). */
+    mode: z.enum(['steer', 'queue']).optional(),
   }),
   'threadTiers.get': z.void(),
   'threadTiers.put': z.object({

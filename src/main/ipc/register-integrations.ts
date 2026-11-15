@@ -102,6 +102,7 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     ...(input.agentIds !== undefined ? { agentIds: input.agentIds } : {}),
     ...(input.context !== undefined ? { context: input.context } : {}),
     ...(input.attachmentIds !== undefined ? { attachmentIds: input.attachmentIds } : {}),
+    ...(input.mode !== undefined ? { mode: input.mode } : {}),
   }));
   router.handle('threadTiers.get', S['threadTiers.get'], () => deps.tiers.get());
   router.handle('threadTiers.put', S['threadTiers.put'], (_e, i) => deps.tiers.put(i.key, i.pref === null ? undefined : { mode: i.pref.mode, seenUpdatedAt: i.pref.seenUpdatedAt, ...(i.pref.snoozedUntil !== undefined ? { snoozedUntil: i.pref.snoozedUntil } : {}) }));

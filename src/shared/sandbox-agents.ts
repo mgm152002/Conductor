@@ -45,8 +45,10 @@ export interface SandboxAgent {
   models: Record<string, AgentCliChoice>;
   tools: SandboxToolGroup[];
   approval: SandboxApprovalPolicy;
-  /** Accent for the agent's avatar. */
+  /** Accent for the agent's icon. */
   color: string;
+  /** The agent's icon as a small image data URL; empty when it has none (a coloured initial is shown). */
+  icon: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,7 +62,12 @@ export interface SandboxAgentInput {
   tools: SandboxToolGroup[];
   approval: SandboxApprovalPolicy;
   color: string;
+  icon?: string | undefined;
 }
+
+/** What an agent icon may be: a small raster image, so it can live in the database and render anywhere. */
+export const AGENT_ICON_PATTERN = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
+export const MAX_AGENT_ICON_CHARS = 120_000;
 
 /** A group chat with several agents. */
 export interface AgentGroup {
@@ -78,6 +85,11 @@ export interface AgentGroupMessage {
   createdAt: string;
   /** Agent id → the task that answers it. */
   replies: Record<string, string>;
+  /**
+   * Agent id → the message held for a member who was still working when it
+   * was sent: queued behind that work, or steering it (stopping it to answer).
+   */
+  waiting?: Record<string, { queueId: string; mode: 'steer' | 'queue' }>;
 }
 
 /** Whether this machine can run sandboxes right now. */

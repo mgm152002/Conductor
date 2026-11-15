@@ -27,7 +27,8 @@ describe('document detection', () => {
     ['photo', '000000186674797068656963', 'image', 'image/heic'],
     ['wrong.md', '255044462d312e37', 'pdf', 'application/pdf'],
     ['old.doc', 'd0cf11e0a1b11ae1', 'doc', 'application/msword'],
-    ['archive.zip', '504b0304', 'unsupported', 'application/octet-stream'],
+    ['archive.zip', '504b0304', 'archive', 'application/zip'],
+    ['deck.pptx', '504b0304', 'unsupported', 'application/octet-stream'],
   ])('detects %s by magic', (name, hex, kind, mimeType) => {
     expect(detectDocumentFormat(name, Buffer.from(hex, 'hex'))).toEqual({ kind, mimeType });
   });
@@ -196,5 +197,37 @@ describe('installed parser smoke checks', () => {
     zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello Word</w:t></w:r></w:p></w:body></w:document>');
     expect(await preview('real.docx', await zip.generateAsync({ type: 'nodebuffer' }))).toMatchObject({ format: 'markdown', markdown: 'Hello Word' });
     expect(await preview('broken.docx', 'PK\x03\x04broken')).toMatchObject({ reason: 'error' });
+  });
+});
+
+describe('zip archives', () => {
+  it('shows what is in a zip and the contents of its text files, without unpacking anything else', async () => {
+    const { default: JSZip } = await import('jszip');
+    const zip = new JSZip();
+    zip.file('src/app.ts', 'export const answer = 42;\n');
+    zip.file('notes/README.md', '# Notes\n```js\ncode\n```\n');
+    zip.file('logo.bin', Buffer.from([0, 1, 2, 255]));
+    zip.file('../evil|name`.txt', 'outside');
+    // Compresses to a few KB but would unpack to 8 MB: over the per-file cap.
+    zip.file('bomb.txt', 'a'.repeat(8 * 1024 * 1024));
+    const bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    expect(bytes.length).toBeLessThan(200_000);
+
+    const result = await preview('project.zip', bytes);
+    expect(result.format).toBe('markdown');
+    const markdown = result.format === 'markdown' ? result.markdown : '';
+    expect(markdown).toContain('| src/app.ts |');
+    expect(markdown).toContain('export const answer = 42;');
+    // A file containing a code fence is wrapped in a longer one.
+    expect(markdown).toContain('````\n# Notes');
+    // Names are reported, never used as paths, and cannot break the table.
+    expect(markdown).toContain('| ../evil_name_.txt |');
+    expect(markdown).toContain('| bomb.txt | 8.0 MB |');
+    expect(markdown).not.toContain('aaaaaaaaaa');
+    expect(markdown).toContain('2 files are not shown above');
+  });
+
+  it('reports a corrupt zip instead of guessing', async () => {
+    expect(await preview('broken.zip', 'PK\x03\x04broken')).toMatchObject({ format: 'unsupported', reason: 'error' });
   });
 });

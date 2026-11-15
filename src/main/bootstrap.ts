@@ -64,6 +64,7 @@ import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
 import { CliMcpManager } from './mcp/cli-mcp';
 import { SandboxManager } from './sandbox/sandbox-manager';
+import { fileMimeType } from './artifacts/file-preview';
 import { SandboxGateway } from './sandbox/sandbox-gateway';
 import { SandboxAgentService } from './sandbox/sandbox-agents';
 import { GITHUB_OAUTH_CLIENT_ID_KEY } from '@shared/mcp';
@@ -266,7 +267,10 @@ export async function bootstrap(): Promise<AppServices> {
   // commands and files, behind Conductor's approval gate. The renderer polls
   // sandbox status while it shows it.
   const sandboxes = new SandboxManager();
-  const sandboxGateway = new SandboxGateway();
+  const sandboxGateway = new SandboxGateway(join(app.getPath('userData'), 'sandbox-tools.json'));
+  // Managed_Local_Storage for artifacts persisted during step execution lives
+  // beside the DB under userData.
+  const storage = new DiskManagedStorage(join(app.getPath('userData'), 'blobs'));
   // Agent chats without a project run in this hidden, non-git workspace.
   const AGENT_WORKSPACE_ID = '00000000-0000-4000-8000-0000a6e17000';
   // Late-bound: the approval broker is created after the orchestrator.
@@ -278,6 +282,15 @@ export async function bootstrap(): Promise<AppServices> {
     autoApprove,
     cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
     agentWorkspace: () => workspaces.ensureHidden(AGENT_WORKSPACE_ID, 'Agents', join(app.getPath('userData'), 'agent-space')).id,
+    // A file an agent handed back from its sandbox: stored as a blob and
+    // linked to the task, so it shows as a card under the agent's reply.
+    deliverFile: (taskId, stepId, file) => {
+      const blob = storage.put(file.bytes, fileMimeType(file.name, file.bytes));
+      store.db.prepare("INSERT INTO task_events (id, task_id, step_id, kind, payload, created_at) VALUES (?, ?, ?, 'artifact', ?, ?)")
+        .run(randomUUID(), taskId, stepId, JSON.stringify({ artifactId: blob.id, name: file.name, contentType: blob.contentType, byteLength: blob.byteLength, delivered: true }), blob.createdAt);
+      const task = stateMachine.getTask(taskId);
+      if (task !== undefined) taskEvents.emit('task.updated', task);
+    },
     log: (taskId, stepId, payload) => {
       store.db.prepare("INSERT INTO task_events (id, task_id, step_id, kind, payload, created_at) VALUES (?, ?, ?, 'log', ?, ?)")
         .run(randomUUID(), taskId, stepId, JSON.stringify({ phase: 'execution', ...payload }), new Date().toISOString());
@@ -286,9 +299,6 @@ export async function bootstrap(): Promise<AppServices> {
     },
   });
 
-  // Managed_Local_Storage for artifacts persisted during step execution lives
-  // beside the DB under userData.
-  const storage = new DiskManagedStorage(join(app.getPath('userData'), 'blobs'));
   const attachments = new AttachmentService(store, storage);
   registerAttachmentHandlers(router, attachments);
 
@@ -607,6 +617,7 @@ export async function bootstrap(): Promise<AppServices> {
   });
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
+  sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));
   // Threads created before auto-titles (or whose generation failed) get named
   // too: backfill the most recent untitled roots, queued one at a time.
   threadTitles.scheduleRecent(10);

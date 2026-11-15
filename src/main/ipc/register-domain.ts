@@ -68,6 +68,7 @@ import { existsSync } from 'node:fs';
 import type { AgentQuestionBroker } from '../orchestrator/agent-questions';
 import type { ToolApprovalBroker } from '../orchestrator/tool-approvals';
 import { generateArtifactFile } from '../artifacts/generate-artifact';
+import { previewFile } from '../artifacts/file-preview';
 import type { ArtifactImageData } from '@shared/generated-artifacts';
 
 // Wire the workspace, settings, and task-lifecycle services onto the validated
@@ -147,6 +148,8 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
   // Any agent's artifact spec becomes a real file here (pdf/docx/pptx);
   // video specs are rendered by the renderer's player instead.
   router.handle('artifact.generate', A['artifact.generate'], (_e, i) => generateArtifactFile(i.spec, i.images ?? {}));
+  router.handle('artifact.preview', A['artifact.preview'], (_e, i) => previewFile(i.fileName, Buffer.from(i.dataBase64, 'base64')));
+  router.handle('task.artifactFile', A['task.artifactFile'], (_e, i) => deps.taskQueries.artifactFile(i));
   router.handle('artifact.rasterize', A['artifact.rasterize'], async (_e, i) => {
     if (deps.renderVisual === undefined) throw new Error('Diagram rendering is not available.');
     return deps.renderVisual(i.html);

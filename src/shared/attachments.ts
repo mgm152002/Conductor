@@ -20,6 +20,7 @@ export const ATTACHMENT_KINDS = [
   'pdf',
   'docx',
   'doc',
+  'archive',
   'unsupported',
 ] as const;
 
@@ -33,6 +34,7 @@ export const ATTACHMENT_KIND_LABELS: Readonly<Record<AttachmentKind, string>> = 
   pdf: 'PDF',
   docx: 'Word document',
   doc: 'Word document',
+  archive: 'Zip archive',
   unsupported: 'Unsupported file',
 };
 

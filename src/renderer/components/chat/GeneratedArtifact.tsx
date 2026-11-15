@@ -1,56 +1,43 @@
-import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ARTIFACT_KIND_META, artifactFileName, normalizeSpec, type ArtifactImageData, type GeneratedArtifactSpec,
+  artifactFileName, artifactLabel, normalizeSpec, type ArtifactImageData, type GeneratedArtifactSpec,
 } from '@shared/generated-artifacts';
-import { ChevronRightIcon, DownloadIcon, FileTextIcon, PlayIcon, Spinner, XIcon } from '../ui/icons';
+import { ChevronRightIcon, DatabaseIcon, DownloadIcon, FileTextIcon, LayersIcon, PlayIcon, Spinner, XIcon } from '../ui/icons';
+import { DownloadButton, FileViewer, base64ToBlob, downloadUrl as download, formatBytes } from './FileViewer';
 import { cn } from '../../lib/cn';
 import { buildVisualSrcDoc, normalizeSvgForImage } from '../../lib/visuals';
 import { contentBounds } from '@shared/content-bounds';
 import { useThemeStore } from '../../stores';
 
-// Lazy, like MessagesTimeline: this chunk is only needed when a preview is
-// opened, and it keeps the Markdown <-> GeneratedArtifact import acyclic.
-const Markdown = lazy(() => import('./Markdown').then((m) => ({ default: m.Markdown })));
-
-/** In-app preview: documents render their formatted content; decks step through slides. */
-function ArtifactPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.Element {
+/** In-app preview of a deck: step through its slides. */
+function SlidesPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.Element {
   const slides = spec.slides ?? [];
   const [index, setIndex] = useState(0);
   const dark = useThemeStore((s) => s.appearance) === 'dark';
-  if (spec.kind === 'presentation') {
-    const slide = slides[Math.min(index, Math.max(0, slides.length - 1))];
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="flex aspect-video w-full flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card px-6 py-5">
-          <p className="text-lg font-semibold text-foreground">{slide?.title}</p>
-          {slide?.body ? <p className="text-sm whitespace-pre-wrap text-muted-foreground">{slide.body}</p> : null}
-          <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-foreground">
-            {slide?.bullets.map((bullet, i) => <li key={i}>{bullet}</li>)}
-          </ul>
-          {slide?.svg ? (
-            <iframe
-              title={`Diagram on slide: ${slide.title}`}
-              sandbox=""
-              srcDoc={buildVisualSrcDoc(slide.svg, dark)}
-              className="block min-h-44 w-full flex-1 border-0 bg-transparent"
-            />
-          ) : null}
-        </div>
-        <div className="flex items-center justify-between text-2xs text-muted-foreground">
-          <button type="button" disabled={index <= 0} onClick={() => { setIndex((v) => Math.max(0, v - 1)); }} className="cursor-pointer rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40">Previous</button>
-          <span className="tabular-nums">Slide {Math.min(index + 1, slides.length)} of {slides.length}</span>
-          <button type="button" disabled={index >= slides.length - 1} onClick={() => { setIndex((v) => Math.min(slides.length - 1, v + 1)); }} className="cursor-pointer rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40">Next</button>
-        </div>
-      </div>
-    );
-  }
-  const markdown = spec.content ?? slides.map((s) => `# ${s.title}\n${s.body ?? ''}\n${s.bullets.map((b) => `- ${b}`).join('\n')}`).join('\n\n');
+  const slide = slides[Math.min(index, Math.max(0, slides.length - 1))];
   return (
-    <div className="px-1">
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading preview…</p>}>
-        <Markdown text={markdown} />
-      </Suspense>
+    <div className="flex flex-col gap-2">
+      <div className="flex aspect-video w-full flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card px-6 py-5">
+        <p className="text-lg font-semibold text-foreground">{slide?.title}</p>
+        {slide?.body ? <p className="text-sm whitespace-pre-wrap text-muted-foreground">{slide.body}</p> : null}
+        <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm text-foreground">
+          {slide?.bullets.map((bullet, i) => <li key={i}>{bullet}</li>)}
+        </ul>
+        {slide?.svg ? (
+          <iframe
+            title={`Diagram on slide: ${slide.title}`}
+            sandbox=""
+            srcDoc={buildVisualSrcDoc(slide.svg, dark)}
+            className="block min-h-44 w-full flex-1 border-0 bg-transparent"
+          />
+        ) : null}
+      </div>
+      <div className="flex items-center justify-between text-2xs text-muted-foreground">
+        <button type="button" disabled={index <= 0} onClick={() => { setIndex((v) => Math.max(0, v - 1)); }} className="cursor-pointer rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40">Previous</button>
+        <span className="tabular-nums">Slide {Math.min(index + 1, slides.length)} of {slides.length}</span>
+        <button type="button" disabled={index >= slides.length - 1} onClick={() => { setIndex((v) => Math.min(slides.length - 1, v + 1)); }} className="cursor-pointer rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40">Next</button>
+      </div>
     </div>
   );
 }
@@ -61,12 +48,7 @@ function ArtifactPreview({ spec }: { spec: GeneratedArtifactSpec }): React.JSX.E
 // the preview. A video shows its render canvas under the card while it
 // records, then plays in the panel.
 
-/** 42 → "42 bytes", 1_536 → "1.5 KB". */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} byte${bytes === 1 ? "" : "s"}`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+export { formatBytes };
 
 /**
  * The artifact card shown in a conversation. The card itself opens the
@@ -172,26 +154,12 @@ export function ArtifactPanel({ title, meta, icon, actions, onClose, children }:
   );
 }
 
-interface Ready { url: string; fileName: string; sizeBytes: number; missingDiagrams?: number; missingReason?: string }
+interface Ready { url: string; fileName: string; mimeType: string; sizeBytes: number; /** The file's bytes, for the viewer (absent for a recorded video). */ dataBase64?: string; missingDiagrams?: number; missingReason?: string }
 type State = { status: 'generating'; progress: number } | { status: 'ready'; ready: Ready } | { status: 'failed'; error: string };
 
 // Session cache so scrolling/remounting never regenerates a file (a video
 // render takes real time).
 const cache = new Map<string, Promise<Ready>>();
-
-function download(url: string, fileName: string): void {
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-}
-
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
-}
 
 const VIDEO_W = 1280;
 const VIDEO_H = 720;
@@ -278,7 +246,7 @@ async function generateVideo(spec: GeneratedArtifactSpec, canvas: HTMLCanvasElem
   const recordedType = (recorder.mimeType || mimeType || 'video/webm').split(';')[0]!;
   const blob = new Blob(chunks, { type: recordedType });
   const fileName = artifactFileName(spec).replace(/\.(webm|mp4)$/, recordedType === 'video/mp4' ? '.mp4' : '.webm');
-  return { url: URL.createObjectURL(blob), fileName, sizeBytes: blob.size };
+  return { url: URL.createObjectURL(blob), fileName, mimeType: recordedType, sizeBytes: blob.size };
 }
 
 function extractSvg(fragment: string): string | null {
@@ -447,11 +415,13 @@ function generate(spec: GeneratedArtifactSpec, canvas: HTMLCanvasElement | null,
     onProgress(0.35);
     // Rasterize embedded SVGs and clamp to the IPC schema caps, whatever
     // built this spec.
-    const prepared = await prepareSpec(spec);
+    // Text files and archives are delivered exactly as written: nothing to rasterize.
+    const verbatim = spec.kind === 'markdown' || spec.kind === 'zip' || spec.kind === 'file';
+    const prepared = verbatim ? { spec: normalizeSpec(spec), images: {}, missing: 0, missingReason: undefined } : await prepareSpec(spec);
     const file = await window.conductor.artifacts.generate(prepared.spec, prepared.images);
     onProgress(0.9);
     const blob = base64ToBlob(file.dataBase64, file.mimeType);
-    return { url: URL.createObjectURL(blob), fileName: file.fileName, sizeBytes: file.sizeBytes, ...(prepared.missing > 0 ? { missingDiagrams: prepared.missing, ...(prepared.missingReason !== undefined ? { missingReason: prepared.missingReason } : {}) } : {}) };
+    return { url: URL.createObjectURL(blob), fileName: file.fileName, mimeType: file.mimeType, sizeBytes: file.sizeBytes, dataBase64: file.dataBase64, ...(prepared.missing > 0 ? { missingDiagrams: prepared.missing, ...(prepared.missingReason !== undefined ? { missingReason: prepared.missingReason } : {}) } : {}) };
   })();
   cache.set(key, pending);
   void pending.catch(() => { cache.delete(key); });
@@ -487,8 +457,9 @@ export function GeneratedArtifact({ spec, complete = true }: { spec: GeneratedAr
   }, [specKey, complete]);
 
   const kind = spec?.kind ?? 'pdf';
-  const meta = ARTIFACT_KIND_META[kind];
-  const icon = kind === 'video' ? <PlayIcon size={17} /> : <FileTextIcon size={17} />;
+  const meta = { label: artifactLabel(spec ?? { kind: 'pdf', title: '' }) };
+  const KindIcon = kind === 'video' ? PlayIcon : kind === 'zip' ? LayersIcon : kind === 'presentation' ? LayersIcon : kind === 'file' && /\.(csv|tsv|json|xml|ya?ml|sql)$/i.test(spec?.fileName ?? '') ? DatabaseIcon : FileTextIcon;
+  const icon = <KindIcon size={17} />;
   if (!complete) {
     return (
       <div className="my-1" role="status" aria-label={`Generating ${meta.label.toLowerCase()}…`}>
@@ -532,17 +503,17 @@ export function GeneratedArtifact({ spec, complete = true }: { spec: GeneratedAr
         <ArtifactPanel
           title={spec.title}
           meta={`${ready.fileName}, ${formatBytes(ready.sizeBytes)}`}
-          icon={kind === 'video' ? <PlayIcon size={14} /> : <FileTextIcon size={14} />}
+          icon={<KindIcon size={14} />}
           onClose={() => { setPreviewOpen(false); }}
-          actions={(
-            <button type="button" onClick={() => { download(ready.url, ready.fileName); }} className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-semibold text-primary-foreground transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring">
-              <DownloadIcon size={13} />Download
-            </button>
-          )}
+          actions={<DownloadButton onClick={() => { download(ready.url, ready.fileName); }} />}
         >
-          {spec.kind === 'video'
+          {spec.kind === 'video' || ready.dataBase64 === undefined
             ? <video controls preload="metadata" src={ready.url} className="aspect-video w-full rounded-xl border border-border bg-black" aria-label={spec.title} />
-            : <ArtifactPreview spec={spec} />}
+            : spec.kind === 'presentation'
+              ? <SlidesPreview spec={spec} />
+              // The real file, rendered: PDF pages, the Word document's
+              // formatted text, Markdown, or the archive's contents.
+              : <FileViewer fileName={ready.fileName} mimeType={ready.mimeType} dataBase64={ready.dataBase64} url={ready.url} cacheKey={specKey ?? ready.fileName} archiveFiles={spec.files} onDownload={() => { download(ready.url, ready.fileName); }} />}
         </ArtifactPanel>
       ) : null}
     </figure>

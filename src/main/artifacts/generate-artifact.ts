@@ -1,5 +1,5 @@
 import { deflateRawSync } from 'node:zlib';
-import { ARTIFACT_KIND_META, artifactFileName, normalizeSpec, type ArtifactImageData, type GeneratedArtifactSpec, type GeneratedArtifactSpecInput, type GeneratedFile } from '@shared/generated-artifacts';
+import { artifactFileName, artifactMimeType, normalizeSpec, type ArtifactImageData, type GeneratedArtifactSpec, type GeneratedArtifactSpecInput, type GeneratedFile } from '@shared/generated-artifacts';
 
 export type ArtifactImages = Readonly<Record<string, ArtifactImageData>>;
 
@@ -32,7 +32,7 @@ function crc32(buffer: Buffer): number {
 }
 crc32.table = undefined as Int32Array | undefined;
 
-function zip(entries: { name: string; data: Buffer }[]): Buffer {
+export function zip(entries: { name: string; data: Buffer }[]): Buffer {
   const chunks: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
@@ -512,11 +512,15 @@ function generatePptx(spec: GeneratedArtifactSpec, images: ArtifactImages): Buff
 export function generateArtifactFile(input: GeneratedArtifactSpecInput, images: ArtifactImages = {}): GeneratedFile {
   const spec = normalizeSpec(input);
   if (spec.kind === 'video') throw new Error('Video artifacts are rendered in the app player');
-  const bytes = spec.kind === 'pdf' ? generatePdf(spec, images) : spec.kind === 'document' ? generateDocx(spec, images) : generatePptx(spec, images);
-  const meta = ARTIFACT_KIND_META[spec.kind];
+  if (spec.kind === 'zip' && (spec.files ?? []).length === 0) throw new Error('The archive has no files');
+  const bytes = spec.kind === 'pdf' ? generatePdf(spec, images)
+    : spec.kind === 'document' ? generateDocx(spec, images)
+      : spec.kind === 'presentation' ? generatePptx(spec, images)
+        : spec.kind === 'zip' ? zip((spec.files ?? []).map((file) => ({ name: file.path, data: utf8(file.content) })))
+          : utf8(spec.content ?? ''); // markdown and plain files are their text
   return {
     fileName: artifactFileName(spec),
-    mimeType: meta.mimeType,
+    mimeType: artifactMimeType(spec),
     sizeBytes: bytes.length,
     dataBase64: bytes.toString('base64'),
   };

@@ -10,7 +10,7 @@ import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { Alert, Button } from '../ui/primitives';
 import { FolderIcon, PlusIcon } from '../ui/icons';
-import { ArtifactRow } from '../workspace/ArtifactsRegion';
+import { ArtifactRow, DeliveredFiles } from '../workspace/ArtifactsRegion';
 import { requestsArtifact } from '../../lib/artifacts';
 import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
 import { GeneratedArtifact } from './GeneratedArtifact';
@@ -132,9 +132,12 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
       {!live && replyText !== '' && requestedKind !== null && !hasArtifactBlock(replyText) && !hasDeliveredFileLink(replyText)
         ? <GeneratedArtifact spec={synthesizeSpec(requestedKind, task.objective, replyText)} />
         : null}
-      {details !== null && details.artifacts.length > 0 && requestsArtifact(task.objective) && !generatedInChat ? (
+      {/* Files the agent handed back on purpose always show; the stored copy
+          of its output only when the request asked for a document. */}
+      {details !== null ? <DeliveredFiles taskId={task.id} artifacts={details.artifacts} /> : null}
+      {details !== null && details.artifacts.some((artifact) => artifact.delivered !== true) && requestsArtifact(task.objective) && !generatedInChat && !details.artifacts.some((artifact) => artifact.delivered === true) ? (
         <ul className="flex flex-col gap-2" aria-label="Documents from the agent">
-          {details.artifacts.map((artifact) => <ArtifactRow key={artifact.id} taskId={task.id} artifact={artifact} />)}
+          {details.artifacts.filter((artifact) => artifact.delivered !== true).map((artifact) => <ArtifactRow key={artifact.id} taskId={task.id} artifact={artifact} />)}
         </ul>
       ) : null}
       {details !== null && planned ? <PlanResults task={task} details={details} /> : null}

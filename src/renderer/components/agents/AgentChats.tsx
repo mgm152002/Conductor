@@ -2,9 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Task } from '@shared/domain';
 import type { RunChoice } from '@shared/agent-models';
 import type { AgentGroup, AgentGroupMessage, SandboxAgent } from '@shared/sandbox-agents';
+import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import { useTaskStore, useWorkspaceStore } from '../../stores';
 import { useSandboxAgentStore } from '../../stores/sandbox-agent-store';
 import { threadKey } from '../../lib/threads';
+import type { TurnRun } from '../../lib/timeline';
 import { isWorkingState, threadTitle } from '../../lib/thread-status';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
@@ -12,7 +14,7 @@ import { AgentAvatar } from '../ui/AgentAvatar';
 import { MenuSelect } from '../ui/MenuSelect';
 import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 import { Alert, Button } from '../ui/primitives';
-import { ArrowUpIcon, FolderIcon, GlobeIcon, PencilIcon, SquarePenIcon, TrashIcon } from '../ui/icons';
+import { ArrowUpIcon, ClockIcon, FolderIcon, GlobeIcon, PencilIcon, SquarePenIcon, TrashIcon, XIcon } from '../ui/icons';
 import { AgentReply } from './AgentReply';
 import { AgentMark } from '../chat/AgentMark';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
@@ -39,13 +41,19 @@ function UserBubble({ text, at, task }: { text: string; at: string; task?: Task 
 }
 
 /** Message box shared by both panes, with attachments (picked, pasted or dropped). */
-function ChatComposer({ placeholder, disabled, onSend, children }: {
+function ChatComposer({ placeholder, disabled, working = false, workingName, onSend, children }: {
   placeholder: string;
   disabled?: string | undefined;
-  onSend: (text: string, attachmentIds: string[]) => Promise<void>;
+  /** The agent is still working: the message is steered or queued, as the user picks. */
+  working?: boolean;
+  /** Who is working, for the button titles. */
+  workingName?: string | undefined;
+  onSend: (text: string, attachmentIds: string[], mode: QueuedMessageMode) => Promise<void>;
   children?: React.ReactNode;
 }): React.JSX.Element {
   const [text, setText] = useState('');
+  const [mode, setMode] = useState<QueuedMessageMode>('queue');
+  const who = workingName ?? 'the agent';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -60,7 +68,7 @@ function ChatComposer({ placeholder, disabled, onSend, children }: {
     const trimmed = text.trim();
     if (trimmed === '' || busy || disabled !== undefined || draft.busy || draft.errors.length > 0) return;
     setBusy(true); setError(null);
-    try { await onSend(trimmed, draft.attachmentIds); setText(''); draft.reset(); }
+    try { await onSend(trimmed, draft.attachmentIds, mode); setText(''); draft.reset(); }
     catch (err) { setError(message(err)); }
     finally { setBusy(false); area.current?.focus(); }
   };
@@ -104,7 +112,21 @@ function ChatComposer({ placeholder, disabled, onSend, children }: {
           onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }}
           className="max-h-50 min-h-6 flex-1 resize-none bg-transparent py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
         />
-        <button type="submit" aria-label="Send" disabled={text.trim() === '' || busy || disabled !== undefined || draft.busy || draft.errors.length > 0}
+        {working ? (
+          <div role="group" aria-label="How to send while the agent is working" className="mb-1 flex shrink-0 items-center rounded-full border border-border p-0.5">
+            <button type="button" aria-pressed={mode === 'steer'} title={`Stop what ${who} is doing and answer this next`}
+              onClick={() => { setMode('steer'); }}
+              className={cn('flex h-6 cursor-pointer items-center gap-1 rounded-full px-2 text-2xs transition-colors focus-visible:outline-2 focus-visible:outline-ring', mode === 'steer' ? 'bg-warning/20 text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+              <ArrowUpIcon size={11} /> Steer
+            </button>
+            <button type="button" aria-pressed={mode === 'queue'} title={`Let ${who} finish, then answer this`}
+              onClick={() => { setMode('queue'); }}
+              className={cn('flex h-6 cursor-pointer items-center gap-1 rounded-full px-2 text-2xs transition-colors focus-visible:outline-2 focus-visible:outline-ring', mode === 'queue' ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+              <ClockIcon size={11} /> Queue
+            </button>
+          </div>
+        ) : null}
+        <button type="submit" aria-label={working ? (mode === 'steer' ? 'Steer agent' : 'Queue message') : 'Send'} disabled={text.trim() === '' || busy || disabled !== undefined || draft.busy || draft.errors.length > 0}
           className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground hover:brightness-110 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
           <ArrowUpIcon size={15} />
         </button>
@@ -113,6 +135,47 @@ function ChatComposer({ placeholder, disabled, onSend, children }: {
     </div>
   );
 }
+
+/** A message held while an agent works: steering it, or queued behind it. */
+function HeldMessage({ mode, label, starting, onCancel }: { mode: QueuedMessageMode; label: string; starting?: boolean; onCancel: () => void }): React.JSX.Element {
+  return (
+    <li className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-xs">
+      <span className={cn('shrink-0 rounded-full px-1.5 py-px text-3xs font-medium', mode === 'steer' ? 'bg-warning/15 text-warning' : 'bg-primary/12 text-primary')}>
+        {mode === 'steer' ? 'Steering' : 'Queued'}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-foreground" title={label}>{label}</span>
+      {starting === true ? <span className="shrink-0 text-3xs text-muted-foreground">Starting…</span> : (
+        <button type="button" aria-label={`Cancel: ${label.slice(0, 40)}`} title="Don’t send this"
+          onClick={onCancel}
+          className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+          <XIcon size={12} />
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** The messages waiting in a thread, kept current as they are sent or cancelled. */
+function useQueuedMessages(threadId: string | null): QueuedMessage[] {
+  const [queued, setQueued] = useState<QueuedMessage[]>([]);
+  useEffect(() => {
+    if (threadId === null) { setQueued([]); return; }
+    let active = true;
+    const refresh = (): void => {
+      void window.conductor.task.queueList(threadId).then((list) => { if (active) setQueued(list); }).catch(() => undefined);
+    };
+    refresh();
+    const stop = window.conductor.on('task.queue.updated', (payload) => {
+      const event = payload as { threadId?: string; queue?: QueuedMessage[] };
+      if (event.threadId === threadId && Array.isArray(event.queue)) setQueued(event.queue);
+    });
+    return () => { active = false; stop(); };
+  }, [threadId]);
+  return queued;
+}
+
+const cancelQueued = (id: string): void => { void window.conductor.task.queueCancel(id).catch(() => undefined); };
+const isBusy = (task: Task | undefined): boolean => task !== undefined && (isWorkingState(task.state) || task.state === 'WAITING_FOR_APPROVAL');
 
 /** Keeps a conversation scrolled to the newest message unless the user scrolled up. */
 function useStickToBottom(dependency: unknown): { ref: React.RefObject<HTMLDivElement | null>; onScroll: (event: React.UIEvent<HTMLDivElement>) => void } {
@@ -243,10 +306,22 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
   // An existing chat keeps the project it started in.
   const chatProject = turns[0] !== undefined ? (workspaces.some((w) => w.id === turns[0]!.workspaceId) ? turns[0]!.workspaceId : null) : projectId;
 
-  async function send(text: string, attachmentIds: string[]): Promise<void> {
-    if (latest !== undefined && isWorkingState(latest.state)) {
+  const queued = useQueuedMessages(current);
+  const busy = isBusy(latest);
+  // Which CLI and model each turn ran with, so a switch shows between turns.
+  const [turnRuns, setTurnRuns] = useState<Map<string, TurnRun>>(() => new Map());
+  const reportRun = useCallback((taskId: string, run: TurnRun) => {
+    setTurnRuns((previous) => {
+      const known = previous.get(taskId);
+      if (known?.agentId === run.agentId && known.model === run.model) return previous;
+      return new Map(previous).set(taskId, run);
+    });
+  }, []);
+
+  async function send(text: string, attachmentIds: string[], mode: QueuedMessageMode): Promise<void> {
+    if (latest !== undefined && busy) {
       await window.conductor.task.enqueue({
-        taskId: latest.id, objective: text, mode: 'queue',
+        taskId: latest.id, objective: text, mode,
         ...(cli !== '' ? { agentId: cli } : {}),
         ...(cli !== '' && Object.keys(choice).length > 0 ? { runOptions: { main: choice } } : {}),
         ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
@@ -307,16 +382,23 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-6">
-            {turns.map((task) => (
+            {turns.map((task, index) => (
               <div key={task.id} className="flex flex-col gap-4">
                 <UserBubble text={task.objective} at={task.createdAt} task={task} />
-                <AgentReply agent={agent} task={task} />
+                <AgentReply agent={agent} task={task} previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined} onRun={reportRun} />
               </div>
             ))}
           </div>
         )}
       </div>
-      <ChatComposer placeholder={`Message ${agent.name}`} onSend={send}>
+      <ChatComposer placeholder={busy ? `Steer ${agent.name}, or queue a follow-up` : `Message ${agent.name}`} working={busy} workingName={agent.name} onSend={send}>
+        {queued.length > 0 ? (
+          <ul aria-label="Waiting messages" className="mb-2 flex flex-col gap-1.5">
+            {queued.map((item) => (
+              <HeldMessage key={item.id} mode={item.mode} label={item.objective} starting={item.status === 'dispatching'} onCancel={() => { cancelQueued(item.id); }} />
+            ))}
+          </ul>
+        ) : null}
         <div className="mb-2 flex items-center gap-2">
           <ProjectPicker value={chatProject} onChange={setProjectId} locked={turns.length > 0} />
           <MenuSelect
@@ -361,7 +443,13 @@ export function GroupChat({ group, agents, onDelete }: {
     await Promise.all(missing.map((taskId) => window.conductor.task.get(taskId).then((task) => { useTaskStore.getState().upsert(task); }).catch(() => undefined)));
   }, [group.id]);
   useEffect(() => { setTargets([]); texts.current.clear(); void load(); }, [load]);
-  const working = messages.some((item) => Object.values(item.replies).some((taskId) => { const task = tasks[taskId]; return task !== undefined && isWorkingState(task.state); }));
+  const waiting = messages.some((item) => item.waiting !== undefined);
+  const working = waiting || messages.some((item) => Object.values(item.replies).some((taskId) => isBusy(tasks[taskId])));
+  // A held message was sent, cancelled or started: show it straight away.
+  useEffect(() => window.conductor.on('task.queue.updated', () => { void load(); }), [load]);
+  // Members who would get the next message and are still busy with an earlier one.
+  const busyMembers = members.filter((member) => (targets.length === 0 || targets.includes(member.id))
+    && messages.some((item) => item.waiting?.[member.id] !== undefined || isBusy(tasks[item.replies[member.id] ?? ''])));
   useEffect(() => {
     if (!working) return;
     const timer = window.setInterval(() => { void load(); }, 4_000);
@@ -370,7 +458,7 @@ export function GroupChat({ group, agents, onDelete }: {
   const scroll = useStickToBottom(group.id);
   const onText = useCallback((taskId: string, text: string) => { texts.current.set(taskId, text); }, []);
 
-  async function send(text: string, attachmentIds: string[]): Promise<void> {
+  async function send(text: string, attachmentIds: string[], mode: QueuedMessageMode): Promise<void> {
     // What members said in the last few exchanges, so they can build on it.
     const context = messages.slice(-3).flatMap((item) => Object.entries(item.replies).map(([agentId, taskId]) => {
       const reply = texts.current.get(taskId);
@@ -378,7 +466,7 @@ export function GroupChat({ group, agents, onDelete }: {
       return reply !== undefined ? `${name}: ${reply.length > 1200 ? `${reply.slice(0, 1200)}…` : reply}` : undefined;
     })).filter((line): line is string => line !== undefined).join('\n\n');
     await window.conductor.sandboxAgents.sendGroup({
-      groupId: group.id, text,
+      groupId: group.id, text, mode,
       ...(projectId !== null ? { workspaceId: projectId } : {}),
       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       ...(targets.length > 0 ? { agentIds: targets } : {}),
@@ -414,12 +502,25 @@ export function GroupChat({ group, agents, onDelete }: {
                   const task: Task | undefined = tasks[taskId];
                   return agent !== undefined && task !== undefined ? <AgentReply key={taskId} agent={agent} task={task} onText={onText} /> : null;
                 })}
+                {item.waiting !== undefined ? (
+                  <ul aria-label="Waiting for members" className="flex flex-col gap-1.5">
+                    {Object.entries(item.waiting).map(([agentId, held]) => {
+                      const name = agents.find((candidate) => candidate.id === agentId)?.name ?? 'Agent';
+                      return (
+                        <HeldMessage key={agentId} mode={held.mode}
+                          label={held.mode === 'steer' ? `Stopping ${name}’s current work to answer this` : `${name} will answer this after finishing its current work`}
+                          onCancel={() => { void window.conductor.task.queueCancel(held.queueId).then(load).catch(() => undefined); }} />
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </div>
             ))}
           </div>
         )}
       </div>
-      <ChatComposer placeholder={targets.length === 0 ? `Message everyone in ${group.name}` : `Message ${targets.map((id) => members.find((member) => member.id === id)?.name).join(', ')}`} onSend={send}>
+      <ChatComposer placeholder={targets.length === 0 ? `Message everyone in ${group.name}` : `Message ${targets.map((id) => members.find((member) => member.id === id)?.name).join(', ')}`}
+        working={busyMembers.length > 0} workingName={busyMembers.length === 1 ? busyMembers[0]!.name : 'the members still working'} onSend={send}>
         <div className="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Send to">
           <ProjectPicker value={projectId} onChange={setProjectId} locked={messages.length > 0} />
           <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />

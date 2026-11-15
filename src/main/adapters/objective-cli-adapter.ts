@@ -4,6 +4,7 @@ import type { AdapterSessionHandle, CapabilityDescriptor } from '@shared/adapter
 import { AGENT_PREFERENCE_ORDER } from '@shared/agent-preference';
 import { MAX_ATTACHMENT_EXTRACTED_CHARS, type AttachmentRef } from '@shared/attachments';
 import type { CatalogEntry } from '@shared/catalog';
+import { SANDBOX_MCP_KEY } from '@shared/sandbox-agents';
 import { ARTIFACT_OUTPUT_INSTRUCTION } from '@shared/generated-artifacts';
 import type { PermissionProfile } from '@shared/domain';
 
@@ -121,6 +122,10 @@ export function codexMcpOverrides(servers: readonly CodexMcpServer[] | undefined
     if (!MCP_KEY.test(server.key)) continue;
     if (server.url !== undefined) {
       args.push('-c', `mcp_servers.${server.key}.url=${tomlString(server.url)}`);
+      // Codex runs non-interactively with approvals off, which refuses every
+      // MCP tool call ("requires approval, but approval policy is never").
+      // The sandbox gateway asks the user itself, so Codex must not.
+      if (server.key === SANDBOX_MCP_KEY) args.push('-c', `mcp_servers.${server.key}.default_tools_approval_mode="approve"`);
       if (server.headers?.['Authorization']?.startsWith('Bearer ')) {
         args.push('-c', `mcp_servers.${server.key}.bearer_token_env_var=${tomlString(mcpTokenEnvName(server.key))}`);
       }

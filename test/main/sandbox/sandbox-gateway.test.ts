@@ -1,4 +1,7 @@
 import { createServer, type Server } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -6,6 +9,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import { SandboxGateway, isLookOnly, toolGroup } from '@main/sandbox/sandbox-gateway';
+import { readSandboxFile } from '@main/sandbox/sandbox-agents';
 import type { GateRequest, ToolApprovalDecision } from '@main/adapters/tool-gate';
 
 // The gateway sits between an agent CLI and the AIO Sandbox's MCP endpoint.
@@ -170,5 +174,146 @@ describe('SandboxGateway', () => {
     const forged = `${url.origin}/g/${'0'.repeat(48)}/mcp`;
     const response = await fetch(forged, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(404);
+  });
+});
+
+describe('handing a sandbox file back to the chat', () => {
+  it('offers return_file only when the run can deliver, and never forwards it to the sandbox', async () => {
+    const plain = await connect((await open().session).url);
+    expect((await plain.listTools()).tools.map((tool) => tool.name)).not.toContain('return_file');
+
+    const returned: Array<{ path: string; name?: string }> = [];
+    const session = await gateway.open({
+      agentName: 'Researcher', tools: ['files'], approval: 'all',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'decline',
+      returnFile: async (input) => { returned.push(input); return `${input.name ?? input.path} delivered`; },
+    });
+    const cli = await connect(session.url);
+    expect((await cli.listTools()).tools.map((tool) => tool.name)).toContain('return_file');
+    // No approval is asked even under approval: 'all' (decide would decline).
+    const result = await cli.callTool({ name: 'return_file', arguments: { path: '/home/gem/out/report.pdf', name: 'Report.pdf' } });
+    expect(result.isError).not.toBe(true);
+    expect(text(result)).toBe('Report.pdf delivered');
+    expect(returned).toEqual([{ path: '/home/gem/out/report.pdf', name: 'Report.pdf' }]);
+    expect(calls).toEqual([]);
+    const missing = await cli.callTool({ name: 'return_file', arguments: { path: '  ' } });
+    expect(missing.isError).toBe(true);
+  });
+
+  it('reads the file from the download endpoint, or over the shell with a size check', async () => {
+    const endpoint = { baseUrl: 'http://sandbox.test', apiKey: 'k' };
+    const pdf = Buffer.from('%PDF-1.4 binary \x00\x01 bytes');
+    const direct = (async (url: string | URL | Request) => {
+      expect(String(url)).toBe('http://sandbox.test/v1/file/download?path=%2Fhome%2Fgem%2Fa%20b.pdf');
+      return new Response(pdf, { headers: { 'content-type': 'application/pdf' } });
+    }) as typeof fetch;
+    expect((await readSandboxFile(endpoint, '/home/gem/a b.pdf', direct)).equals(pdf)).toBe(true);
+
+    const commands: string[] = [];
+    const shell = (output: string) => (async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('/v1/file/download')) return new Response('{"detail":"Not Found"}', { status: 404, headers: { 'content-type': 'application/json' } });
+      commands.push((JSON.parse(String(init?.body)) as { command: string }).command);
+      return new Response(JSON.stringify({ success: true, data: { output } }), { headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    expect((await readSandboxFile(endpoint, "/tmp/it's.pdf", shell(`${pdf.length}\n${pdf.toString('base64')}\n`))).equals(pdf)).toBe(true);
+    expect(commands[0]).toContain(`'/tmp/it'\\''s.pdf'`);
+    await expect(readSandboxFile(endpoint, '/tmp/x.pdf', shell(`${pdf.length + 5}\n${pdf.toString('base64')}`))).rejects.toThrow(/completely/);
+    await expect(readSandboxFile(endpoint, '/tmp/none.pdf', shell(''))).rejects.toThrow(/No file was found/);
+  });
+});
+
+describe('locking the folder agents share', () => {
+  const S = '/home/gem/shared';
+  const openAs = (id: string, name: string) => gateway.open({
+    agentName: name, tools: ['files', 'shell'], approval: 'none',
+    sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+    decide: async () => 'accept',
+    lockOwner: { id, name },
+  });
+
+  it('gives lock tools only to runs that can hold locks, and never forwards them', async () => {
+    const plain = await connect((await open().session).url);
+    expect((await plain.listTools()).tools.map((tool) => tool.name)).not.toContain('lock_shared');
+    const cli = await connect((await openAs('task-a', 'Researcher')).url);
+    expect((await cli.listTools()).tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['lock_shared', 'unlock_shared']));
+    expect((await cli.callTool({ name: 'lock_shared', arguments: { path: `${S}/data` } })).isError).not.toBe(true);
+    expect((await cli.callTool({ name: 'lock_shared', arguments: { path: '/home/gem/workspace/x' } })).isError).toBe(true);
+    expect((await cli.callTool({ name: 'lock_shared', arguments: { path: S } })).isError).toBe(true);
+    expect((await cli.callTool({ name: 'lock_shared', arguments: { path: `${S}/../workspace/x` } })).isError).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('turns another agent away from a locked file or folder until it is unlocked', async () => {
+    const a = await connect((await openAs('task-a', 'Researcher')).url);
+    const b = await connect((await openAs('task-b', 'Writer')).url);
+    await a.callTool({ name: 'lock_shared', arguments: { path: `${S}/data` } });
+
+    const taken = await b.callTool({ name: 'lock_shared', arguments: { path: `${S}/data/rows.csv` } });
+    expect(taken.isError).toBe(true);
+    expect(text(taken)).toContain('locked by Researcher');
+    // Writes through a file tool, a command naming the path, and a command on a parent folder.
+    for (const call of [
+      { name: 'file_write', arguments: { path: `${S}/data/rows.csv` } },
+      { name: 'terminal_execute', arguments: { command: `echo x >> ${S}/data/rows.csv` } },
+      { name: 'terminal_execute', arguments: { command: 'rm -rf ~/shared/*' } },
+      { name: 'terminal_execute', arguments: { command: `mv "${S}/data" /tmp/` } },
+    ]) {
+      const refused = await b.callTool(call);
+      expect(refused.isError).toBe(true);
+      expect(text(refused)).toContain('locked by Researcher');
+    }
+    expect(calls).toEqual([]);
+
+    // Reading is never blocked, nor is the rest of the folder or the holder itself.
+    expect((await b.callTool({ name: 'file_read', arguments: { path: `${S}/data/rows.csv` } })).isError).not.toBe(true);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: `${S}/other.md` } })).isError).not.toBe(true);
+    expect((await b.callTool({ name: 'terminal_execute', arguments: { command: `ls ${S}/database` } })).isError).not.toBe(true);
+    expect((await a.callTool({ name: 'terminal_execute', arguments: { command: `echo x >> ${S}/data/rows.csv` } })).isError).not.toBe(true);
+
+    expect((await b.callTool({ name: 'unlock_shared', arguments: { path: `${S}/data` } })).isError).toBe(true);
+    expect((await a.callTool({ name: 'unlock_shared', arguments: { path: `${S}/data` } })).isError).not.toBe(true);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: `${S}/data/rows.csv` } })).isError).not.toBe(true);
+  });
+
+  it('locks a shared file for whoever writes it with a file tool, and frees it when their run ends', async () => {
+    const first = await openAs('task-a', 'Researcher');
+    const a = await connect(first.url);
+    const b = await connect((await openAs('task-b', 'Writer')).url);
+    await a.callTool({ name: 'file_write', arguments: { path: `${S}/notes.md` } });
+    expect(gateway.locks.list().map((lock) => [lock.path, lock.owner.name])).toEqual([[`${S}/notes.md`, 'Researcher']]);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: `${S}/notes.md` } })).isError).toBe(true);
+    // Files outside the shared folder are nobody's business.
+    await a.callTool({ name: 'file_write', arguments: { path: '/home/gem/workspace/notes.md' } });
+    expect(gateway.locks.list()).toHaveLength(1);
+
+    first.dispose();
+    expect(gateway.locks.list()).toEqual([]);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: `${S}/notes.md` } })).isError).not.toBe(true);
+  });
+});
+
+describe('SandboxGateway tools/list while the sandbox starts', () => {
+  const never = (): Promise<{ baseUrl: string; apiKey: string }> => new Promise(() => undefined);
+  const dir = mkdtempSync(join(tmpdir(), 'gateway-cache-'));
+  afterEach(() => { gateway.close(); });
+
+  it('answers from the last list the sandbox gave, without waiting for it to start', async () => {
+    const cache = join(dir, 'tools.json');
+    const first = new SandboxGateway(cache);
+    const warm = await first.open({ agentName: 'Researcher', tools: ['browser', 'files'], approval: 'none', sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }), decide: async () => 'accept' });
+    expect(await (await connect(warm.url)).listTools().then((r) => r.tools.length)).toBeGreaterThan(0);
+    warm.dispose(); first.close();
+
+    // A new app run with a sandbox that is still starting.
+    const second = new SandboxGateway(cache);
+    const cold = await second.open({ agentName: 'Researcher', tools: ['browser'], approval: 'none', sandbox: never, decide: async () => 'accept' });
+    const started = Date.now();
+    const names = (await (await connect(cold.url)).listTools()).tools.map((tool) => tool.name);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(names).toContain('browser_navigate');
+    expect(names).not.toContain('terminal_execute');
+    cold.dispose(); second.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

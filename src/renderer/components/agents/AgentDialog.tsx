@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   SANDBOX_AGENT_COLORS, SANDBOX_TOOL_GROUPS,
   type SandboxAgent, type SandboxAgentInput, type SandboxApprovalPolicy, type SandboxToolGroup,
@@ -8,8 +8,9 @@ import type { AgentOption } from '@shared/integrations-contract';
 import { AgentMark } from '../chat/AgentMark';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Dialog, Switch, inputClassName, textareaClassName } from '../ui/primitives';
-import { ArrowUpIcon, ChevronDownIcon, PlusIcon, Spinner, XIcon } from '../ui/icons';
+import { ArrowUpIcon, ChevronDownIcon, PlusIcon, SparklesIcon, Spinner, XIcon } from '../ui/icons';
 import { cn } from '../../lib/cn';
+import { fileToIcon, generateIcon } from '../../lib/agent-icon';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 
 // Creating and editing a sandbox agent: who it is, what it does, which CLIs
@@ -55,6 +56,7 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { setForm(initial); setError(null); }, [initial]);
   const ids = { name: useId(), description: useId(), instructions: useId() };
   const local = clis.filter((cli) => !cli.remote);
@@ -99,9 +101,22 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
     >
       <form className="flex max-h-[68vh] flex-col gap-4 overflow-y-auto pr-1" onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <div className="flex items-end gap-3">
-          <span className="agent-stage flex size-16 shrink-0 items-center justify-center rounded-2xl" style={{ ['--agent-color' as string]: form.color }}>
-            <AgentAvatar agent={{ name: form.name || 'New agent', color: form.color }} size={48} />
-          </span>
+          <div className="flex shrink-0 flex-col items-center gap-1.5">
+            <AgentAvatar agent={{ name: form.name || 'New agent', color: form.color, icon: form.icon }} size={64} />
+            <div className="flex gap-1">
+              <Button type="button" size="sm" variant="ghost" title="Upload an image" onClick={() => { fileInput.current?.click(); }}>Upload</Button>
+              <Button type="button" size="sm" variant="ghost" title="Generate a new icon" onClick={() => { setError(null); try { setForm({ ...form, icon: generateIcon(form.color) }); } catch (err) { setError(message(err)); } }}><SparklesIcon size={12} />Generate</Button>
+              {form.icon !== undefined && form.icon !== '' ? <Button type="button" size="sm" variant="ghost" title="Remove the icon" onClick={() => { setForm({ ...form, icon: '' }); }}>Remove</Button> : null}
+            </div>
+            <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden aria-label="Upload an icon"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file === undefined) return;
+                setError(null);
+                void fileToIcon(file).then((icon) => { setForm((current) => ({ ...current, icon })); }).catch((err: unknown) => { setError(message(err)); });
+              }} />
+          </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <label htmlFor={ids.name} className="text-2xs font-medium text-muted-foreground">Name</label>
             <input id={ids.name} className={inputClassName} value={form.name} maxLength={60} placeholder="Web researcher" onChange={(e) => { setForm({ ...form, name: e.target.value }); }} />

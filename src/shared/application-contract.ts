@@ -7,6 +7,8 @@ export const APPLICATION_SCHEMAS = {
     spec: GeneratedArtifactSpecSchema,
     images: z.record(z.string().max(64), ArtifactImageDataSchema).optional(),
   }).strict(),
+  // A file's bytes, rendered for the in-app viewer (25 MiB as base64).
+  'artifact.preview': z.object({ fileName: z.string().min(1).max(255), dataBase64: z.string().max(35_000_000) }).strict(),
   'artifact.rasterize': z.object({ html: z.string().min(1).max(300_000) }).strict(),
   'workspace.active': z.void(),
   'workspace.changes': z.object({workspaceId:z.string().uuid(),taskId:z.string().uuid().optional()}),
@@ -16,6 +18,7 @@ export const APPLICATION_SCHEMAS = {
   'task.list': z.object({workspaceId:z.string().uuid().optional(),limit:z.number().int().min(1).max(500).optional()}).optional(),
   'task.details': z.object({id:z.string().uuid()}),
   'task.readArtifact': z.object({taskId:z.string().uuid(),artifactId:z.string().uuid()}),
+  'task.artifactFile': z.object({taskId:z.string().uuid(),artifactId:z.string().uuid()}),
   'task.retry': z.object({id:z.string().uuid()}),
   'task.thread': z.object({threadId:z.string().uuid()}),
   'approval.list': z.void(),

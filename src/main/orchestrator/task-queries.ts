@@ -3,6 +3,8 @@ import type { Store } from '../db/types';
 import type { Orchestrator } from './orchestrator';
 import type { PermissionService } from '../domain/permission-service';
 import type { ManagedStorage } from '../storage/managed-storage';
+import { MAX_VIEWABLE_BYTES, type FileBytes } from '@shared/file-preview';
+import { fileMimeType } from '../artifacts/file-preview';
 import type { ArtifactPreview, ArtifactSummary, TaskDetails, TaskVerification } from '@shared/task-view';
 import type { Task, TaskEvent, TaskStep } from '@shared/domain';
 import { redact } from '../ipc/redaction';
@@ -74,6 +76,7 @@ export class TaskQueries {
         ...(typeof payload['name']==='string' ? {name:payload['name']}:{}),
         ...(typeof payload['contentType']==='string' ? {mimeType:payload['contentType']}:{}),
         ...(typeof payload['byteLength']==='number' ? {sizeBytes:payload['byteLength']}:{}),
+        ...(payload['delivered']===true ? {delivered:true}:{}),
       });
     }
     const checkpoint = this.store.db.prepare(`SELECT * FROM checkpoints WHERE task_id=?
@@ -93,6 +96,16 @@ export class TaskQueries {
     const plan = this.planView?.(id) ?? null;
     const usage = taskUsage(this.store, id, this.pricing);
     return redact({task,steps,events,artifacts:[...artifacts.values()],attachments:this.attachments?.listTask(id) ?? [],approvals,verification,plan,usage}) as TaskDetails;
+  }
+
+  /** A task output's bytes, for the in-app viewer and Download. */
+  artifactFile(input:{taskId:string;artifactId:string}):FileBytes {
+    const artifact = this.details(input.taskId).artifacts.find((a)=>a.id===input.artifactId);
+    if (artifact === undefined) throw new Error('Artifact does not belong to this task');
+    const buffer = this.storage.get(input.artifactId);
+    if (buffer.length > MAX_VIEWABLE_BYTES) throw new Error('This file is too large to open here');
+    const fileName = artifact.name ?? 'output.txt';
+    return {fileName,mimeType:artifact.mimeType ?? fileMimeType(fileName,buffer),sizeBytes:buffer.length,dataBase64:buffer.toString('base64')};
   }
 
   readArtifact(input:{taskId:string;artifactId:string}):ArtifactPreview {

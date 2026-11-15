@@ -3,6 +3,7 @@ import {
   GeneratedArtifactSpecSchema, hasArtifactBlock, parseArtifactSpec, requestedArtifactKind, splitArtifactBlocks, synthesizeSpec,
 } from '@shared/generated-artifacts';
 import { generateArtifactFile } from '@main/artifacts/generate-artifact';
+import { fileMimeType, listZipEntries, previewFile } from '@main/artifacts/file-preview';
 
 describe('artifact specs (any agent, both modes)', () => {
   it('parses an artifact block out of a reply and keeps the prose', () => {
@@ -172,5 +173,63 @@ describe('generateArtifactFile', () => {
   it('refuses video (rendered by the in-chat player, not the file service)', () => {
     expect(() => generateArtifactFile({ kind: 'video', title: 'Tides', slides: [{ title: 'Moon', bullets: [] }] }))
       .toThrow(/player/);
+  });
+
+  it('delivers markdown and plain text files exactly as written', () => {
+    const md = generateArtifactFile({ kind: 'markdown', title: 'Release Notes', content: '# Notes\n\n- one\n```svg\n<svg/>\n```' });
+    expect(md).toMatchObject({ fileName: 'release-notes.md', mimeType: 'text/markdown' });
+    expect(Buffer.from(md.dataBase64, 'base64').toString('utf8')).toBe('# Notes\n\n- one\n```svg\n<svg/>\n```');
+
+    const csv = generateArtifactFile({ kind: 'file', title: 'Sales', fileName: '../../etc/sales.csv', content: 'a,b\n1,2\n' });
+    expect(csv).toMatchObject({ fileName: 'sales.csv', mimeType: 'text/csv' });
+    expect(Buffer.from(csv.dataBase64, 'base64').toString('utf8')).toBe('a,b\n1,2\n');
+    expect(generateArtifactFile({ kind: 'file', title: 'Read Me', content: 'hi' }).fileName).toBe('read-me.txt');
+  });
+
+  it('builds a real zip from the spec files, with safe relative paths', () => {
+    const spec = parseArtifactSpec('{"kind":"zip","title":"Starter","files":[{"path":"src/index.ts","content":"export {};"},{"path":"../../outside.txt","content":"x"},{"path":"/abs/readme.md","content":"# Hi"},{"path":"src/index.ts","content":"dup"}]}');
+    expect(spec?.files?.map((file) => file.path)).toEqual(['src/index.ts', 'outside.txt', 'abs/readme.md']);
+    const file = generateArtifactFile(spec!);
+    expect(file).toMatchObject({ fileName: 'starter.zip', mimeType: 'application/zip' });
+    const bytes = Buffer.from(file.dataBase64, 'base64');
+    expect(bytes.readUInt32LE(0)).toBe(0x04034b50);
+    const listing = listZipEntries(bytes);
+    expect(listing?.entries).toEqual([
+      { path: 'src/index.ts', sizeBytes: 10, directory: false },
+      { path: 'outside.txt', sizeBytes: 1, directory: false },
+      { path: 'abs/readme.md', sizeBytes: 4, directory: false },
+    ]);
+    expect(() => generateArtifactFile({ kind: 'zip', title: 'Empty', files: [] })).toThrow(/no files/);
+    expect(GeneratedArtifactSpecSchema.safeParse(spec).success).toBe(true);
+  });
+
+  it('asks for a markdown file when the request names one', () => {
+    expect(requestedArtifactKind('give me the plan as a markdown file')).toBe('markdown');
+    expect(requestedArtifactKind('write NOTES.md for this')).toBe('markdown');
+    expect(requestedArtifactKind('explain markdown tables')).toBeNull();
+  });
+});
+
+describe('file preview for the in-app viewer', () => {
+  it('lists an archive, renders markdown and text, and declines unknown binaries', async () => {
+    const zip = generateArtifactFile({ kind: 'zip', title: 'Bundle', files: [{ path: 'a.txt', content: 'hello' }] });
+    const archive = await previewFile(zip.fileName, Buffer.from(zip.dataBase64, 'base64'));
+    expect(archive).toMatchObject({ format: 'archive', entryCount: 1, totalBytes: 5, truncated: false });
+
+    expect(await previewFile('notes.md', Buffer.from('# Title\n'))).toMatchObject({ format: 'markdown', markdown: '# Title\n' });
+    expect(await previewFile('data.csv', Buffer.from('a,b\n'))).toMatchObject({ format: 'text', text: 'a,b\n' });
+    expect(await previewFile('blob.bin', Buffer.from([0, 1, 2, 3, 255]))).toMatchObject({ format: 'unsupported' });
+    expect(listZipEntries(Buffer.from('not a zip at all, just some text'))).toBeNull();
+  });
+
+  it('shows a generated Word document as formatted text', async () => {
+    const docx = generateArtifactFile({ kind: 'document', title: 'Plan', content: '## Goals\n- Ship it' });
+    const preview = await previewFile(docx.fileName, Buffer.from(docx.dataBase64, 'base64'));
+    expect(preview.format).toBe('markdown');
+    if (preview.format !== 'markdown') throw new Error('expected markdown');
+    expect(preview.markdown).toContain('Goals');
+    expect(preview.markdown).toContain('Ship it');
+    expect(fileMimeType('deck.pptx', Buffer.from(generateArtifactFile({ kind: 'presentation', title: 'D', slides: [{ title: 'S', bullets: [] }] }).dataBase64, 'base64')))
+      .toBe('application/vnd.openxmlformats-officedocument.presentationml.presentation');
   });
 });

@@ -38,6 +38,7 @@ import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import type { IconBridge } from '@shared/icon-contract';
 import type { GitHubBridge } from '@shared/github-contract';
 import type { ArtifactImageData, GeneratedArtifactSpec, GeneratedFile } from '@shared/generated-artifacts';
+import type { FileBytes, FilePreview } from '@shared/file-preview';
 
 // The preload bridge exposes exactly one namespaced object, `window.conductor`.
 // It is the only surface the sandboxed renderer can reach: typed `invoke`
@@ -287,11 +288,15 @@ const conductor = {
       invoke('artifact.generate', { spec, ...(images !== undefined ? { images } : {}) }),
     /** Paint an HTML/SVG diagram in an offscreen window; resolves to PNG bytes. */
     rasterize: (html: string): Promise<ArtifactImageData> => invoke('artifact.rasterize', { html }),
+    /** Render a file's bytes for the in-app viewer: PDF pages, Word/Markdown text, archive listing. */
+    preview: (fileName: string, dataBase64: string): Promise<FilePreview> => invoke('artifact.preview', { fileName, dataBase64 }),
   },
   task: {
     list: (input?:{workspaceId?:string;limit?:number}):Promise<Task[]> => invoke('task.list',input),
     details: (id:string):Promise<TaskDetails> => invoke('task.details',{id}),
     readArtifact: (input:{taskId:string;artifactId:string}):Promise<ArtifactPreview> => invoke('task.readArtifact',input),
+    /** The bytes of a file a task produced, to view or download. */
+    artifactFile: (input:{taskId:string;artifactId:string}):Promise<FileBytes> => invoke('task.artifactFile',input),
     retry: (id:string):Promise<void> => invoke('task.retry',{id}),
     thread: (threadId:string):Promise<Task[]> => invoke('task.thread',{threadId}),
     /** Delete a thread and everything stored for its messages (not project files). */

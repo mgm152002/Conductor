@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SandboxManager, SANDBOX_IMAGE, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
+import { SandboxManager, SANDBOX_IMAGE, agentVolume, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
 import { SandboxAgentService } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
@@ -52,6 +52,34 @@ describe('SandboxManager', () => {
     const keyArg = run[run.indexOf('-e') + 1]!;
     expect(keyArg).toMatch(/^SANDBOX_API_KEY=[0-9a-f]{48}$/);
     expect(endpoint).toEqual({ baseUrl: 'http://127.0.0.1:50000', apiKey: keyArg.split('=')[1] });
+  });
+
+  it('mounts the agent’s own volume and the shared one, and keeps them when the sandbox stops', async () => {
+    const subject = manager();
+    await subject.acquire({ taskId: 'task-1', agentId: 'agent-1', agentName: 'A' });
+    await subject.acquire({ taskId: 'task-2', agentId: 'agent-2', agentName: 'B' });
+    const runs = dockerCalls.filter((args) => args[0] === 'run');
+    const mounts = (args: string[]): string[] => args.flatMap((arg, index) => (arg === '-v' ? [args[index + 1]!] : []));
+    expect(mounts(runs[0]!)).toEqual(['conductor-sandbox-agent-agent-1:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
+    expect(mounts(runs[1]!)).toEqual(['conductor-sandbox-agent-agent-2:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
+    expect(dockerCalls.some((args) => args[0] === 'exec' && args.at(-1)!.includes('chown gem:gem /home/gem/workspace /home/gem/shared'))).toBe(true);
+
+    await subject.stop('agent-1');
+    await subject.cleanupOrphans();
+    expect(dockerCalls.some((args) => args[0] === 'volume')).toBe(false);
+    expect(dockerCalls.filter((args) => args[0] === 'rm').every((args) => !args.includes('-v'))).toBe(true);
+
+    // Restarting the agent mounts the same volume again.
+    await subject.acquire({ taskId: 'task-3', agentId: 'agent-1', agentName: 'A' });
+    expect(mounts(dockerCalls.filter((args) => args[0] === 'run')[2]!)[0]).toBe('conductor-sandbox-agent-agent-1:/home/gem/workspace');
+  });
+
+  it('deletes only the agent’s own volume when the agent is deleted', async () => {
+    const subject = manager();
+    await subject.acquire({ taskId: 'task-1', agentId: 'agent-1', agentName: 'A' });
+    await subject.forget('agent-1');
+    expect(dockerCalls.filter((args) => args[0] === 'volume')).toEqual([['volume', 'rm', '-f', 'conductor-sandbox-agent-agent-1']]);
+    expect(agentVolume('a/b c:d')).toBe('conductor-sandbox-agent-abcd');
   });
 
   it('reuses the thread’s sandbox for follow-ups', async () => {
@@ -126,6 +154,7 @@ describe('SandboxAgentService', () => {
   const service = (available: string[] = ['claude-code', 'codex']) => new SandboxAgentService({
     store, manager: manager(), gateway: new SandboxGateway(),
     approver: async () => 'accept', autoApprove: () => false,
+    deliverFile: () => undefined,
     cliAvailable: (id) => available.includes(id),
     log: () => {},
     agentWorkspace: () => 'agent-space',
@@ -144,6 +173,46 @@ describe('SandboxAgentService', () => {
     expect(subject.update(agent.id, { ...input, name: 'Scout' }).name).toBe('Scout');
     subject.remove(agent.id);
     expect(subject.list()).toEqual([]);
+  });
+
+  it('keeps an agent icon, and drops anything that is not a small image', () => {
+    const subject = service();
+    const icon = 'data:image/png;base64,iVBORw0KGgo=';
+    const agent = subject.create({ ...input, icon });
+    expect(agent.icon).toBe(icon);
+    expect(subject.update(agent.id, { ...input, icon: 'javascript:alert(1)' }).icon).toBe('');
+    expect(subject.update(agent.id, { ...input, icon }).icon).toBe(icon);
+    expect(subject.update(agent.id, input).icon).toBe('');
+    expect(subject.create(input).icon).toBe('');
+  });
+
+  it('tells an agent to read the shared notebook after a restart or a change of CLI', async () => {
+    const subject = service();
+    const agent = subject.create(input);
+    store.db.pragma('foreign_keys = OFF');
+    const now = new Date().toISOString();
+    const addTurn = (id: string, adapter: string): { id: string; threadId: string; stepId: string } => {
+      store.db.prepare("INSERT INTO tasks (id, workspace_id, objective, state, thread_id, created_at, updated_at) VALUES (?, 'w', 'x', 'COMPLETED', 't1', ?, ?)").run(id, now, now);
+      store.db.prepare("INSERT INTO task_steps (id, task_id, ordinal, description, status, assigned_adapter_id) VALUES (?, ?, 0, 'x', 'succeeded', ?)").run(`${id}-step`, id, adapter);
+      return { id, threadId: 't1', stepId: `${id}-step` };
+    };
+    subject.bindThread('t1', agent.id);
+    const first = addTurn('a', 'claude-code');
+    const guidance = async (turn: { id: string; threadId: string; stepId: string }): Promise<string> => {
+      const run = await subject.prepareStep({ id: turn.id, threadId: turn.threadId } as never, turn.stepId, 'read_only');
+      subject.release({ id: turn.id, threadId: turn.threadId });
+      return run!.guidance;
+    };
+    // No sandbox is running, so it is a (re)start.
+    expect(await guidance(first)).toMatch(/was just \(re\)started, so FIRST read \/home\/gem\/shared\/memory\.md/);
+    // Same CLI again, but still a fresh sandbox: also a restart.
+    const second = addTurn('b', 'claude-code');
+    expect(await guidance(second)).toContain('FIRST read');
+    // Another CLI takes over.
+    const third = addTurn('c', 'codex');
+    expect(await guidance(third)).toContain('A different CLI or model has just taken over');
+    // Every run is told to keep the notebook.
+    expect(await guidance(third)).toContain('Keep a shared notebook at /home/gem/shared/memory.md');
   });
 
   it('starts on the first available CLI and falls back in the agent’s own order', () => {
@@ -184,6 +253,51 @@ describe('SandboxAgentService', () => {
     expect(Object.keys(subject.groupThreadMap())).toHaveLength(2);
     await expect(subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'x', agentIds: ['00000000-0000-4000-8000-000000000099'] })).rejects.toThrow(/Mention/);
     expect(subject.groupMessages(group.id)).toHaveLength(1);
+  });
+
+  it('steers or queues a group message for a member who is still working', async () => {
+    const subject = service();
+    const a = subject.create({ ...input, name: 'Researcher' });
+    const b = subject.create({ ...input, name: 'Tester' });
+    const group = subject.createGroup('', [a.id, b.id]);
+    store.db.pragma('foreign_keys = OFF');
+    const now = new Date().toISOString();
+    const addTask = (id: string, state: string): void => {
+      store.db.prepare(`INSERT INTO tasks (id, workspace_id, objective, acceptance_criteria, state, thread_id, created_at, updated_at) VALUES (?, 'w', 'o', '[]', ?, ?, ?, ?)`).run(id, state, id, now, now);
+    };
+    // Each member already has a thread: the Researcher is mid-run, the Tester is done.
+    addTask('task-a', 'RUNNING');
+    addTask('task-b', 'COMPLETED');
+    store.db.prepare('UPDATE agent_group_members SET thread_id = ? WHERE group_id = ? AND agent_id = ?').run('task-a', group.id, a.id);
+    store.db.prepare('UPDATE agent_group_members SET thread_id = ? WHERE group_id = ? AND agent_id = ?').run('task-b', group.id, b.id);
+    const created: Array<{ parentTaskId?: string }> = [];
+    subject.setTaskCreator(async (request) => {
+      created.push(request);
+      const task = { id: 'task-b2', threadId: 'task-b' } as never as import('@shared/domain').Task;
+      request.onCreated?.(task);
+      return task;
+    });
+    const held: Array<{ taskId: string; objective: string; mode: string }> = [];
+    subject.setMessageQueue(async (request) => {
+      held.push(request);
+      store.db.prepare(`INSERT INTO task_message_queue (id, anchor_task_id, thread_id, workspace_id, objective, mode, status, created_at, updated_at) VALUES ('q1', ?, ?, 'w', ?, ?, 'pending', ?, ?)`)
+        .run(request.taskId, request.taskId, request.objective, request.mode, now, now);
+      return { id: 'q1', anchorTaskId: request.taskId, threadId: request.taskId, objective: request.objective, mode: request.mode, status: 'pending', createdAt: now };
+    });
+
+    const sent = await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'Change of plan', mode: 'steer' });
+    // The idle member starts at once; the busy one is steered, not started alongside its own run.
+    expect(created.map((request) => request.parentTaskId)).toEqual(['task-b']);
+    expect(held).toEqual([expect.objectContaining({ taskId: 'task-a', mode: 'steer' })]);
+    expect(held[0]!.objective).toContain('Change of plan');
+    expect(sent.replies).toEqual({ [b.id]: 'task-b2' });
+    expect(sent.waiting).toEqual({ [a.id]: { queueId: 'q1', mode: 'steer' } });
+
+    // Once the held message is dispatched, it is that member's reply.
+    store.db.prepare("UPDATE task_message_queue SET status = 'dispatched', dispatched_task_id = 'task-a2' WHERE id = 'q1'").run();
+    const after = subject.groupMessages(group.id)[0]!;
+    expect(after.replies).toEqual({ [b.id]: 'task-b2', [a.id]: 'task-a2' });
+    expect(after.waiting).toBeUndefined();
   });
 
   it('keeps a model per CLI and drops choices for CLIs the agent does not use', () => {
