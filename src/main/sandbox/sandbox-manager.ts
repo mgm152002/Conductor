@@ -10,7 +10,8 @@ import type { SandboxRun, SandboxStatus } from '@shared/sandbox-agents';
 //
 // Each container runs the pinned image with a random API key, publishes its
 // port on 127.0.0.1 only, and is labelled so leftovers from a crash are
-// removed on the next launch. There is no fixed limit on how many run: before
+// removed on the next launch. Files live on in two named volumes (below),
+// which that cleanup never touches. There is no fixed limit on how many run: before
 // starting one, Docker's free memory is checked, and if another sandbox
 // won't fit the start is refused with a warning saying how to make room. A
 // sandbox stops after it sits idle. Nothing here talks to the sandbox's
@@ -25,6 +26,23 @@ const READY_TIMEOUT_MS = 120_000;
 /** Free Docker memory a new sandbox needs to start (its desktop and browser at rest). */
 const START_HEADROOM_BYTES = 1.25 * 1024 ** 3;
 const IDLE_STOP_MS = 15 * 60_000;
+
+// Storage that outlives the container. Containers are thrown away when a
+// sandbox idles out or the app quits, so anything an agent wants to keep goes
+// in one of two Docker named volumes: its own, and one every agent shares.
+/** Where an agent's own volume is mounted: kept across restarts, private to it. */
+export const SANDBOX_WORKSPACE_DIR = '/home/gem/workspace';
+/** Where the volume shared by every agent is mounted. */
+export const SANDBOX_SHARED_DIR = '/home/gem/shared';
+/** The notebook every agent keeps in the shared folder, so work carries over a restart or a change of model. */
+export const SANDBOX_MEMORY_FILE = `${SANDBOX_SHARED_DIR}/memory.md`;
+export const SHARED_VOLUME = 'conductor-sandbox-shared';
+
+/** The Docker volume holding one agent's files. */
+export function agentVolume(agentId: string): string {
+  const safe = agentId.replace(/[^a-zA-Z0-9_.-]/g, '');
+  return `conductor-sandbox-agent-${safe === '' ? 'default' : safe}`;
+}
 
 /** How the sandbox's API is reached from this process. */
 export interface SandboxEndpoint {
@@ -276,8 +294,17 @@ export class SandboxManager {
         '--memory', String(SANDBOX_MEMORY_BYTES), '--shm-size', '1g',
         '-e', `SANDBOX_API_KEY=${apiKey}`, '-e', 'TZ=UTC',
         '-p', `127.0.0.1::${CONTAINER_PORT}`,
+        // Docker creates a named volume the first time it is mounted.
+        '-v', `${agentVolume(input.agentId)}:${SANDBOX_WORKSPACE_DIR}`,
+        '-v', `${SHARED_VOLUME}:${SANDBOX_SHARED_DIR}`,
         SANDBOX_IMAGE,
       ], { timeoutMs: 120_000 });
+      // A fresh volume is owned by root; hand both mounts to the sandbox user.
+      // Best-effort: if the image has no such user, leave them world-writable.
+      await this.docker([
+        'exec', '-u', '0', container, 'sh', '-c',
+        `chown gem:gem ${SANDBOX_WORKSPACE_DIR} ${SANDBOX_SHARED_DIR} 2>/dev/null || chmod 0777 ${SANDBOX_WORKSPACE_DIR} ${SANDBOX_SHARED_DIR}`,
+      ], { timeoutMs: 30_000 }).catch(() => {});
       const mapping = (await this.docker(['port', container, `${CONTAINER_PORT}/tcp`], { timeoutMs: 15_000 })).split('\n')[0]?.trim() ?? '';
       const port = /:(\d+)$/.exec(mapping)?.[1];
       if (port === undefined) throw new Error('Docker did not publish the sandbox port');
@@ -323,6 +350,12 @@ export class SandboxManager {
     try { await this.docker(['rm', '-f', run.container], { timeoutMs: 60_000 }); } catch { /* already gone */ }
     this.running.delete(agentId);
     this.onChange();
+  }
+
+  /** The agent was deleted: stop its sandbox and delete its own volume. The shared volume stays. */
+  async forget(agentId: string): Promise<void> {
+    await this.stop(agentId);
+    try { await this.docker(['volume', 'rm', '-f', agentVolume(agentId)], { timeoutMs: 30_000 }); } catch { /* Docker absent, or never created */ }
   }
 
   async stopAll(): Promise<void> {

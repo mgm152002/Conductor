@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { SandboxApprovalPolicy, SandboxToolGroup } from '@shared/sandbox-agents';
 import type { GateRequest } from '../adapters/tool-gate';
 import type { ToolApprovalDecision } from '../adapters/tool-gate';
-import type { SandboxEndpoint } from './sandbox-manager';
+import { SANDBOX_SHARED_DIR, type SandboxEndpoint } from './sandbox-manager';
+import { SharedLocks, refusal, type LockOwner } from './shared-locks';
 
 // The MCP server an agent CLI connects to for its sandbox tools.
 //
@@ -33,6 +35,45 @@ export interface GatewayTool { name: string; description?: string; inputSchema: 
 // read/write/…), sandbox_str_replace_editor (`command` picks view/edit),
 // sandbox_convert_to_markdown, and context tools (sandbox_get_context,
 // sandbox_get_packages). Other spellings from older releases are accepted too.
+
+/** The gateway's own tool: hand a sandbox file back to the user's chat. */
+export const RETURN_FILE_TOOL = 'return_file';
+const RETURN_FILE: GatewayTool = {
+  name: RETURN_FILE_TOOL,
+  description: 'Give the user a file you created in the sandbox (PDF, Word, zip, spreadsheet, image, any type). The file appears in the chat, where the user can open and download it. Call this once per finished file, after saving it in the sandbox.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Absolute path of the file in the sandbox, e.g. /home/gem/output/report.pdf' },
+      name: { type: 'string', description: 'Optional file name to show the user, with its extension. Defaults to the file\'s own name.' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+};
+
+/** The gateway's own tools: lock and unlock part of the folder all agents share. */
+export const LOCK_TOOL = 'lock_shared';
+export const UNLOCK_TOOL = 'unlock_shared';
+const LOCK_INPUT: Json = {
+  type: 'object',
+  properties: { path: { type: 'string', description: `Absolute path of a file or subfolder inside ${SANDBOX_SHARED_DIR}. It does not have to exist yet.` } },
+  required: ['path'],
+  additionalProperties: false,
+};
+const LOCK_TOOLS: GatewayTool[] = [
+  {
+    name: LOCK_TOOL,
+    description: `Lock a file or subfolder in ${SANDBOX_SHARED_DIR} so no other agent can change it while you work on it. A folder lock covers everything inside it. `
+      + 'Always lock before creating, changing, moving or deleting anything there with the terminal or code. If another agent holds it, you are told who; wait and try again. Locks are released when you unlock or when this task ends.',
+    inputSchema: LOCK_INPUT,
+  },
+  {
+    name: UNLOCK_TOOL,
+    description: `Release a lock you took with ${LOCK_TOOL}, as soon as the file or folder is complete, so other agents can use it.`,
+    inputSchema: LOCK_INPUT,
+  },
+];
 
 /** Harmless context tools every agent gets, whatever families it has. */
 const CONTEXT_TOOLS = new Set(['sandbox_get_context', 'sandbox_get_packages']);
@@ -83,6 +124,16 @@ export interface GatewaySessionConfig {
   decide: (request: GateRequest, signal: AbortSignal) => Promise<ToolApprovalDecision>;
   /** Shown in approval cards, e.g. "Researcher". */
   agentName: string;
+  /**
+   * Copies a sandbox file into the user's chat; resolves to the line the
+   * agent is told. When set, the run gets the `return_file` tool.
+   */
+  returnFile?: (input: { path: string; name?: string }, endpoint: SandboxEndpoint) => Promise<string>;
+  /**
+   * This run, for locks on the shared folder. When set, the run gets the
+   * lock tools, and its calls are checked against other runs' locks.
+   */
+  lockOwner?: LockOwner;
   /** Called after each forwarded call, for the thread's activity. */
   onCall?: (call: { tool: string; ok: boolean }) => void;
 }
@@ -155,10 +206,15 @@ function describeCall(name: string, args: Json): { summary: string; detail?: str
   return { kind: 'permissions', summary: `Sandbox tool: ${name}`, detail: JSON.stringify(args).slice(0, 500) };
 }
 
+/** How long tools/list waits for the sandbox when it has no saved list to answer from. */
+const LIST_WAIT_MS = 8_000;
+
 export class SandboxGateway {
   private server: Server | undefined;
   private listening: Promise<number> | undefined;
   private readonly sessions = new Map<string, Session>();
+  /** One table for every agent: who is changing what in the shared folder. */
+  readonly locks = new SharedLocks(SANDBOX_SHARED_DIR);
 
   async open(config: GatewaySessionConfig): Promise<GatewaySession> {
     const port = await this.listen();
@@ -170,13 +226,19 @@ export class SandboxGateway {
       toolNames: async () => (await this.tools(session)).map((tool) => tool.name),
       dispose: () => {
         this.sessions.delete(token);
+        // Other sessions of the same run (a step retried on another CLI) may still be open.
+        const owner = config.lockOwner;
+        if (owner !== undefined && ![...this.sessions.values()].some((other) => other.config.lockOwner?.id === owner.id)) this.locks.releaseAll(owner.id);
         void session.client?.then((client) => client.close()).catch(() => undefined);
       },
     };
   }
 
   close(): void {
-    for (const session of this.sessions.values()) void session.client?.then((client) => client.close()).catch(() => undefined);
+    for (const session of this.sessions.values()) {
+      if (session.config.lockOwner !== undefined) this.locks.releaseAll(session.config.lockOwner.id);
+      void session.client?.then((client) => client.close()).catch(() => undefined);
+    }
     this.sessions.clear();
     this.server?.close();
     this.server = undefined;
@@ -201,21 +263,44 @@ export class SandboxGateway {
     return session.client;
   }
 
+  /** Every tool the sandbox offers, as last seen — so a CLI can be told them before the sandbox is up. */
+  private upstream: GatewayTool[] | undefined;
+
+  constructor(private readonly cacheFile?: string) {
+    if (cacheFile === undefined) return;
+    try {
+      const saved = JSON.parse(readFileSync(cacheFile, 'utf8')) as unknown;
+      if (Array.isArray(saved)) this.upstream = saved.filter((tool): tool is GatewayTool => typeof (tool as GatewayTool | undefined)?.name === 'string');
+    } catch { /* no saved list yet */ }
+  }
+
+  private remember(tools: GatewayTool[]): void {
+    this.upstream = tools;
+    if (this.cacheFile === undefined) return;
+    try { writeFileSync(this.cacheFile, JSON.stringify(tools)); } catch { /* the list is only a speed-up */ }
+  }
+
+  /** The tools this session's agent may use, out of what the sandbox offers. */
+  private visible(session: Session, upstream: readonly GatewayTool[]): GatewayTool[] {
+    const allowed = new Set(session.config.tools);
+    const out = upstream.filter((tool) => allowedTool(tool.name, allowed));
+    if (session.config.returnFile !== undefined) out.push(RETURN_FILE);
+    if (session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
+    return out;
+  }
+
   private tools(session: Session): Promise<GatewayTool[]> {
     session.tools ??= (async () => {
       const client = await this.client(session);
-      const allowed = new Set(session.config.tools);
-      const out: GatewayTool[] = [];
+      const all: GatewayTool[] = [];
       let cursor: string | undefined;
       do {
         const page = await client.listTools(cursor !== undefined ? { cursor } : undefined);
-        for (const tool of page.tools) {
-          if (!allowedTool(tool.name, allowed)) continue;
-          out.push({ name: tool.name, ...(tool.description !== undefined ? { description: tool.description } : {}), inputSchema: tool.inputSchema as Json });
-        }
+        for (const tool of page.tools) all.push({ name: tool.name, ...(tool.description !== undefined ? { description: tool.description } : {}), inputSchema: tool.inputSchema as Json });
         cursor = page.nextCursor;
-      } while (cursor !== undefined && out.length < 500);
-      return out;
+      } while (cursor !== undefined && all.length < 500);
+      this.remember(all);
+      return this.visible(session, all);
     })().catch((error: unknown) => {
       delete session.tools;
       throw error;
@@ -223,11 +308,67 @@ export class SandboxGateway {
     return session.tools;
   }
 
+  /**
+   * The answer to a CLI's tools/list. CLIs such as Kiro give up on an MCP
+   * server that does not answer within seconds, and the sandbox can take far
+   * longer than that to start — so answer from the last list the sandbox gave
+   * (it starts in the background meanwhile). With no list yet, wait briefly,
+   * then offer only Conductor's own tools rather than nothing.
+   */
+  private async listTools(session: Session): Promise<GatewayTool[]> {
+    const real = this.tools(session);
+    if (this.upstream !== undefined) {
+      real.catch(() => undefined);
+      return this.visible(session, this.upstream);
+    }
+    const waited = await Promise.race([real, new Promise<undefined>((resolve) => setTimeout(resolve, LIST_WAIT_MS, undefined))]);
+    if (waited !== undefined) return waited;
+    real.catch(() => undefined);
+    return this.visible(session, []);
+  }
+
   /** Approve (or not) and forward one tool call. */
   async call(session: Session, name: string, args: Json, signal: AbortSignal): Promise<Json> {
     const tools = await this.tools(session);
     if (!tools.some((tool) => tool.name === name)) {
       return { content: [{ type: 'text', text: `The tool ${name} is not available to this agent.` }], isError: true };
+    }
+    // Handing a file to the user's own chat changes nothing in the sandbox
+    // and needs no approval; it never reaches the sandbox's MCP endpoint.
+    if (name === RETURN_FILE_TOOL && session.config.returnFile !== undefined) {
+      const path = typeof args['path'] === 'string' ? args['path'].trim() : '';
+      if (path === '') return { content: [{ type: 'text', text: 'Give the path of the file in the sandbox.' }], isError: true };
+      try {
+        const displayName = typeof args['name'] === 'string' && args['name'].trim() !== '' ? args['name'].trim() : undefined;
+        const text = await session.config.returnFile({ path, ...(displayName !== undefined ? { name: displayName } : {}) }, await session.config.sandbox());
+        return { content: [{ type: 'text', text }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `The file could not be handed back: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
+      }
+    }
+    const owner = session.config.lockOwner;
+    if (owner !== undefined && (name === LOCK_TOOL || name === UNLOCK_TOOL)) {
+      const path = typeof args['path'] === 'string' ? args['path'] : '';
+      if (name === UNLOCK_TOOL) {
+        const released = this.locks.release(path, owner.id);
+        return { content: [{ type: 'text', text: released ? `Unlocked ${path}.` : `You hold no lock on ${path}.` }], ...(released ? {} : { isError: true }) };
+      }
+      const result = this.locks.acquire(path, owner);
+      return result.ok
+        ? { content: [{ type: 'text', text: `Locked ${result.path}. Only you can change it until you call ${UNLOCK_TOOL} or this task ends. Unlock it as soon as it is complete.` }] }
+        : { content: [{ type: 'text', text: result.reason }], isError: true };
+    }
+    // Anything that can change the shared folder is turned away while another
+    // run holds a lock on what it names. Reading is never blocked. A file
+    // tool takes the lock itself; a command or code has to lock first, since
+    // what it will touch can't be known from its text.
+    if (owner !== undefined && !isLookOnly(name, args)) {
+      const paths = this.locks.mentioned(args);
+      for (const path of paths) {
+        const holder = this.locks.blocker(path, owner.id);
+        if (holder !== undefined) return { content: [{ type: 'text', text: refusal(holder) }], isError: true };
+      }
+      if (toolGroup(name) === 'files') for (const path of paths) this.locks.acquire(path, owner);
     }
     const { approval } = session.config;
     const needsApproval = approval === 'all' || (approval === 'risky' && !isLookOnly(name, args));
@@ -318,7 +459,7 @@ export class SandboxGateway {
         reply({});
         return;
       case 'tools/list':
-        try { reply({ tools: await this.tools(session) }); }
+        try { reply({ tools: await this.listTools(session) }); }
         catch (error) { fail(`The sandbox is not reachable: ${error instanceof Error ? error.message : 'unknown error'}`); }
         return;
       case 'tools/call': {

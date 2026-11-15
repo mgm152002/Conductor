@@ -1567,6 +1567,31 @@ const migration039: Migration = {
   },
 };
 
+// Migration 40 — a group message waiting on a busy member: the member's
+// reply is a queued (or steering) message until it is dispatched as a task.
+const migration040: Migration = {
+  version: 40,
+  name: 'agent_group_pending_replies',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_group_pending (
+        message_id TEXT NOT NULL REFERENCES agent_group_messages(id) ON DELETE CASCADE,
+        agent_id   TEXT NOT NULL,
+        queue_id   TEXT NOT NULL,
+        PRIMARY KEY (message_id, agent_id)
+      );
+    `);
+  },
+};
+
+const migration041: Migration = {
+  version: 41,
+  name: 'sandbox_agent_icon',
+  up({ db }: Tx): void {
+    db.exec("ALTER TABLE sandbox_agents ADD COLUMN icon TEXT NOT NULL DEFAULT ''");
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1608,4 +1633,6 @@ export const MIGRATIONS: readonly Migration[] = [
   migration037,
   migration038,
   migration039,
+  migration040,
+  migration041,
 ];
