@@ -55,7 +55,7 @@ export const INTEGRATION_SCHEMAS = {
   'mcp.setSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/), value: z.string().min(1).max(65536) }),
   'mcp.clearSecret': z.object({ id, name: z.string().trim().regex(/^[A-Za-z0-9_]{1,64}$/) }),
 
-  // Sandbox agents and their AIO Sandbox containers.
+  // Sandbox agents and their sandbox containers.
   'agents.sandbox.list': z.void(),
   'agents.sandbox.create': sandboxAgentInput,
   'agents.sandbox.update': sandboxAgentInput.extend({ id: uuid }),
@@ -73,6 +73,9 @@ export const INTEGRATION_SCHEMAS = {
     attachmentIds: AttachmentIdsSchema.optional(),
     /** For members still working: steer stops them to answer now, queue waits (the default). */
     mode: z.enum(['steer', 'queue']).optional(),
+    /** Run this message on this CLI for the members that have it (others keep their own first CLI). */
+    agentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
+    runOptions: z.object({ main: z.object({ model: z.string().regex(/^[\w./:@-]{1,100}$/).optional(), effort: z.string().regex(/^[a-z]{2,12}$/).optional() }).optional() }).optional(),
   }),
   'threadTiers.get': z.void(),
   'threadTiers.put': z.object({

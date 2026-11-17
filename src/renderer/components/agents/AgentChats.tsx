@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '@shared/domain';
 import type { RunChoice } from '@shared/agent-models';
-import type { AgentGroup, AgentGroupMessage, SandboxAgent } from '@shared/sandbox-agents';
+import type { AgentGroup, AgentGroupMessage, AgentGroupPlan, SandboxAgent } from '@shared/sandbox-agents';
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import { useTaskStore, useWorkspaceStore } from '../../stores';
 import { useSandboxAgentStore } from '../../stores/sandbox-agent-store';
@@ -14,7 +14,7 @@ import { AgentAvatar } from '../ui/AgentAvatar';
 import { MenuSelect } from '../ui/MenuSelect';
 import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 import { Alert, Button } from '../ui/primitives';
-import { ArrowUpIcon, ClockIcon, FolderIcon, GlobeIcon, PencilIcon, SquarePenIcon, TrashIcon, XIcon } from '../ui/icons';
+import { ArrowUpIcon, CheckIcon, ClockIcon, FolderIcon, GlobeIcon, PencilIcon, Spinner, SquarePenIcon, StopIcon, TrashIcon, XIcon } from '../ui/icons';
 import { AgentReply } from './AgentReply';
 import { AgentMark } from '../chat/AgentMark';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
@@ -41,7 +41,7 @@ function UserBubble({ text, at, task }: { text: string; at: string; task?: Task 
 }
 
 /** Message box shared by both panes, with attachments (picked, pasted or dropped). */
-function ChatComposer({ placeholder, disabled, working = false, workingName, onSend, children }: {
+function ChatComposer({ placeholder, disabled, working = false, workingName, onSend, onStop, children }: {
   placeholder: string;
   disabled?: string | undefined;
   /** The agent is still working: the message is steered or queued, as the user picks. */
@@ -49,12 +49,15 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
   /** Who is working, for the button titles. */
   workingName?: string | undefined;
   onSend: (text: string, attachmentIds: string[], mode: QueuedMessageMode) => Promise<void>;
+  /** Stops the work in progress. While working, the send button becomes a stop button until something is typed. */
+  onStop?: (() => Promise<void>) | undefined;
   children?: React.ReactNode;
 }): React.JSX.Element {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<QueuedMessageMode>('queue');
   const who = workingName ?? 'the agent';
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const draft = useAttachmentDraft();
@@ -71,6 +74,14 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
     try { await onSend(trimmed, draft.attachmentIds, mode); setText(''); draft.reset(); }
     catch (err) { setError(message(err)); }
     finally { setBusy(false); area.current?.focus(); }
+  };
+  const showStop = working && onStop !== undefined && text.trim() === '' && draft.attachments.length === 0;
+  const stop = async (): Promise<void> => {
+    if (onStop === undefined || stopping) return;
+    setStopping(true); setError(null);
+    try { await onStop(); }
+    catch (err) { setError(message(err)); }
+    finally { setStopping(false); }
   };
   return (
     <div className="mx-auto w-full max-w-3xl shrink-0 px-5 pt-3 pb-4">
@@ -126,10 +137,17 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
             </button>
           </div>
         ) : null}
+        {showStop ? (
+          <button type="button" onClick={() => { void stop(); }} disabled={stopping} aria-label={`Stop ${who}`} title={`Stop ${who}`}
+            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+            {stopping ? <Spinner size={14} /> : <StopIcon size={14} />}
+          </button>
+        ) : (
         <button type="submit" aria-label={working ? (mode === 'steer' ? 'Steer agent' : 'Queue message') : 'Send'} disabled={text.trim() === '' || busy || disabled !== undefined || draft.busy || draft.errors.length > 0}
           className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground hover:brightness-110 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
           <ArrowUpIcon size={15} />
         </button>
+        )}
         </div>
       </form>
     </div>
@@ -318,6 +336,12 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
     });
   }, []);
 
+  /** Stop what the agent is doing, and the messages waiting behind it, which the user would not expect to start afterwards. */
+  async function stopWork(): Promise<void> {
+    queued.forEach((item) => { cancelQueued(item.id); });
+    if (latest !== undefined) await window.conductor.task.cancel(latest.id);
+  }
+
   async function send(text: string, attachmentIds: string[], mode: QueuedMessageMode): Promise<void> {
     if (latest !== undefined && busy) {
       await window.conductor.task.enqueue({
@@ -357,17 +381,18 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
           <h2 className="truncate text-sm font-semibold text-foreground">{agent.name}</h2>
           <p className="truncate text-2xs text-muted-foreground">{agent.description || agent.clis.join(' → ')}</p>
         </div>
-        {chats.length > 1 ? (
+        {chats.length > 1 || (fresh && chats.length > 0) ? (
           <MenuSelect
             label="Earlier chats"
             value={current ?? ''}
-            onChange={(value) => { setThreadId(value); setFresh(false); }}
+            onChange={(value) => { if (value !== '') { setThreadId(value); setFresh(false); } }}
             className="max-w-48"
-            options={chats.map((id) => ({ value: id, label: titleOf(id) }))}
+            // A new chat has no title yet; without its own entry the picker would keep showing the newest earlier chat.
+            options={[...(current === null ? [{ value: '', label: 'New chat' }] : []), ...chats.map((id) => ({ value: id, label: titleOf(id) }))]}
           />
         ) : null}
         {sandboxRunning ? (
-          <Button size="sm" variant="ghost" title="Watch its sandbox" onClick={() => { void window.conductor.sandbox.openViewer(agent.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
+          <Button size="sm" variant="ghost" title="Watch its browser live" onClick={() => { void window.conductor.sandbox.openViewer(agent.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
         ) : null}
         <Button size="icon" variant="ghost" aria-label="New chat" title="New chat" onClick={() => { setFresh(true); }}><SquarePenIcon size={15} /></Button>
         <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} title="Edit" onClick={onEdit}><PencilIcon size={14} /></Button>
@@ -391,7 +416,7 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
           </div>
         )}
       </div>
-      <ChatComposer placeholder={busy ? `Steer ${agent.name}, or queue a follow-up` : `Message ${agent.name}`} working={busy} workingName={agent.name} onSend={send}>
+      <ChatComposer placeholder={busy ? `Steer ${agent.name}, or queue a follow-up` : `Message ${agent.name}`} working={busy} workingName={agent.name} onSend={send} onStop={stopWork}>
         {queued.length > 0 ? (
           <ul aria-label="Waiting messages" className="mb-2 flex flex-col gap-1.5">
             {queued.map((item) => (
@@ -434,6 +459,16 @@ export function GroupChat({ group, agents, onDelete }: {
   const { projectId, setProjectId } = useConversationProject(`group:${group.id}`);
   const [messages, setMessages] = useState<AgentGroupMessage[]>([]);
   const [targets, setTargets] = useState<string[]>([]);
+  // The CLI and model for the next message, remembered per group. '' is Auto:
+  // each member runs on its own first CLI. Otherwise members that have the
+  // chosen CLI run on it; the rest keep their own. A CLI that runs out of
+  // usage hands over to that member's next one, in its own order.
+  const stickyId = `group:${group.id}`;
+  const [cli, setCli] = useState(() => readSticky(stickyId).cli);
+  const [choice, setChoice] = useState<RunChoice>(() => readSticky(stickyId).choice);
+  const cliOptions = useAgents();
+  useEffect(() => { const saved = readSticky(stickyId); setCli(saved.cli); setChoice(saved.choice); }, [stickyId]);
+  useEffect(() => { writeSticky(stickyId, cli, choice); }, [stickyId, cli, choice]);
   const texts = useRef(new Map<string, string>());
   const load = useCallback(async () => {
     const list = await window.conductor.sandboxAgents.groupMessages(group.id);
@@ -443,7 +478,7 @@ export function GroupChat({ group, agents, onDelete }: {
     await Promise.all(missing.map((taskId) => window.conductor.task.get(taskId).then((task) => { useTaskStore.getState().upsert(task); }).catch(() => undefined)));
   }, [group.id]);
   useEffect(() => { setTargets([]); texts.current.clear(); void load(); }, [load]);
-  const waiting = messages.some((item) => item.waiting !== undefined);
+  const waiting = messages.some((item) => item.waiting !== undefined || item.plan?.mode === 'planning' || item.plan?.steps.some((step) => step.status === 'waiting' || step.status === 'running') === true);
   const working = waiting || messages.some((item) => Object.values(item.replies).some((taskId) => isBusy(tasks[taskId])));
   // A held message was sent, cancelled or started: show it straight away.
   useEffect(() => window.conductor.on('task.queue.updated', () => { void load(); }), [load]);
@@ -452,11 +487,24 @@ export function GroupChat({ group, agents, onDelete }: {
     && messages.some((item) => item.waiting?.[member.id] !== undefined || isBusy(tasks[item.replies[member.id] ?? ''])));
   useEffect(() => {
     if (!working) return;
-    const timer = window.setInterval(() => { void load(); }, 4_000);
+    const timer = window.setInterval(() => { void load(); }, 2_500);
     return () => { window.clearInterval(timer); };
   }, [working, load]);
   const scroll = useStickToBottom(group.id);
+  // CLIs any member runs on, in the order the members list them.
+  const groupClis = useMemo(() => [...new Set(members.flatMap((member) => member.clis))], [members]);
+  // A remembered CLI no member runs on any more falls back to Auto.
+  useEffect(() => { if (cli !== '' && !groupClis.includes(cli)) { setCli(''); setChoice({}); } }, [groupClis, cli]);
   const onText = useCallback((taskId: string, text: string) => { texts.current.set(taskId, text); }, []);
+
+  /** Stop every member still working on this group's messages, and the messages held for them. Parts waiting on a stopped one are skipped. */
+  async function stopGroup(): Promise<void> {
+    const held = messages.flatMap((item) => Object.values(item.waiting ?? {}).map((entry) => entry.queueId));
+    held.forEach((queueId) => { cancelQueued(queueId); });
+    const running = messages.flatMap((item) => Object.values(item.replies)).filter((taskId) => isBusy(tasks[taskId]));
+    await Promise.all(running.map((taskId) => window.conductor.task.cancel(taskId)));
+    await load();
+  }
 
   async function send(text: string, attachmentIds: string[], mode: QueuedMessageMode): Promise<void> {
     // What members said in the last few exchanges, so they can build on it.
@@ -467,6 +515,8 @@ export function GroupChat({ group, agents, onDelete }: {
     })).filter((line): line is string => line !== undefined).join('\n\n');
     await window.conductor.sandboxAgents.sendGroup({
       groupId: group.id, text, mode,
+      ...(cli !== '' ? { agentId: cli } : {}),
+      ...(cli !== '' && Object.keys(choice).length > 0 ? { runOptions: { main: choice } } : {}),
       ...(projectId !== null ? { workspaceId: projectId } : {}),
       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       ...(targets.length > 0 ? { agentIds: targets } : {}),
@@ -497,7 +547,8 @@ export function GroupChat({ group, agents, onDelete }: {
             {messages.map((item) => (
               <div key={item.id} className="flex flex-col gap-4">
                 <UserBubble text={item.text} at={item.createdAt} task={tasks[Object.values(item.replies)[0] ?? '']} />
-                {Object.entries(item.replies).map(([agentId, taskId]) => {
+                {item.plan !== undefined ? <GroupPlanCard plan={item.plan} agents={agents} /> : null}
+                {repliesInOrder(item, tasks).map(([agentId, taskId]) => {
                   const agent = members.find((member) => member.id === agentId) ?? agents.find((candidate) => candidate.id === agentId);
                   const task: Task | undefined = tasks[taskId];
                   return agent !== undefined && task !== undefined ? <AgentReply key={taskId} agent={agent} task={task} onText={onText} /> : null;
@@ -520,9 +571,24 @@ export function GroupChat({ group, agents, onDelete }: {
         )}
       </div>
       <ChatComposer placeholder={targets.length === 0 ? `Message everyone in ${group.name}` : `Message ${targets.map((id) => members.find((member) => member.id === id)?.name).join(', ')}`}
-        working={busyMembers.length > 0} workingName={busyMembers.length === 1 ? busyMembers[0]!.name : 'the members still working'} onSend={send}>
+        working={busyMembers.length > 0 || working} workingName={busyMembers.length === 1 ? busyMembers[0]!.name : 'the members still working'} onSend={send} onStop={stopGroup}>
         <div className="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Send to">
           <ProjectPicker value={projectId} onChange={setProjectId} locked={messages.length > 0} />
+          <MenuSelect
+            label="CLI"
+            value={cli}
+            onChange={(next) => { setCli(next); setChoice({}); }}
+            title="Run the next messages on this CLI. Members that don’t have it keep their own."
+            className="max-w-44"
+            options={[
+              { value: '', label: 'Auto CLI', hint: 'each member’s own order' },
+              ...groupClis.map((id) => {
+                const option = cliOptions.find((o) => o.id === id);
+                return { value: id, label: option?.name ?? id, ...(option !== undefined && !option.available ? { hint: 'not available' } : {}), mark: <AgentMark agentId={id} name={option?.name ?? id} size={14} /> };
+              }),
+            ]}
+          />
+          {cli !== '' ? <ModelEffortPicker agentId={cli} value={choice} onChange={setChoice} label="Next message" /> : null}
           <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
           <button type="button" aria-pressed={targets.length === 0} onClick={() => { setTargets([]); }}
             className={cn('h-6 cursor-pointer rounded-full px-2.5 text-2xs font-medium focus-visible:outline-2 focus-visible:outline-ring', targets.length === 0 ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
@@ -539,6 +605,63 @@ export function GroupChat({ group, agents, onDelete }: {
           })}
         </div>
       </ChatComposer>
+    </section>
+  );
+}
+
+/**
+ * A message's replies in the order the work happened: the plan's order when
+ * there is one (the parts that came first on top), otherwise by when each
+ * member's task started. Object order alone follows however the answers were
+ * recorded, which is not the order they ran in.
+ */
+function repliesInOrder(item: AgentGroupMessage, tasks: Record<string, Task>): Array<[string, string]> {
+  const position = (agentId: string): number => {
+    const index = item.plan?.steps.findIndex((step) => step.agentId === agentId) ?? -1;
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return Object.entries(item.replies).sort(([agentA, taskA], [agentB, taskB]) =>
+    position(agentA) - position(agentB) || (tasks[taskA]?.createdAt ?? '').localeCompare(tasks[taskB]?.createdAt ?? ''));
+}
+
+/**
+ * How a message to the group was split: independent parts at once, each in
+ * its own sandbox, or parts that build on each other in one shared sandbox,
+ * in order. Hidden for a lone member, where there is nothing to split.
+ */
+function GroupPlanCard({ plan, agents }: { plan: AgentGroupPlan; agents: SandboxAgent[] }): React.JSX.Element | null {
+  if (plan.mode === 'planning') {
+    return <p role="status" className="flex items-center gap-2 px-1 text-xs text-muted-foreground"><Spinner size={11} />Planning how to split this between the members…</p>;
+  }
+  if (plan.steps.length < 2) return null;
+  const name = (id: string): string => agents.find((agent) => agent.id === id)?.name ?? 'Agent';
+  const dag = plan.mode === 'dag';
+  return (
+    <section aria-label="Plan" className="rounded-xl border border-border bg-card/60 px-3 py-2.5">
+      <p className="flex flex-wrap items-center gap-x-2 text-2xs font-medium text-foreground">
+        <span className="rounded-full bg-accent px-2 py-px text-3xs">{dag ? 'In order · one shared sandbox' : 'In parallel · separate sandboxes'}</span>
+        {plan.summary !== '' ? <span className="font-normal text-muted-foreground">{plan.summary}</span> : null}
+      </p>
+      <ol className="mt-2 flex flex-col gap-1.5">
+        {plan.steps.map((step, index) => {
+          const member = agents.find((agent) => agent.id === step.agentId);
+          return (
+            <li key={`${step.agentId}-${index}`} className="flex items-start gap-2 text-xs">
+              {member !== undefined ? <AgentAvatar agent={member} size={18} className="mt-px" /> : null}
+              <span className="min-w-0 flex-1">
+                <span className="font-medium text-foreground">{name(step.agentId)}</span>
+                {step.dependsOn.length > 0 ? <span className="text-muted-foreground"> · after {step.dependsOn.map((position) => name(plan.steps[position]?.agentId ?? '')).join(', ')}</span> : null}
+                <span className="block text-muted-foreground [overflow-wrap:anywhere]">{step.instruction.length > 220 ? `${step.instruction.slice(0, 219)}…` : step.instruction}</span>
+                {step.note !== undefined ? <span className="block text-destructive-foreground">{step.note}</span> : null}
+              </span>
+              <span className="mt-px flex shrink-0 items-center gap-1 text-3xs text-muted-foreground" title={step.status}>
+                {step.status === 'running' ? <Spinner size={11} /> : step.status === 'done' ? <CheckIcon size={12} className="text-success" /> : step.status === 'failed' || step.status === 'skipped' ? <XIcon size={12} className="text-destructive" /> : <ClockIcon size={12} />}
+                {step.status === 'waiting' ? 'waiting' : step.status === 'running' ? 'working' : step.status}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
     </section>
   );
 }

@@ -94,7 +94,7 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('agents.workspace', S['agents.workspace'], () => deps.sandboxAgents.agentWorkspaceId());
   router.handle('agents.group.list', S['agents.group.list'], () => ({ groups: deps.sandboxAgents.listGroups(), groupThreads: deps.sandboxAgents.groupThreadMap() }));
   router.handle('agents.group.create', S['agents.group.create'], (_e, input) => deps.sandboxAgents.createGroup(input.name, input.agentIds));
-  router.handle('agents.group.remove', S['agents.group.remove'], (_e, input) => { deps.sandboxAgents.removeGroup(input.id); });
+  router.handle('agents.group.remove', S['agents.group.remove'], async (_e, input) => { await deps.sandboxAgents.removeGroup(input.id); });
   router.handle('agents.group.messages', S['agents.group.messages'], (_e, input) => deps.sandboxAgents.groupMessages(input.groupId));
   router.handle('agents.group.send', S['agents.group.send'], (_e, input) => deps.sandboxAgents.sendGroup({
     groupId: input.groupId, text: input.text,
@@ -103,6 +103,11 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     ...(input.context !== undefined ? { context: input.context } : {}),
     ...(input.attachmentIds !== undefined ? { attachmentIds: input.attachmentIds } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
+    ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+    ...(input.runOptions?.main !== undefined ? { runOptions: { main: {
+      ...(input.runOptions.main.model !== undefined ? { model: input.runOptions.main.model } : {}),
+      ...(input.runOptions.main.effort !== undefined ? { effort: input.runOptions.main.effort } : {}),
+    } } } : {}),
   }));
   router.handle('threadTiers.get', S['threadTiers.get'], () => deps.tiers.get());
   router.handle('threadTiers.put', S['threadTiers.put'], (_e, i) => deps.tiers.put(i.key, i.pref === null ? undefined : { mode: i.pref.mode, seenUpdatedAt: i.pref.seenUpdatedAt, ...(i.pref.snoozedUntil !== undefined ? { snoozedUntil: i.pref.snoozedUntil } : {}) }));

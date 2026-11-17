@@ -63,7 +63,7 @@ import { McpRegistry } from './mcp/mcp-registry';
 import { SdkMcpTransport } from './mcp/sdk-transport';
 import { McpService } from './mcp/mcp-service';
 import { CliMcpManager } from './mcp/cli-mcp';
-import { SandboxManager } from './sandbox/sandbox-manager';
+import { SANDBOX_IMAGE, SandboxManager } from './sandbox/sandbox-manager';
 import { fileMimeType } from './artifacts/file-preview';
 import { SandboxGateway } from './sandbox/sandbox-gateway';
 import { SandboxAgentService } from './sandbox/sandbox-agents';
@@ -88,6 +88,7 @@ import { QuotaPollingService } from './usage/quota-polling';
 import { ModelPricingService } from './usage/pricing';
 import { deleteProject } from './domain/project-deletion';
 import { deleteThread } from './domain/thread-deletion';
+import { buildTimeline } from '../renderer/lib/timeline';
 import { ChatService } from './domain/chat-service';
 import { AgentTitleGenerator, ThreadTitleService, TITLE_TIMEOUT_MS } from './domain/thread-title-service';
 import { AgentPrDescriptionGenerator } from './domain/pr-description';
@@ -263,11 +264,11 @@ export async function bootstrap(): Promise<AppServices> {
   // there and keeps the CLIs in step (sync preferences beside the DB).
   const cliMcp = new CliMcpManager({ statePath: join(app.getPath('userData'), 'mcp-cli-sync.json') });
   // Sandbox agents: named agents that run on the user's CLIs (in their own
-  // fallback order) with an AIO Sandbox container per thread for browsing,
-  // commands and files, behind Conductor's approval gate. The renderer polls
+  // fallback order) with an AIO Sandbox container per agent for
+  // browsing, commands and files, behind Conductor's approval gate. The renderer polls
   // sandbox status while it shows it.
   const sandboxes = new SandboxManager();
-  const sandboxGateway = new SandboxGateway(join(app.getPath('userData'), 'sandbox-tools.json'));
+  const sandboxGateway = new SandboxGateway(join(app.getPath('userData'), 'sandbox-tools.json'), SANDBOX_IMAGE);
   // Managed_Local_Storage for artifacts persisted during step execution lives
   // beside the DB under userData.
   const storage = new DiskManagedStorage(join(app.getPath('userData'), 'blobs'));
@@ -328,7 +329,7 @@ export async function bootstrap(): Promise<AppServices> {
   // first message, replacing the first-characters placeholder. Active threads
   // are named by the model they are running on; backfill of old threads may
   // use any model. Shared by Work threads, casual chats, and PR creation.
-  const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs, TITLE_TIMEOUT_MS, {
+  const titleOptions: ConstructorParameters<typeof AgentTitleGenerator>[4] = {
     // Pin the same Settings default model the user's chats run on; a bare
     // session would otherwise start on the CLI's own (possibly broken) default.
     settingsRunChoice: (agentId) => {
@@ -346,7 +347,10 @@ export async function bootstrap(): Promise<AppServices> {
     // Same-agent fallback model before the next CLI, mirroring run fallback.
     fallbackModel: (agentId) => runResolver.fallbackModel(agentId),
     onError: (message) => { console.warn(message); },
-  });
+  };
+  const titleGenerator = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'title-sandbox'), modelCatalogs, TITLE_TIMEOUT_MS, titleOptions);
+  // Plans how the members of a group split a message: a longer read-only question than a title.
+  const groupPlanner = new AgentTitleGenerator(registry, join(app.getPath('userData'), 'group-plan-sandbox'), modelCatalogs, 60_000, titleOptions);
   const threadTitles = new ThreadTitleService({
     store,
     getTask: (taskId) => stateMachine.getTask(taskId),
@@ -618,6 +622,22 @@ export async function bootstrap(): Promise<AppServices> {
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
   sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));
+  sandboxAgents.setGroupPlanner((prompt) => groupPlanner.ask('Planning a group message', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));
+  sandboxAgents.setReplyReader((taskId) => {
+    const task = stateMachine.getTask(taskId);
+    if (task === undefined) return '';
+    return buildTimeline(task, taskQueries.details(taskId)).filter((item) => item.kind === 'assistant').map((item) => item.text).join('\n\n');
+  });
+  // A group's parts that wait on another member start when that member's task ends.
+  // The final state arrives as a task update (not when the step settles), so listen for it.
+  taskEvents.subscribe((channel, payload) => {
+    if (channel !== 'task.updated') return;
+    const task = payload as Task | undefined;
+    if (task !== undefined && typeof task.id === 'string') void sandboxAgents.taskSettled(task).catch(() => undefined);
+  });
+  sandboxAgents.setThreadDeleter((threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId));
+  // Group threads left behind by a group deleted earlier no longer show up as members' own chats.
+  void sandboxAgents.purgeOrphanGroupThreads().then(() => sandboxAgents.reconcileGroupSteps()).catch(() => undefined);
   // Threads created before auto-titles (or whose generation failed) get named
   // too: backfill the most recent untitled roots, queued one at a time.
   threadTitles.scheduleRecent(10);

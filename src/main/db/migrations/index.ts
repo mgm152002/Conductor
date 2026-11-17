@@ -1592,6 +1592,32 @@ const migration041: Migration = {
   },
 };
 
+const migration042: Migration = {
+  version: 42,
+  name: 'agent_group_plans',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_group_plans (
+        message_id TEXT PRIMARY KEY NOT NULL REFERENCES agent_group_messages(id) ON DELETE CASCADE,
+        mode       TEXT NOT NULL CHECK (mode IN ('planning', 'parallel', 'dag')),
+        summary    TEXT NOT NULL DEFAULT '',
+        options    TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE agent_group_steps (
+        message_id  TEXT NOT NULL REFERENCES agent_group_messages(id) ON DELETE CASCADE,
+        ordinal     INTEGER NOT NULL,
+        agent_id    TEXT NOT NULL,
+        instruction TEXT NOT NULL,
+        depends_on  TEXT NOT NULL DEFAULT '[]',
+        status      TEXT NOT NULL CHECK (status IN ('waiting', 'running', 'done', 'failed', 'skipped')),
+        task_id     TEXT,
+        note        TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (message_id, ordinal)
+      );
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1635,4 +1661,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration039,
   migration040,
   migration041,
+  migration042,
 ];

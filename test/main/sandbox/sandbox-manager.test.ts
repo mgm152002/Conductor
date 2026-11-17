@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SandboxManager, SANDBOX_IMAGE, agentVolume, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
-import { SandboxAgentService } from '@main/sandbox/sandbox-agents';
+import { SandboxAgentService, groupSandboxKey } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
 
@@ -130,6 +130,15 @@ describe('SandboxManager', () => {
   it('reads Docker’s memory figures', () => {
     expect(parseMemUsage('512MiB / 3.8GiB')).toBe(512 * 1024 ** 2);
     expect(parseMemUsage('1.5GiB / 3.8GiB')).toBe(1.5 * 1024 ** 3);
+  });
+
+  it('works a group’s sandbox in the shared volume and never deletes it', async () => {
+    const subject = manager();
+    await subject.acquire({ taskId: 'task-1', agentId: 'group-g1', agentName: 'Group' });
+    const mounts = dockerCalls.find((args) => args[0] === 'run')!.flatMap((arg, index, all) => (arg === '-v' ? [all[index + 1]!] : []));
+    expect(mounts).toEqual(['conductor-sandbox-shared:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
+    await subject.forget('group-g1');
+    expect(dockerCalls.some((args) => args[0] === 'volume')).toBe(false);
   });
 
   it('removes containers left over from an earlier run', async () => {
@@ -298,6 +307,165 @@ describe('SandboxAgentService', () => {
     const after = subject.groupMessages(group.id)[0]!;
     expect(after.replies).toEqual({ [b.id]: 'task-b2', [a.id]: 'task-a2' });
     expect(after.waiting).toBeUndefined();
+  });
+
+  it('runs a group message on the chosen CLI for members that have it, and leaves the others on their own', async () => {
+    const subject = service(['claude-code', 'codex', 'kiro']);
+    const a = subject.create({ ...input, name: 'Researcher', clis: ['claude-code', 'codex'] });
+    const b = subject.create({ ...input, name: 'Tester', clis: ['kiro', 'claude-code'] });
+    const group = subject.createGroup('', [a.id, b.id]);
+    const created: Array<{ agentId?: string; runOptions?: unknown; parentTaskId?: string }> = [];
+    subject.setTaskCreator(async (request) => {
+      created.push(request);
+      const task = { id: `00000000-0000-4000-8000-00000000000${created.length}` } as never as import('@shared/domain').Task;
+      request.onCreated?.(task);
+      return task;
+    });
+    store.db.pragma('foreign_keys = OFF');
+    // Codex belongs to the Researcher only.
+    await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'Go', agentId: 'codex', runOptions: { main: { model: 'gpt-x' } } });
+    expect(created.find((request) => request.agentId === 'codex')?.runOptions).toEqual({ main: { model: 'gpt-x' } });
+    const other = created.find((request) => request.agentId !== 'codex')!;
+    expect(other.agentId).toBe('kiro'); // the Tester's own first CLI
+    expect(other.runOptions).toBeUndefined();
+    // Auto leaves everyone on their own first CLI.
+    created.length = 0;
+    await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'Again' });
+    expect(created.map((request) => request.agentId).sort()).toEqual(['claude-code', 'kiro']);
+    expect(created.every((request) => request.runOptions === undefined)).toBe(true);
+  });
+
+  it('deletes a group’s member threads with the group, and purges threads left over from a group already deleted', async () => {
+    const subject = service();
+    const a = subject.create({ ...input, name: 'Researcher' });
+    const b = subject.create({ ...input, name: 'Tester' });
+    const group = subject.createGroup('', [a.id, b.id]);
+    store.db.pragma('foreign_keys = OFF');
+    const now = new Date().toISOString();
+    const addTask = (id: string, objective: string): void => {
+      store.db.prepare(`INSERT INTO tasks (id, workspace_id, objective, acceptance_criteria, state, thread_id, created_at, updated_at) VALUES (?, 'w', ?, '[]', 'COMPLETED', ?, ?, ?)`).run(id, objective, id, now, now);
+    };
+    addTask('own-chat', 'my own question');
+    addTask('group-thread', '[Group chat “G” — you are Researcher]\n\nMessage:\nhi');
+    addTask('left-over', '[Group chat “Old” — you are Tester]\n\nMessage:\nhi');
+    subject.bindThread('own-chat', a.id);
+    subject.bindThread('group-thread', a.id);
+    subject.bindThread('left-over', b.id);
+    store.db.prepare('UPDATE agent_group_members SET thread_id = ? WHERE group_id = ? AND agent_id = ?').run('group-thread', group.id, a.id);
+    const deleted: string[] = [];
+    subject.setThreadDeleter(async (threadId) => { deleted.push(threadId); });
+
+    // 'left-over' belongs to no group: it is purged. The live group's thread and the agent's own chat stay.
+    expect(await subject.purgeOrphanGroupThreads()).toBe(1);
+    expect(deleted).toEqual(['left-over']);
+    expect(Object.keys(subject.threadAgents()).sort()).toEqual(['group-thread', 'own-chat']);
+
+    await subject.removeGroup(group.id);
+    expect(deleted).toEqual(['left-over', 'group-thread']);
+    expect(Object.keys(subject.threadAgents())).toEqual(['own-chat']);
+    expect(subject.listGroups()).toEqual([]);
+  });
+
+  describe('planning a group message', () => {
+    const setup = (planReply: string | undefined | (() => never)) => {
+      const subject = service(['claude-code', 'codex']);
+      const researcher = subject.create({ ...input, name: 'Web researcher' });
+      const tailor = subject.create({ ...input, name: 'Resume Tailor' });
+      const group = subject.createGroup('Job hunt', [researcher.id, tailor.id]);
+      store.db.pragma('foreign_keys = OFF');
+      const created: Array<{ id: string; objective: string; agentId?: string }> = [];
+      subject.setTaskCreator(async (request) => {
+        const task = { id: `00000000-0000-4000-8000-0000000000${String(created.length + 10)}` } as never as import('@shared/domain').Task;
+        created.push({ id: task.id, objective: request.objective, ...(request.agentId !== undefined ? { agentId: request.agentId } : {}) });
+        request.onCreated?.(task);
+        return task;
+      });
+      subject.setReplyReader((taskId) => (taskId === created[0]?.id ? 'SAS — Software Developer Intern, Cary NC, posted Nov 14.' : ''));
+      subject.setGroupPlanner(async () => { if (typeof planReply === 'function') planReply(); return planReply as string | undefined; });
+      return { subject, researcher, tailor, group, created };
+    };
+    const until = async (check: () => boolean): Promise<void> => { for (let i = 0; i < 100 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5)); expect(check()).toBe(true); };
+    const dagReply = '```json\n' + JSON.stringify({ summary: 'Research, then tailor.', steps: [
+      { agent: 'Web researcher', instruction: 'Find the newest SWE internship posted yesterday.', after: [] },
+      { agent: 'Resume Tailor', instruction: 'Tailor the resume for that posting.', after: ['Web researcher'] },
+    ] }) + '\n```';
+
+    it('shows the message at once, then runs dependent parts in order in one shared sandbox', async () => {
+      const { subject, researcher, tailor, group, created } = setup(dagReply);
+      const sent = await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'find the newest swe internship and tailor my resume for it' });
+      expect(sent.plan?.mode).toBe('planning');
+      await until(() => created.length === 1);
+      // Only the researcher starts; the tailor waits for its result.
+      expect(created[0]!.objective).toContain('Your part:\nFind the newest SWE internship');
+      expect(created[0]!.objective).toContain('SAME sandbox');
+      const midway = subject.groupMessages(group.id)[0]!.plan!;
+      expect(midway.mode).toBe('dag');
+      expect(midway.steps.map((step) => [step.agentId, step.status, step.dependsOn])).toEqual([[researcher.id, 'running', []], [tailor.id, 'waiting', [0]]]);
+
+      // Both parts use the group's one sandbox, not their agents' own.
+      const firstTask = created[0]!.id;
+      expect((subject as unknown as { sandboxScope(id: string): unknown }).sandboxScope(firstTask)).toEqual({ key: groupSandboxKey(group.id), name: 'Job hunt' });
+
+      await subject.taskSettled({ id: firstTask, state: 'COMPLETED' });
+      expect(created).toHaveLength(2);
+      expect(created[1]!.objective).toContain('Web researcher finished and said:\nSAS — Software Developer Intern');
+      expect(created[1]!.objective).toContain('Tailor the resume for that posting.');
+      await subject.taskSettled({ id: created[1]!.id, state: 'COMPLETED' });
+      expect(subject.groupMessages(group.id)[0]!.plan!.steps.map((step) => step.status)).toEqual(['done', 'done']);
+    });
+
+    it('settles a part whose task ended while nobody was listening, and goes on to the next', async () => {
+      const { subject, group, created } = setup(dagReply);
+      await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'x' });
+      await until(() => created.length === 1);
+      const now = new Date().toISOString();
+      // The researcher's task is COMPLETED in the tasks table, but its part is still 'running'.
+      store.db.prepare(`INSERT INTO tasks (id, workspace_id, objective, acceptance_criteria, state, thread_id, created_at, updated_at) VALUES (?, 'w', 'o', '[]', 'COMPLETED', ?, ?, ?)`).run(created[0]!.id, created[0]!.id, now, now);
+      await subject.reconcileGroupSteps();
+      expect(created).toHaveLength(2);
+      expect(subject.groupMessages(group.id)[0]!.plan!.steps.map((step) => step.status)).toEqual(['done', 'running']);
+      // Running it again changes nothing.
+      await subject.reconcileGroupSteps();
+      expect(created).toHaveLength(2);
+    });
+
+    it('skips the parts that need a result that never came', async () => {
+      const { subject, group, created } = setup(dagReply);
+      await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'x' });
+      await until(() => created.length === 1);
+      await subject.taskSettled({ id: created[0]!.id, state: 'FAILED' });
+      expect(created).toHaveLength(1);
+      const steps = subject.groupMessages(group.id)[0]!.plan!.steps;
+      expect(steps.map((step) => step.status)).toEqual(['failed', 'skipped']);
+      expect(steps[1]!.note).toMatch(/Web researcher did not finish/);
+    });
+
+    it('runs independent parts at once, each in its own sandbox', async () => {
+      const { subject, group, created } = setup('```json\n{"steps":[{"agent":"Web researcher","instruction":"a"},{"agent":"Resume Tailor","instruction":"b"}]}\n```');
+      await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'do your jobs' });
+      await until(() => created.length === 2);
+      expect(subject.groupMessages(group.id)[0]!.plan!.mode).toBe('parallel');
+      expect((subject as unknown as { sandboxScope(id: string): unknown }).sandboxScope(created[0]!.id)).toBeUndefined();
+    });
+
+    it('falls back to everyone at once when the planner fails or answers nonsense', async () => {
+      for (const reply of [undefined, 'no idea', (() => { throw new Error('offline'); }) as () => never]) {
+        const { subject, group, created } = setup(reply);
+        await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'hello' });
+        await until(() => created.length === 2);
+        const plan = subject.groupMessages(group.id)[0]!.plan!;
+        expect(plan.mode).toBe('parallel');
+        expect(created.every((task) => task.objective.includes('Message:\nhello'))).toBe(true);
+        store.db.prepare('DELETE FROM agent_groups').run();
+      }
+    });
+
+    it('does not plan for a single member', async () => {
+      const { subject, researcher, group, created } = setup(dagReply);
+      const sent = await subject.sendGroup({ groupId: group.id, workspaceId: 'w', text: 'just you', agentIds: [researcher.id] });
+      expect(sent.plan?.mode).toBe('parallel');
+      expect(created).toHaveLength(1);
+    });
   });
 
   it('keeps a model per CLI and drops choices for CLIs the agent does not use', () => {
