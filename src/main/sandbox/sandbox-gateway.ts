@@ -76,6 +76,28 @@ const LOCK_TOOLS: GatewayTool[] = [
   },
 ];
 
+/** The gateway's own tools: the agent's private long-term memory (Mem0). */
+export const MEMORY_SAVE_TOOL = 'memory_save';
+export const MEMORY_SEARCH_TOOL = 'memory_search';
+export const MEMORY_FORGET_TOOL = 'memory_forget';
+const MEMORY_TOOLS: GatewayTool[] = [
+  {
+    name: MEMORY_SAVE_TOOL,
+    description: 'Save something to your own long-term memory so you still have it in later tasks, after a restart, or on another CLI: what you learned about the user, decisions, preferences, where things are, what is left to do. One short, self-contained fact or note per call. By default only you can read it; use scope "shared" for knowledge every agent should have. Never save passwords or secrets.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'The note to remember, written so it makes sense on its own later.' }, scope: { type: 'string', enum: ['private', 'shared'], description: '"private" (default): only you. "shared": every agent can find it.' } }, required: ['text'], additionalProperties: false },
+  },
+  {
+    name: MEMORY_SEARCH_TOOL,
+    description: 'Look up your long-term memory and the knowledge shared by all agents (including the files in the shared folder). Search by meaning (e.g. "how does the user like reports formatted"); leave the query empty to list recent notes. Do this at the start of a task.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'What to look for. May be empty.' }, scope: { type: 'string', enum: ['private', 'shared', 'all'], description: 'Where to look; default all.' } }, additionalProperties: false },
+  },
+  {
+    name: MEMORY_FORGET_TOOL,
+    description: 'Delete one of your memory notes that is wrong or no longer true, by the id memory_search showed.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The note id.' } }, required: ['id'], additionalProperties: false },
+  },
+];
+
 /** Harmless context tools every agent gets, whatever families it has. */
 const CONTEXT_TOOLS = new Set(['sandbox_get_context', 'sandbox_get_packages']);
 
@@ -140,6 +162,8 @@ export interface GatewaySessionConfig {
    * in it is the same file as one in the shared folder and is locked as such.
    */
   workspaceIsShared?: boolean;
+  /** The agent's private long-term memory. When set, the run gets the memory tools. */
+  memory?: { save(text: string, scope?: string): Promise<string>; search(query: string, scope?: string): Promise<string>; forget(id: string): Promise<string> };
   /** Called after each forwarded call, for the thread's activity. */
   onCall?: (call: { tool: string; ok: boolean }) => void;
 }
@@ -321,6 +345,7 @@ export class SandboxGateway {
     const out = upstream.filter((tool) => allowedTool(tool.name, allowed));
     if (session.config.returnFile !== undefined) out.push(RETURN_FILE);
     if (session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
+    if (session.config.memory !== undefined) out.push(...MEMORY_TOOLS);
     return out;
   }
 
@@ -380,6 +405,18 @@ export class SandboxGateway {
         return { content: [{ type: 'text', text }] };
       } catch (error) {
         return { content: [{ type: 'text', text: `The file could not be handed back: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
+      }
+    }
+    // The agent's own notes live in Mem0, outside the sandbox: no approval.
+    const memory = session.config.memory;
+    if (memory !== undefined && (name === MEMORY_SAVE_TOOL || name === MEMORY_SEARCH_TOOL || name === MEMORY_FORGET_TOOL)) {
+      try {
+        const text = name === MEMORY_SAVE_TOOL ? await memory.save(typeof args['text'] === 'string' ? args['text'] : '', typeof args['scope'] === 'string' ? args['scope'] : undefined)
+          : name === MEMORY_SEARCH_TOOL ? await memory.search(typeof args['query'] === 'string' ? args['query'] : '', typeof args['scope'] === 'string' ? args['scope'] : undefined)
+          : await memory.forget(typeof args['id'] === 'string' ? args['id'] : '');
+        return { content: [{ type: 'text', text }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `Memory is unavailable right now: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
       }
     }
     const owner = session.config.lockOwner;
