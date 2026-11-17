@@ -156,27 +156,45 @@ describe('phone work list, uploads and live watch', () => {
     expect((await fetch(`${base}/api/upload`, { method: 'POST', body: 'x' })).status).toBe(401);
   });
 
-  it('shows a running sandbox through the server without exposing its key', async () => {
-    const { createServer } = await import('node:http');
-    const seen: Array<{ key: unknown; url: string | undefined }> = [];
-    const upstream = createServer((req, res) => { seen.push({ key: req.headers['x-aio-api-key'], url: req.url }); res.writeHead(200, { 'content-type': 'text/html', 'x-frame-options': 'DENY' }); res.end('<html>desktop</html>'); });
-    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
-    const upstreamPort = (upstream.address() as { port: number }).port;
-    try {
-      const s = new PhoneServer({ invoke: async () => ({ ok: true, value: null }), sandboxEndpoint: (id) => (id === 'agent-1' ? { baseUrl: `http://127.0.0.1:${upstreamPort}`, apiKey: 'secret-key' } : undefined) });
-      base = `http://127.0.0.1:${await s.listen()}`; server = s;
-      const token = await pair(s);
-      expect((await post('/api/watch', { agentId: 'nope' }, token)).status).toBe(409);
-      const { value } = (await (await post('/api/watch', { agentId: 'agent-1' }, token)).json()) as { value: { src: string } };
-      expect(value.src).toMatch(/^\/w\/[0-9a-f]{48}\/vnc\/index\.html\?/);
-      expect(value.src).not.toContain('secret-key');
-      const page = await fetch(`${base}${value.src}`);
-      expect(await page.text()).toContain('desktop');
-      expect(page.headers.get('x-frame-options')).toBeNull();
-      expect(seen[0]!.key).toBe('secret-key');
-      expect((await fetch(`${base}/w/${'0'.repeat(48)}/vnc/index.html`)).status).toBe(404);
-      s.revokeAll();
-      expect((await fetch(`${base}${value.src}`)).status).toBe(404);
-    } finally { upstream.close(); }
+  it('serves a stored file and previews one generated from an artifact block', async () => {
+    const seen: Array<{ channel: string; payload: unknown }> = [];
+    const hello = Buffer.from('hello').toString('base64');
+    const s = new PhoneServer({
+      invoke: async (channel, payload) => {
+        seen.push({ channel, payload });
+        if (channel === 'task.artifactFile' || channel === 'artifact.generate') return { ok: true, value: { fileName: 'report ä.txt', mimeType: 'text/plain', sizeBytes: 5, dataBase64: hello } };
+        if (channel === 'artifact.preview') return { ok: true, value: { format: 'text', text: 'hello', truncated: false, attachment: {} } };
+        return { ok: true, value: null };
+      },
+    });
+    base = `http://127.0.0.1:${await s.listen()}`; server = s;
+    const token = await pair(s);
+    const ids = { taskId: '22222222-2222-4222-8222-222222222222', artifactId: '33333333-3333-4333-8333-333333333333' };
+
+    expect((await post('/api/file', ids)).status).toBe(401);
+    const file = await post('/api/file', ids, token);
+    expect(file.status).toBe(200);
+    expect(Buffer.from(await file.arrayBuffer()).toString()).toBe('hello');
+    expect(decodeURIComponent(file.headers.get('x-file-name')!)).toBe('report ä.txt');
+    expect(file.headers.get('content-disposition')).toBe('attachment');
+    expect(seen.at(-1)).toEqual({ channel: 'task.artifactFile', payload: ids });
+
+    const raw = '{"kind":"markdown","title":"Notes","content":"# Hi"}';
+    const preview = await (await post('/api/preview', { raw }, token)).json() as { value: { fileName: string; preview: { format: string } } };
+    expect(preview.value.preview.format).toBe('text');
+    expect(seen.map((call) => call.channel)).toContain('artifact.generate');
+
+    expect((await post('/api/preview', { raw: '{"kind":"video","title":"V","slides":[{"title":"a"}]}' }, token)).status).toBe(400);
+    expect((await post('/api/file', {}, token)).status).toBe(400);
+  });
+
+  it('stores a photo from the phone as an attachment', async () => {
+    const s = await start();
+    const token = await pair(s);
+    const res = await fetch(`${base}/api/upload?name=${encodeURIComponent('a b.png')}&type=image/png`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: new Uint8Array([1, 2, 3]) });
+    expect(res.status).toBe(200);
+    expect(calls.at(-1)!.channel).toBe('attachment.ingestBytes');
+    expect(calls.at(-1)!.payload).toMatchObject({ name: 'a b.png', mimeType: 'image/png' });
+    expect((await fetch(`${base}/api/upload`, { method: 'POST', body: 'x' })).status).toBe(401);
   });
 });

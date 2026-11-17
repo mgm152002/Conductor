@@ -3,16 +3,18 @@ import { readFile, stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { PermissionProfile, Task } from '@shared/domain';
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
+import type { RunOptions } from '@shared/agent-models';
+import { defaultPlan, parsePlan, plannerPrompt, type GroupPlan, type PlanMember } from './group-plan';
 import {
   AGENT_ICON_PATTERN, MAX_AGENT_ICON_CHARS, SANDBOX_AGENT_COLORS, SANDBOX_MCP_KEY, SANDBOX_TOOL_GROUPS,
-  type AgentCliChoice, type AgentGroup, type AgentGroupMessage,
+  type AgentCliChoice, type AgentGroup, type AgentGroupMessage, type AgentGroupPlanStep,
   type SandboxAgent, type SandboxAgentInput, type SandboxApprovalPolicy, type SandboxToolGroup,
 } from '@shared/sandbox-agents';
 import type { Store } from '../db/types';
 import type { CodexMcpServer } from '../adapters/objective-cli-adapter';
 import { ToolGate, type ToolApprover } from '../adapters/tool-gate';
 import { LOCK_TOOL, RETURN_FILE_TOOL, UNLOCK_TOOL, type SandboxGateway, type GatewaySession } from './sandbox-gateway';
-import { SANDBOX_MEMORY_FILE, SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint, type SandboxManager } from './sandbox-manager';
+import { GROUP_KEY_PREFIX, SANDBOX_MEMORY_FILE, SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint, type SandboxManager } from './sandbox-manager';
 
 // Sandbox agents: their definitions, which thread each one runs, and the
 // per-run wiring — the sandbox container for the thread, the approval-gated
@@ -25,6 +27,9 @@ interface AgentRow {
 }
 
 const GROUPS = new Set<SandboxToolGroup>(SANDBOX_TOOL_GROUPS.map((group) => group.id));
+const parseNumbers = (text: string): number[] => {
+  try { const value = JSON.parse(text) as unknown; return Array.isArray(value) ? value.filter((item): item is number => Number.isInteger(item)) : []; } catch { return []; }
+};
 const parseList = (text: string): string[] => {
   try { const value = JSON.parse(text) as unknown; return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
 };
@@ -80,14 +85,34 @@ interface ActiveRun { agentId: string; session: GatewaySession }
 
 /** Starts a task (TaskRunner.create); set once the runner exists. */
 export type TaskCreator = (input: {
-  workspaceId: string; objective: string; parentTaskId?: string; agentId?: string; attachmentIds?: readonly string[];
+  workspaceId: string; objective: string; parentTaskId?: string; agentId?: string; runOptions?: RunOptions; attachmentIds?: readonly string[];
   onCreated?: (task: Task) => void;
 }) => Promise<Task>;
 
 /** Holds a message for a task that is still working (TaskRunner.enqueueMessage). */
 export type MessageEnqueuer = (input: {
-  taskId: string; objective: string; mode: QueuedMessageMode; attachmentIds?: readonly string[];
+  taskId: string; objective: string; mode: QueuedMessageMode; agentId?: string; runOptions?: RunOptions; attachmentIds?: readonly string[];
 }) => Promise<QueuedMessage>;
+
+/** Asks an agent for a plan (its reply text), or nothing when none is available. */
+export type GroupPlannerFn = (prompt: string) => Promise<string | undefined>;
+/** The text of a task's answer, for the members that build on it. */
+export type ReplyReader = (taskId: string) => string;
+
+/** What is needed to start a member's part later, after the parts before it. */
+interface GroupSendOptions {
+  workspaceId?: string; attachmentIds?: string[]; context?: string; mode?: QueuedMessageMode; agentId?: string; runOptions?: RunOptions;
+}
+
+/** Task states that end a member's part. */
+const SETTLED = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED', 'RECOVERABLE_INTERRUPTION']);
+/** Longest answer handed on to the member that builds on it. */
+const MAX_HANDOFF_REPLY = 6000;
+/** The sandbox that a group's dependent parts share. */
+export const groupSandboxKey = (groupId: string): string => `${GROUP_KEY_PREFIX}${groupId}`;
+
+/** Deletes a conversation thread and everything stored for it (ThreadDeletion). */
+export type ThreadDeleter = (threadId: string) => Promise<unknown>;
 
 /** States in which a thread is busy, so a new message is steered or queued rather than started. */
 const BUSY_STATES = new Set(['CREATED', 'CONTEXT_LOADING', 'PLANNING', 'RUNNING', 'VERIFYING', 'WAITING_FOR_APPROVAL']);
@@ -155,6 +180,9 @@ export class SandboxAgentService {
 
   private createTask: TaskCreator | undefined;
   private enqueue: MessageEnqueuer | undefined;
+  private deleteThread: ThreadDeleter | undefined;
+  private planner: GroupPlannerFn | undefined;
+  private readReply: ReplyReader | undefined;
   /** Files already copied into a running sandbox (keyed by its address and key). */
   private readonly uploaded = new Set<string>();
 
@@ -166,6 +194,18 @@ export class SandboxAgentService {
 
   setMessageQueue(enqueue: MessageEnqueuer): void {
     this.enqueue = enqueue;
+  }
+
+  setGroupPlanner(plan: GroupPlannerFn): void {
+    this.planner = plan;
+  }
+
+  setReplyReader(read: ReplyReader): void {
+    this.readReply = read;
+  }
+
+  setThreadDeleter(remove: ThreadDeleter): void {
+    this.deleteThread = remove;
   }
 
   /** Where agent chats without a project run (a hidden, non-git workspace). */
@@ -291,8 +331,39 @@ export class SandboxAgentService {
     return this.listGroups().find((group) => group.id === id)!;
   }
 
-  removeGroup(id: string): void {
+  /**
+   * Delete a group and its history. Each member answered in its own thread for
+   * the group; those threads go too, so nothing from the group is left
+   * behind in a member's own chats.
+   */
+  async removeGroup(id: string): Promise<void> {
+    const threads = (this.deps.store.db.prepare('SELECT thread_id FROM agent_group_members WHERE group_id = ? AND thread_id IS NOT NULL').all(id) as Array<{ thread_id: string }>).map((row) => row.thread_id);
     this.deps.store.db.prepare('DELETE FROM agent_groups WHERE id = ?').run(id);
+    await this.removeThreads(threads);
+    void this.deps.manager.forget(groupSandboxKey(id));
+  }
+
+  /** Delete threads that were only a group's, along with their agent binding. A thread still working is kept and retried on the next launch. */
+  private async removeThreads(threads: readonly string[]): Promise<void> {
+    for (const threadId of threads) {
+      try {
+        await this.deleteThread?.(threadId);
+        this.deps.store.db.prepare('DELETE FROM thread_sandbox_agents WHERE thread_id = ?').run(threadId);
+      } catch { /* still working; the next purge gets it */ }
+    }
+  }
+
+  /**
+   * Group threads whose group no longer exists (it was deleted before its
+   * threads were) would otherwise appear as ordinary chats of their agent.
+   */
+  async purgeOrphanGroupThreads(): Promise<number> {
+    const rows = this.deps.store.db.prepare(`SELECT s.thread_id FROM thread_sandbox_agents s
+      JOIN tasks t ON t.id = s.thread_id
+      WHERE t.objective LIKE '[Group chat “%'
+        AND NOT EXISTS (SELECT 1 FROM agent_group_members m WHERE m.thread_id = s.thread_id)`).all() as Array<{ thread_id: string }>;
+    await this.removeThreads(rows.map((row) => row.thread_id));
+    return rows.length;
   }
 
   groupMessages(groupId: string): AgentGroupMessage[] {
@@ -303,7 +374,13 @@ export class SandboxAgentService {
     const held = this.deps.store.db.prepare(`SELECT p.message_id, p.agent_id, p.queue_id, q.mode, q.status, q.dispatched_task_id FROM agent_group_pending p
       JOIN agent_group_messages m ON m.id = p.message_id JOIN task_message_queue q ON q.id = p.queue_id WHERE m.group_id = ?`)
       .all(groupId) as Array<{ message_id: string; agent_id: string; queue_id: string; mode: QueuedMessageMode; status: string; dispatched_task_id: string | null }>;
+    const plans = this.deps.store.db.prepare(`SELECT p.message_id, p.mode, p.summary FROM agent_group_plans p
+      JOIN agent_group_messages m ON m.id = p.message_id WHERE m.group_id = ?`).all(groupId) as Array<{ message_id: string; mode: 'planning' | 'parallel' | 'dag'; summary: string }>;
+    const steps = this.deps.store.db.prepare(`SELECT s.message_id, s.agent_id, s.instruction, s.depends_on, s.status, s.note FROM agent_group_steps s
+      JOIN agent_group_messages m ON m.id = s.message_id WHERE m.group_id = ? ORDER BY s.message_id, s.ordinal`)
+      .all(groupId) as Array<{ message_id: string; agent_id: string; instruction: string; depends_on: string; status: AgentGroupPlanStep['status']; note: string }>;
     return messages.map((message) => {
+      const plan = plans.find((row) => row.message_id === message.id);
       const mine = held.filter((row) => row.message_id === message.id);
       const waiting = Object.fromEntries(mine.filter((row) => row.status === 'pending' || row.status === 'dispatching').map((row) => [row.agent_id, { queueId: row.queue_id, mode: row.mode }]));
       return {
@@ -313,19 +390,33 @@ export class SandboxAgentService {
           ...mine.filter((row) => row.dispatched_task_id !== null).map((row): [string, string] => [row.agent_id, row.dispatched_task_id!]),
         ]),
         ...(Object.keys(waiting).length > 0 ? { waiting } : {}),
+        ...(plan !== undefined ? {
+          plan: {
+            mode: plan.mode, summary: plan.summary,
+            steps: steps.filter((step) => step.message_id === message.id).map((step): AgentGroupPlanStep => ({
+              agentId: step.agent_id, instruction: step.instruction, dependsOn: parseNumbers(step.depends_on), status: step.status,
+              ...(step.note !== '' ? { note: step.note } : {}),
+            })),
+          },
+        } : {}),
       };
     });
   }
 
   /**
-   * Send a message to a group: each targeted member answers in its own thread
-   * for this group (continuing it after the first message). `context` is what
-   * the other members said recently, so they can build on each other. A
-   * member still working on an earlier message gets this one by `mode`:
-   * queued behind that work (the default), or steering it — the work is
-   * stopped and this message answered next.
+   * Send a message to a group. A planner first decides how the members split
+   * it: independent parts run at once, each member in its own sandbox; parts
+   * that build on each other share one sandbox and run in order, each
+   * receiving the answers of the parts it waits for (see group-plan.ts). A
+   * single member, or no planner, means the plain case: everyone at once.
+   *
+   * Each member answers in its own thread for this group (continuing it after
+   * the first message). `context` is what the others said recently. A member
+   * still working on an earlier message gets this one by `mode`: queued behind
+   * that work (the default), or steering it — the work is stopped and this
+   * message answered next.
    */
-  async sendGroup(input: { groupId: string; text: string; workspaceId?: string; agentIds?: string[]; context?: string; attachmentIds?: readonly string[]; mode?: QueuedMessageMode }): Promise<AgentGroupMessage> {
+  async sendGroup(input: { groupId: string; text: string; workspaceId?: string; agentIds?: string[]; context?: string; attachmentIds?: readonly string[]; mode?: QueuedMessageMode; agentId?: string; runOptions?: RunOptions }): Promise<AgentGroupMessage> {
     if (this.createTask === undefined) throw new Error('Conductor is still starting. Try again in a moment.');
     const group = this.listGroups().find((item) => item.id === input.groupId);
     if (group === undefined) throw new Error('That group no longer exists.');
@@ -333,54 +424,190 @@ export class SandboxAgentService {
     if (text === '') throw new Error('Write a message first.');
     const targets = (input.agentIds ?? group.agentIds).filter((id) => group.agentIds.includes(id));
     if (targets.length === 0) throw new Error('Mention at least one member of the group.');
-    const names = group.agentIds.map((id) => this.get(id)?.name).filter((name): name is string => name !== undefined);
+    const members: PlanMember[] = targets.flatMap((id) => { const agent = this.get(id); return agent === undefined ? [] : [{ id, name: agent.name, description: agent.description }]; });
     const messageId = randomUUID();
     const now = new Date().toISOString();
-    this.deps.store.db.prepare('INSERT INTO agent_group_messages (id, group_id, text, created_at) VALUES (?, ?, ?, ?)').run(messageId, group.id, text, now);
-    this.deps.store.db.prepare('UPDATE agent_groups SET updated_at = ? WHERE id = ?').run(now, group.id);
-    const failures: string[] = [];
-    for (const agentId of targets) {
-      const agent = this.get(agentId);
-      if (agent === undefined) continue;
-      const others = names.filter((name) => name !== agent.name);
-      const objective = [
-        `[Group chat “${group.name}” — you are ${agent.name}; also here: ${others.join(', ') || 'nobody else'}. Reply to the user's message; build on what the others said rather than repeating it.]`,
-        input.context !== undefined && input.context.trim() !== '' ? `What the others said recently:\n${input.context.trim().slice(-MAX_GROUP_CONTEXT)}` : '',
-        `Message:\n${text}`,
-      ].filter((part) => part !== '').join('\n\n');
-      const thread = (this.deps.store.db.prepare('SELECT thread_id FROM agent_group_members WHERE group_id = ? AND agent_id = ?').get(group.id, agentId) as { thread_id: string | null } | undefined)?.thread_id ?? null;
-      const parent = thread === null ? undefined : this.deps.store.db.prepare('SELECT id, state FROM tasks WHERE thread_id = ? OR id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(thread, thread) as { id: string; state: string } | undefined;
-      try {
-        if (parent !== undefined && BUSY_STATES.has(parent.state) && this.enqueue !== undefined) {
-          // Too long to hold with the others' context: send the message itself.
-          const held = objective.length <= MAX_QUEUED_OBJECTIVE ? objective : text;
-          const entry = await this.enqueue({
-            taskId: parent.id, objective: held, mode: input.mode ?? 'queue',
-            ...(input.attachmentIds !== undefined && input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
-          });
-          this.deps.store.db.prepare('INSERT INTO agent_group_pending (message_id, agent_id, queue_id) VALUES (?, ?, ?)').run(messageId, agentId, entry.id);
-          continue;
-        }
-        await this.createTask({
-          workspaceId: input.workspaceId ?? this.agentWorkspaceId(),
-          objective,
-          ...(input.attachmentIds !== undefined && input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
-          ...(parent !== undefined ? { parentTaskId: parent.id } : { agentId: this.startingCli(agentId) }),
-          onCreated: (task) => {
-            const threadId = task.threadId ?? task.id;
-            if (parent === undefined) {
-              this.bindThread(threadId, agentId);
-              this.deps.store.db.prepare('UPDATE agent_group_members SET thread_id = ? WHERE group_id = ? AND agent_id = ?').run(threadId, group.id, agentId);
-            }
-            this.deps.store.db.prepare('INSERT INTO agent_group_replies (message_id, agent_id, task_id) VALUES (?, ?, ?)').run(messageId, agentId, task.id);
-          },
-        });
-      } catch (error) {
-        failures.push(`${agent.name}: ${error instanceof Error ? error.message : 'could not start'}`);
-      }
+    const options: GroupSendOptions = {
+      ...(input.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+      ...(input.attachmentIds !== undefined && input.attachmentIds.length > 0 ? { attachmentIds: [...input.attachmentIds] } : {}),
+      ...(input.context !== undefined ? { context: input.context } : {}),
+      ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+      ...(input.runOptions !== undefined ? { runOptions: input.runOptions } : {}),
+    };
+    const db = this.deps.store.db;
+    db.prepare('INSERT INTO agent_group_messages (id, group_id, text, created_at) VALUES (?, ?, ?, ?)').run(messageId, group.id, text, now);
+    db.prepare('UPDATE agent_groups SET updated_at = ? WHERE id = ?').run(now, group.id);
+    const planned = members.length > 1 && this.planner !== undefined;
+    db.prepare('INSERT INTO agent_group_plans (message_id, mode, summary, options) VALUES (?, ?, ?, ?)').run(messageId, planned ? 'planning' : 'parallel', '', JSON.stringify(options));
+    if (planned) {
+      // Deciding takes a model call; the message shows at once and the plan fills in.
+      void this.planAndRun(messageId, text, members, input.context).catch(() => undefined);
+    } else {
+      this.savePlan(messageId, defaultPlan(members, text));
+      await this.advance(messageId);
+      const steps = db.prepare('SELECT status, note FROM agent_group_steps WHERE message_id = ?').all(messageId) as Array<{ status: string; note: string }>;
+      if (steps.length > 0 && steps.every((step) => step.status === 'failed')) throw new Error(steps.map((step) => step.note).join(' '));
     }
-    if (failures.length === targets.length) throw new Error(failures.join(' '));
     return this.groupMessages(group.id).find((message) => message.id === messageId)!;
+  }
+
+  /** Ask the planner, fall back to everyone-at-once, save the plan and start what can start. */
+  private async planAndRun(messageId: string, text: string, members: PlanMember[], context: string | undefined): Promise<void> {
+    let plan: GroupPlan = defaultPlan(members, text);
+    try {
+      const reply = await this.planner?.(plannerPrompt({ text, members, context }));
+      const parsed = reply === undefined ? null : parsePlan(reply, members, text);
+      if (parsed !== null) plan = parsed;
+    } catch { /* the default plan stands */ }
+    this.savePlan(messageId, plan);
+    await this.advance(messageId);
+  }
+
+  private savePlan(messageId: string, plan: GroupPlan): void {
+    const db = this.deps.store.db;
+    db.transaction(() => {
+      db.prepare('UPDATE agent_group_plans SET mode = ?, summary = ? WHERE message_id = ?').run(plan.mode, plan.summary, messageId);
+      const insert = db.prepare("INSERT INTO agent_group_steps (message_id, ordinal, agent_id, instruction, depends_on, status) VALUES (?, ?, ?, ?, ?, 'waiting')");
+      plan.steps.forEach((step, ordinal) => { insert.run(messageId, ordinal, step.agentId, step.instruction, JSON.stringify(step.dependsOn)); });
+    })();
+  }
+
+  /**
+   * Start every part whose parts-before have finished; skip those whose
+   * parts-before did not. Called when a plan is saved and whenever a part ends.
+   */
+  private async advance(messageId: string): Promise<void> {
+    const db = this.deps.store.db;
+    for (let round = 0; round < 32; round += 1) {
+      const steps = db.prepare('SELECT ordinal, agent_id, depends_on, status FROM agent_group_steps WHERE message_id = ? ORDER BY ordinal')
+        .all(messageId) as Array<{ ordinal: number; agent_id: string; depends_on: string; status: AgentGroupPlanStep['status'] }>;
+      let changed = false;
+      for (const step of steps) {
+        if (step.status !== 'waiting') continue;
+        const before = parseNumbers(step.depends_on).map((ordinal) => steps[ordinal]).filter((item) => item !== undefined);
+        const stopped = before.find((item) => item.status === 'failed' || item.status === 'skipped');
+        if (stopped !== undefined) {
+          const who = this.get(stopped.agent_id)?.name ?? 'An earlier part';
+          db.prepare("UPDATE agent_group_steps SET status = 'skipped', note = ? WHERE message_id = ? AND ordinal = ?").run(`Skipped: ${who} did not finish, and this part needs its result.`, messageId, step.ordinal);
+          changed = true;
+        } else if (before.every((item) => item.status === 'done')) {
+          db.prepare("UPDATE agent_group_steps SET status = 'running' WHERE message_id = ? AND ordinal = ?").run(messageId, step.ordinal);
+          changed = true;
+          await this.startStep(messageId, step.ordinal);
+        }
+      }
+      if (!changed) return;
+    }
+  }
+
+  /** Deliver one member's part: as a new task, or held behind the member's current work. */
+  private async startStep(messageId: string, ordinal: number): Promise<void> {
+    const db = this.deps.store.db;
+    const fail = (note: string): void => { db.prepare("UPDATE agent_group_steps SET status = 'failed', note = ? WHERE message_id = ? AND ordinal = ?").run(note, messageId, ordinal); };
+    const step = db.prepare('SELECT agent_id, instruction, depends_on FROM agent_group_steps WHERE message_id = ? AND ordinal = ?').get(messageId, ordinal) as { agent_id: string; instruction: string; depends_on: string } | undefined;
+    const message = db.prepare('SELECT m.group_id, m.text, g.name AS group_name FROM agent_group_messages m JOIN agent_groups g ON g.id = m.group_id WHERE m.id = ?').get(messageId) as { group_id: string; text: string; group_name: string } | undefined;
+    const plan = db.prepare('SELECT mode, options FROM agent_group_plans WHERE message_id = ?').get(messageId) as { mode: string; options: string } | undefined;
+    const agent = step === undefined ? undefined : this.get(step.agent_id);
+    if (step === undefined || message === undefined || plan === undefined || agent === undefined || this.createTask === undefined) { fail('This agent no longer exists.'); return; }
+    let options: GroupSendOptions = {};
+    try { options = JSON.parse(plan.options) as GroupSendOptions; } catch { /* defaults */ }
+    const group = this.listGroups().find((item) => item.id === message.group_id);
+    const names = (group?.agentIds ?? []).map((id) => this.get(id)?.name).filter((name): name is string => name !== undefined);
+    const others = names.filter((name) => name !== agent.name);
+    // What the parts before this one produced.
+    const before = parseNumbers(step.depends_on).flatMap((position) => {
+      const done = db.prepare('SELECT s.agent_id, s.task_id FROM agent_group_steps s WHERE s.message_id = ? AND s.ordinal = ?').get(messageId, position) as { agent_id: string; task_id: string | null } | undefined;
+      if (done === undefined) return [];
+      const reply = done.task_id !== null ? this.readReply?.(done.task_id).trim() ?? '' : '';
+      return [`${this.get(done.agent_id)?.name ?? 'An agent'} finished and said:\n${reply === '' ? '(no written answer; look at the files it saved)' : reply.slice(0, MAX_HANDOFF_REPLY)}`];
+    });
+    const shared = plan.mode === 'dag';
+    const ownPart = step.instruction.trim() !== message.text.trim();
+    const objective = [
+      `[Group chat “${message.group_name}” — you are ${agent.name}; also here: ${others.join(', ') || 'nobody else'}. Reply to the user's message; build on what the others said rather than repeating it.]`,
+      shared ? `[This message was split between the members. You all use the SAME sandbox, so files the others saved in ${SANDBOX_WORKSPACE_DIR} are there for you, and yours stay for the ones after you.]` : '',
+      options.context !== undefined && options.context.trim() !== '' ? `What the others said recently:\n${options.context.trim().slice(-MAX_GROUP_CONTEXT)}` : '',
+      before.length > 0 ? `Work you build on:\n${before.join('\n\n')}` : '',
+      `Message:\n${message.text}`,
+      ownPart ? `Your part:\n${step.instruction}` : '',
+    ].filter((part) => part !== '').join('\n\n');
+    const thread = (db.prepare('SELECT thread_id FROM agent_group_members WHERE group_id = ? AND agent_id = ?').get(message.group_id, step.agent_id) as { thread_id: string | null } | undefined)?.thread_id ?? null;
+    const parent = thread === null ? undefined : db.prepare('SELECT id, state FROM tasks WHERE thread_id = ? OR id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(thread, thread) as { id: string; state: string } | undefined;
+    // The CLI (and model) picked for this message, for members that run on it;
+    // the others keep their own first CLI. Either way a CLI that runs out of
+    // usage hands over to the member's next one, in the member's own order.
+    const chosen = options.agentId !== undefined && agent.clis.includes(options.agentId) && this.deps.cliAvailable(options.agentId) ? options.agentId : undefined;
+    const picked = chosen !== undefined ? { agentId: chosen, ...(options.runOptions !== undefined ? { runOptions: options.runOptions } : {}) } : {};
+    try {
+      if (parent !== undefined && BUSY_STATES.has(parent.state) && this.enqueue !== undefined) {
+        // Too long to hold with the others' context: send the message itself.
+        const held = objective.length <= MAX_QUEUED_OBJECTIVE ? objective : message.text;
+        const entry = await this.enqueue({
+          taskId: parent.id, objective: held, mode: options.mode ?? 'queue', ...picked,
+          ...(options.attachmentIds !== undefined && options.attachmentIds.length > 0 ? { attachmentIds: options.attachmentIds } : {}),
+        });
+        db.prepare('INSERT INTO agent_group_pending (message_id, agent_id, queue_id) VALUES (?, ?, ?)').run(messageId, step.agent_id, entry.id);
+        return;
+      }
+      await this.createTask({
+        workspaceId: options.workspaceId ?? this.agentWorkspaceId(),
+        objective,
+        ...(options.attachmentIds !== undefined && options.attachmentIds.length > 0 ? { attachmentIds: options.attachmentIds } : {}),
+        ...(parent !== undefined ? { parentTaskId: parent.id, ...picked } : { agentId: this.startingCli(step.agent_id, chosen), ...(chosen !== undefined && options.runOptions !== undefined ? { runOptions: options.runOptions } : {}) }),
+        onCreated: (task) => {
+          const threadId = task.threadId ?? task.id;
+          if (parent === undefined) {
+            this.bindThread(threadId, step.agent_id);
+            db.prepare('UPDATE agent_group_members SET thread_id = ? WHERE group_id = ? AND agent_id = ?').run(threadId, message.group_id, step.agent_id);
+          }
+          db.prepare('INSERT INTO agent_group_replies (message_id, agent_id, task_id) VALUES (?, ?, ?)').run(messageId, step.agent_id, task.id);
+          db.prepare('UPDATE agent_group_steps SET task_id = ? WHERE message_id = ? AND ordinal = ?').run(task.id, messageId, ordinal);
+        },
+      });
+    } catch (error) {
+      fail(`${agent.name}: ${error instanceof Error ? error.message : 'could not start'}`);
+    }
+  }
+
+  /** Which message and member a task answers, whether it was started or held and dispatched later. */
+  private groupLink(taskId: string): { messageId: string; agentId: string } | undefined {
+    const db = this.deps.store.db;
+    const reply = db.prepare('SELECT message_id, agent_id FROM agent_group_replies WHERE task_id = ?').get(taskId) as { message_id: string; agent_id: string } | undefined;
+    if (reply !== undefined) return { messageId: reply.message_id, agentId: reply.agent_id };
+    const held = db.prepare('SELECT p.message_id, p.agent_id FROM agent_group_pending p JOIN task_message_queue q ON q.id = p.queue_id WHERE q.dispatched_task_id = ?').get(taskId) as { message_id: string; agent_id: string } | undefined;
+    return held === undefined ? undefined : { messageId: held.message_id, agentId: held.agent_id };
+  }
+
+  /** A member's task ended: record it, then start the parts that were waiting on it. */
+  async taskSettled(task: Pick<Task, 'id' | 'state'>): Promise<void> {
+    if (!SETTLED.has(task.state)) return;
+    const link = this.groupLink(task.id);
+    if (link === undefined) return;
+    const db = this.deps.store.db;
+    const status = task.state === 'COMPLETED' ? 'done' : 'failed';
+    const note = status === 'failed' ? `The run ended (${task.state.toLowerCase().replace(/_/g, ' ')}).` : '';
+    db.prepare("UPDATE agent_group_steps SET status = ?, task_id = ?, note = ? WHERE message_id = ? AND agent_id = ? AND status IN ('running', 'waiting')").run(status, task.id, note, link.messageId, link.agentId);
+    await this.advance(link.messageId);
+  }
+
+  /**
+   * Parts still marked running whose task has ended (the app was closed, or
+   * the update was missed) are settled, so the parts waiting on them go on.
+   */
+  async reconcileGroupSteps(): Promise<void> {
+    const rows = this.deps.store.db.prepare(`SELECT s.task_id AS id, t.state FROM agent_group_steps s JOIN tasks t ON t.id = s.task_id
+      WHERE s.status = 'running'`).all() as Array<{ id: string; state: string }>;
+    for (const row of rows) await this.taskSettled({ id: row.id, state: row.state as Task['state'] });
+  }
+
+  /** The sandbox a task uses: one shared by a group's dependent parts, else its agent's own. */
+  private sandboxScope(taskId: string): { key: string; name: string } | undefined {
+    const link = this.groupLink(taskId);
+    if (link === undefined) return undefined;
+    const row = this.deps.store.db.prepare(`SELECT g.id, g.name, p.mode FROM agent_group_plans p
+      JOIN agent_group_messages m ON m.id = p.message_id JOIN agent_groups g ON g.id = m.group_id WHERE p.message_id = ?`).get(link.messageId) as { id: string; name: string; mode: string } | undefined;
+    return row?.mode === 'dag' ? { key: groupSandboxKey(row.id), name: row.name } : undefined;
   }
 
   /** Threads that belong to group chats (not an agent's 1:1 chat), with their group. */
@@ -433,13 +660,16 @@ export class SandboxAgentService {
     if (agent === undefined) return undefined;
     const gate = new ToolGate(mode, this.deps.approver, { taskId: task.id, stepId }, { autoApprove: this.deps.autoApprove });
     let started: Promise<import('./sandbox-manager').SandboxEndpoint> | undefined;
-    const resumed = this.resumedWork(task, stepId, agent.id);
+    const scope = this.sandboxScope(task.id);
+    const sandboxKey = scope?.key ?? agent.id;
+    const resumed = this.resumedWork(task, stepId, sandboxKey);
     const session = await this.deps.gateway.open({
       agentName: agent.name,
       tools: agent.tools,
       approval: agent.approval,
       decide: (request, signal) => gate.decide(request, signal),
       lockOwner: { id: task.id, name: agent.name },
+      ...(sandboxKey.startsWith(GROUP_KEY_PREFIX) ? { workspaceIsShared: true } : {}),
       returnFile: async (input, endpoint) => {
         const bytes = await readSandboxFile(endpoint, input.path);
         const name = sandboxName(input.name ?? input.path, new Set());
@@ -449,12 +679,12 @@ export class SandboxAgentService {
       },
       sandbox: () => {
         started ??= (async () => {
-          const already = this.deps.manager.endpoint(agent.id);
+          const already = this.deps.manager.endpoint(sandboxKey);
           if (already === undefined) {
             this.deps.log(task.id, stepId, { message: 'Starting the sandbox', kind: 'tool', key: `sandbox-start:${stepId}`, status: 'running', source: agent.name });
           }
           try {
-            const endpoint = await this.deps.manager.acquire({ taskId: task.id, agentId: agent.id, agentName: agent.name });
+            const endpoint = await this.deps.manager.acquire({ taskId: task.id, agentId: sandboxKey, agentName: scope?.name ?? agent.name });
             if (already === undefined) this.deps.log(task.id, stepId, { message: 'Sandbox ready', kind: 'tool', key: `sandbox-start:${stepId}`, status: 'completed', source: agent.name });
             await this.uploadAttachments(task.id, stepId, agent.name, endpoint);
             return endpoint;
@@ -468,7 +698,7 @@ export class SandboxAgentService {
         return started;
       },
     });
-    this.runs.set(task.id, [...(this.runs.get(task.id) ?? []), { agentId: agent.id, session }]);
+    this.runs.set(task.id, [...(this.runs.get(task.id) ?? []), { agentId: sandboxKey, session }]);
     const groups = SANDBOX_TOOL_GROUPS.filter((group) => agent.tools.includes(group.id)).map((group) => group.label.toLowerCase());
     const approvals = agent.approval === 'none' ? '' : agent.approval === 'all'
       ? ' Every sandbox action waits for the user to approve it.'
@@ -485,10 +715,11 @@ export class SandboxAgentService {
       + `${approvals}`,
       `To give the user a file (a PDF, Word document, zip, spreadsheet, image — any type), create it in the sandbox, then call the "${RETURN_FILE_TOOL}" tool with its absolute path. It appears in the chat, where the user can open and download it. Use this for files you built with sandbox tools; do not paste a file's contents into your reply instead.`,
       `Your sandbox is rebuilt from scratch whenever it has been idle, so only two folders keep their contents: ${SANDBOX_WORKSPACE_DIR} is your own storage and survives restarts — keep work in progress, notes, downloads and anything you will want next time there, and look in it at the start of a task for what you left earlier. ${SANDBOX_SHARED_DIR} is shared with the user's other agents and also survives restarts — put files there to pass them to another agent, and check it when you are told another agent left something for you. Other agents may be working there at the same time, so it is locked per file or folder: before you create, change, move or delete anything in ${SANDBOX_SHARED_DIR}, call "${LOCK_TOOL}" with its path (lock a subfolder to cover several files), and call "${UNLOCK_TOOL}" as soon as it is complete. Always use full paths starting with ${SANDBOX_SHARED_DIR} in commands, never "cd" into it. If you are told another agent holds the lock, do not work around it: do something else and try again shortly. Reading needs no lock. Do not delete what you did not create. Everything outside these two folders is lost when the sandbox restarts.`,
+      sandboxKey.startsWith(GROUP_KEY_PREFIX) ? `In this group chat ${SANDBOX_WORKSPACE_DIR} and ${SANDBOX_SHARED_DIR} are the same folder, shared with the other members, so the lock rules above apply to both: lock a path in ${SANDBOX_WORKSPACE_DIR} before you change it, exactly as you would in ${SANDBOX_SHARED_DIR}. Use a subfolder of your own for your files.` : '',
       this.memoryNote(resumed),
       fileNote,
     ].filter((line) => line.trim() !== '').join('\n\n');
-    return { server: { key: SANDBOX_MCP_KEY, url: session.url }, guidance };
+    return { server: { key: SANDBOX_MCP_KEY, url: session.url, ready: session.listed }, guidance };
   }
 
   /**

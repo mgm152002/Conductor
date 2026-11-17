@@ -87,6 +87,8 @@ export interface CodexMcpServer {
   headers?: Record<string, string>;
   /** Tool names the server offers, so the agent knows what it can call. */
   tools?: string[];
+  /** Resolves once the CLI has picked the server up (fetched its tool list), when that can be known. */
+  ready?: Promise<void>;
 }
 
 /**

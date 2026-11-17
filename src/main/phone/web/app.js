@@ -98,6 +98,85 @@ function md(text) {
   return '<div class="md">' + out.join('') + '</div>';
 }
 
+// ---- files the agent made --------------------------------------------------------------
+// A file reaches the phone two ways: stored with the task (a hand-back or an
+// output), or as an ```artifact block in the reply, which the Mac turns into
+// the real file on request. Both show as a card that opens a preview or
+// downloads the file.
+const FILES = []; // what each card refers to, by index
+const KIND_LABEL = { pdf: 'PDF', document: 'Word document', presentation: 'Presentation', video: 'Video', markdown: 'Markdown file', zip: 'Zip archive', file: 'File' };
+function fileCard(ref, name, sub) {
+  // The same file keeps the same index, so a repaint of an unchanged chat is identical.
+  const key = JSON.stringify(ref); let i = FILES.findIndex((f) => JSON.stringify(f) === key); if (i < 0) i = FILES.push(ref) - 1;
+  return '<div class="fcard"><div class="ficon">' + ICON.folder + '</div><div class="fmeta"><b>' + esc(name) + '</b><span>' + esc(sub) + '</span></div>'
+    + '<button class="fbtn" data-file="' + i + '" data-do="view">View</button><button class="fbtn" data-file="' + i + '" data-do="save" aria-label="Download ' + esc(name) + '">' + ICON.down + '</button></div>';
+}
+const bytesLabel = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+/** A reply's text with its artifact blocks cut out, and a card for each one. */
+function agentBody(text, files) {
+  const cards = [];
+  const stripped = String(text).replace(/```artifact[^\n]*\n([\s\S]*?)```/g, (_all, raw) => {
+    const kind = (/"kind"\s*:\s*"(\w+)"/.exec(raw) || [])[1] || 'file';
+    const title = (/"fileName"\s*:\s*"([^"]+)"/.exec(raw) || /"title"\s*:\s*"([^"]+)"/.exec(raw) || [])[1] || (KIND_LABEL[kind] || 'File');
+    cards.push(fileCard({ raw }, title, KIND_LABEL[kind] || 'File'));
+    return '';
+  }).replace(/```artifact[\s\S]*$/, ''); // a block still being written
+  const stored = (files || []).map((f) => fileCard({ taskId: f.taskId, artifactId: f.id }, f.name, f.sizeBytes !== undefined ? bytesLabel(f.sizeBytes) : (f.mimeType || 'File')));
+  return (stripped.trim() ? md(stripped) : '') + cards.join('') + stored.join('');
+}
+/** A turn's agent messages as HTML, its stored files after the last one. */
+function turnHtml(turn) {
+  const files = (turn.files || []).map((f) => ({ ...f, taskId: turn.id }));
+  const agents = turn.messages.filter((m) => m.role === 'agent');
+  let placed = false;
+  return turn.messages.map((m) => {
+    if (m.role === 'user') return '<div class="me">' + esc(m.text) + '</div>';
+    if (m.role === 'error') return '<div class="er">' + esc(m.text) + '</div>';
+    const last = m === agents[agents.length - 1];
+    if (last) placed = true;
+    return '<div class="ag">' + agentBody(m.text, last ? files : []) + '</div>';
+  }).join('') + (!placed && files.length ? '<div class="ag">' + agentBody('', files) + '</div>' : '');
+}
+async function fetchFile(path, ref) {
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token }, body: JSON.stringify(ref) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'Could not open that file.'); }
+  return r;
+}
+async function saveFile(ref) {
+  toast('Preparing the file…');
+  try {
+    const r = await fetchFile('/api/file', ref);
+    const name = decodeURIComponent(r.headers.get('x-file-name') || 'file');
+    const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: r.headers.get('x-file-type') || 'application/octet-stream' }));
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) { fail(e); }
+}
+function previewHtml(p) {
+  if (p.format === 'pdf') return p.pages.map((pg) => pg.dataUrl ? '<img class="fpage" alt="Page ' + pg.pageNumber + '" src="' + pg.dataUrl + '">' : '<pre class="fpre">' + esc(pg.text) + '</pre>').join('') + (p.pageCount > p.pages.length ? '<p class="fnote">Showing ' + p.pages.length + ' of ' + p.pageCount + ' pages. Download it for the rest.</p>' : '');
+  if (p.format === 'image') return '<img class="fpage" alt="" src="' + p.dataUrl + '">';
+  if (p.format === 'markdown') return md(p.markdown) + (p.truncated ? '<p class="fnote">Shortened. Download it for the rest.</p>' : '');
+  if (p.format === 'text') return '<pre class="fpre">' + esc(p.text) + '</pre>' + (p.truncated ? '<p class="fnote">Shortened. Download it for the rest.</p>' : '');
+  if (p.format === 'archive') return '<ul class="flist">' + p.entries.map((e) => '<li>' + esc(e.path) + (e.directory ? '' : '<span>' + bytesLabel(e.sizeBytes) + '</span>') + '</li>').join('') + '</ul>' + (p.truncated ? '<p class="fnote">' + p.entryCount + ' files in total.</p>' : '');
+  return '<p class="fnote">' + esc(p.message || 'This file can’t be shown here. Download it to open it in another app.') + '</p>';
+}
+async function viewFile(ref) {
+  toast('Opening…');
+  try {
+    const r = await fetchFile('/api/preview', ref); const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Could not open that file.');
+    $('.toast')?.remove();
+    sheet(j.value.fileName, '<div class="fview">' + previewHtml(j.value.preview) + '</div><button class="fbtn wide" data-save>Download</button>', (el) => {
+      $('[data-save]', el)?.addEventListener('click', () => { void saveFile(ref); });
+    });
+  } catch (e) { fail(e); }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-file]'); if (!b) return;
+  const ref = FILES[Number(b.dataset.file)]; if (!ref) return;
+  if (b.dataset.do === 'save') void saveFile(ref); else void viewFile(ref);
+});
+
 // ---- sheets & toasts ------------------------------------------------------------------
 let sheetEl = null;
 function closeSheet() { sheetEl?.remove(); sheetEl = null; }
@@ -329,7 +408,7 @@ function paintChat(data) {
   S.chat = { working: !!last && last.working, lastId: last?.id, workspaceId: data.workspaceId };
   const a = S.view.agentId ? agentById(S.view.agentId) : null;
   const sub = $('#sub'); if (sub) sub.textContent = last?.working ? (last.activity || 'Working…') : (a ? a.clis.map(cliName).join(' → ') : '');
-  const msgs = data.turns.flatMap((t) => t.messages).map((m) => m.role === 'user' ? '<div class="me">' + esc(m.text) + '</div>' : m.role === 'error' ? '<div class="er">' + esc(m.text) + '</div>' : '<div class="ag">' + md(m.text) + '</div>').join('');
+  const msgs = data.turns.map(turnHtml).join('');
   const live = last?.working ? '<div class="live"><i></i><span>' + esc(last.activity || 'Thinking…') + '</span></div>' : '';
   const empty = !data.turns.length ? '<div class="empty" style="margin:auto">' + (a ? avatar(a, undefined) + '<br><br><b>' + esc(a.name) + '</b>' + esc(a.description || 'Send a message to start.') : 'Send a message to start.') + '</div>' : '';
   const html = msgs + live + empty;
@@ -388,7 +467,7 @@ async function refreshChat() {
   paintMessages(msgs, working, running ? running.label : 'Thinking…');
 }
 function paintMessages(msgs, working, label) {
-  const html = msgs.map((m) => m.role === 'user' ? '<div class="me">' + esc(m.text) + '</div>' : m.role === 'error' ? '<div class="er">' + esc(m.text) + '</div>' : '<div class="ag">' + md(m.text) + '</div>').join('')
+  const html = msgs.map((m) => m.role === 'user' ? '<div class="me">' + esc(m.text) + '</div>' : m.role === 'error' ? '<div class="er">' + esc(m.text) + '</div>' : '<div class="ag">' + agentBody(m.text) + '</div>').join('')
     + (working && !msgs.some((m) => m.role === 'agent') ? '<div class="live"><i></i><span>' + esc(label || 'Thinking…') + '</span></div>' : '')
     + (!msgs.length ? '<div class="empty" style="margin:auto"><b>New chat</b>Ask anything. Chats aren’t tied to a project.</div>' : '');
   const c = $('#chat'); if (c && S.sig.chat !== html) { S.sig.chat = html; c.innerHTML = html; if (atBottom) c.scrollTop = c.scrollHeight; }
@@ -467,7 +546,7 @@ async function refreshGroup() {
     for (const [agentId, taskId] of Object.entries(m.replies)) {
       const a = agentById(agentId); const turn = await api('/api/task', { id: taskId });
       if (!turn) continue;
-      const body = turn.messages.filter((x) => x.role !== 'user').map((x) => x.role === 'error' ? '<div class="er">' + esc(x.text) + '</div>' : '<div class="ag">' + md(x.text) + '</div>').join('') || (turn.working ? '' : '<div class="ag mute">No reply.</div>');
+      const body = turnHtml({ ...turn, messages: turn.messages.filter((x) => x.role !== 'user') }) || (turn.working ? '' : '<div class="ag mute">No reply.</div>');
       parts.push('<div class="who">' + esc(a ? a.name : 'Agent') + '</div>' + body + (turn.working ? '<div class="live"><i></i><span>' + esc(turn.activity || 'Thinking…') + '</span></div>' : ''));
     }
   }

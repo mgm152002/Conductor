@@ -38,6 +38,14 @@ export const SANDBOX_SHARED_DIR = '/home/gem/shared';
 export const SANDBOX_MEMORY_FILE = `${SANDBOX_SHARED_DIR}/memory.md`;
 export const SHARED_VOLUME = 'conductor-sandbox-shared';
 
+/** Sandbox keys of group chats start with this; a group's sandbox works in the shared volume. */
+export const GROUP_KEY_PREFIX = 'group-';
+
+/** The volume mounted as an agent's workspace: its own, or the shared one for a group's sandbox. */
+export function workspaceVolume(key: string): string {
+  return key.startsWith(GROUP_KEY_PREFIX) ? SHARED_VOLUME : agentVolume(key);
+}
+
 /** The Docker volume holding one agent's files. */
 export function agentVolume(agentId: string): string {
   const safe = agentId.replace(/[^a-zA-Z0-9_.-]/g, '');
@@ -295,7 +303,7 @@ export class SandboxManager {
         '-e', `SANDBOX_API_KEY=${apiKey}`, '-e', 'TZ=UTC',
         '-p', `127.0.0.1::${CONTAINER_PORT}`,
         // Docker creates a named volume the first time it is mounted.
-        '-v', `${agentVolume(input.agentId)}:${SANDBOX_WORKSPACE_DIR}`,
+        '-v', `${workspaceVolume(input.agentId)}:${SANDBOX_WORKSPACE_DIR}`,
         '-v', `${SHARED_VOLUME}:${SANDBOX_SHARED_DIR}`,
         SANDBOX_IMAGE,
       ], { timeoutMs: 120_000 });
@@ -355,6 +363,7 @@ export class SandboxManager {
   /** The agent was deleted: stop its sandbox and delete its own volume. The shared volume stays. */
   async forget(agentId: string): Promise<void> {
     await this.stop(agentId);
+    if (agentId.startsWith(GROUP_KEY_PREFIX)) return; // a group's workspace is the shared volume: never delete it
     try { await this.docker(['volume', 'rm', '-f', agentVolume(agentId)], { timeoutMs: 30_000 }); } catch { /* Docker absent, or never created */ }
   }
 

@@ -5,6 +5,8 @@ import type { Duplex } from 'node:stream';
 import type { IpcResult } from '@shared/ipc-contract';
 import type { Task } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
+import { parseArtifactSpec } from '@shared/generated-artifacts';
+import type { FileBytes, FilePreview } from '@shared/file-preview';
 import { buildTimeline, latestActivity } from '../../renderer/lib/timeline';
 import { isWorkingState, threadTitle } from '../../renderer/lib/thread-status';
 import { groupThreads, threadKey } from '../../renderer/lib/threads';
@@ -37,6 +39,8 @@ const SESSION_IDLE_MS = 24 * 3_600_000;
 const WATCH_MS = 30 * 60_000;
 const MAX_DEVICES = 5;
 const MAX_BODY = 64 * 1024;
+/** A file request may carry an agent's whole artifact block. */
+const MAX_FILE_BODY = 1024 * 1024;
 const MAX_UPLOAD = 25 * 1024 * 1024;
 const FAIL_WINDOW_MS = 60_000;
 const FAIL_LIMIT = 8;
@@ -51,7 +55,8 @@ export interface PhoneServerDeps {
 
 interface Session { hash: string; lastSeen: number; label: string }
 interface Watch { agentId: string; session: string; expires: number }
-interface Turn { id: string; state: string; working: boolean; activity?: string; messages: Array<{ role: 'user' | 'agent' | 'error'; text: string; at: string }> }
+interface TurnFile { id: string; name: string; mimeType?: string; sizeBytes?: number }
+interface Turn { id: string; state: string; working: boolean; activity?: string; files: TurnFile[]; messages: Array<{ role: 'user' | 'agent' | 'error'; text: string; at: string }> }
 
 const sha = (value: string): string => createHash('sha256').update(value).digest('hex');
 const safeEqual = (a: string, b: string): boolean => timingSafeEqual(Buffer.from(sha(a)), Buffer.from(sha(b)));
@@ -119,13 +124,13 @@ export class PhoneServer {
     res.end(JSON.stringify(body));
   }
 
-  private body(req: IncomingMessage): Promise<unknown> {
+  private body(req: IncomingMessage, limit = MAX_BODY): Promise<unknown> {
     return new Promise((resolve, reject) => {
       let size = 0;
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_BODY) { reject(new Error('too large')); req.destroy(); return; }
+        if (size > limit) { reject(new Error('too large')); req.destroy(); return; }
         chunks.push(chunk);
       });
       req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null')); } catch { reject(new Error('bad json')); } });
@@ -151,7 +156,7 @@ export class PhoneServer {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'SAMEORIGIN',
         'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
-        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`,
+        'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`,
       });
       res.end(mobilePage(nonce));
       return;
@@ -190,7 +195,7 @@ export class PhoneServer {
     if (this.authorised(req) === undefined) { this.failures.push(this.now()); this.send(res, 401, { error: 'Signed out. Scan the QR code again.' }); return; }
     if (upload) { await this.upload(req, res, url); return; }
     let body: unknown;
-    try { body = await this.body(req); } catch { this.send(res, 400, { error: 'Bad request.' }); return; }
+    try { body = await this.body(req, url.pathname === '/api/file' || url.pathname === '/api/preview' ? MAX_FILE_BODY : MAX_BODY); } catch { this.send(res, 400, { error: 'Bad request.' }); return; }
 
     switch (url.pathname) {
       case '/api/rpc': {
@@ -217,6 +222,26 @@ export class PhoneServer {
         this.send(res, 200, { ok: true, value: task === undefined ? null : await this.turnView(task) });
         return;
       }
+      case '/api/file':
+      case '/api/preview': {
+        try {
+          const file = await this.fileFor(body);
+          if (url.pathname === '/api/file') {
+            res.writeHead(200, {
+              'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+              'Content-Disposition': 'attachment', 'X-File-Name': encodeURIComponent(file.fileName), 'X-File-Type': file.mimeType,
+            });
+            res.end(Buffer.from(file.dataBase64, 'base64'));
+            return;
+          }
+          const preview = await this.deps.invoke('artifact.preview', { fileName: file.fileName, dataBase64: file.dataBase64 });
+          if (!preview.ok) { this.send(res, 200, { ok: false, error: preview.error.message }); return; }
+          this.send(res, 200, { ok: true, value: { fileName: file.fileName, mimeType: file.mimeType, preview: preview.value as FilePreview } });
+        } catch (error) {
+          this.send(res, 400, { error: error instanceof Error ? error.message : 'That file could not be opened.' });
+        }
+        return;
+      }
       case '/api/work':
         this.send(res, 200, { ok: true, value: await this.work(typeof (body as { workspaceId?: unknown } | null)?.workspaceId === 'string' ? (body as { workspaceId: string }).workspaceId : undefined) });
         return;
@@ -239,6 +264,31 @@ export class PhoneServer {
       default:
         this.send(res, 404, { error: 'Not found.' });
     }
+  }
+
+  // ---- files agents handed back -----------------------------------------------------
+
+  /**
+   * The bytes of one file: a stored task output (task + artifact id), or one
+   * generated from an artifact block the agent wrote in its reply (the raw
+   * block text, as the desktop generates it).
+   */
+  private async fileFor(body: unknown): Promise<FileBytes> {
+    const request = body as { taskId?: unknown; artifactId?: unknown; raw?: unknown } | null;
+    if (typeof request?.taskId === 'string' && typeof request.artifactId === 'string') {
+      const result = await this.deps.invoke('task.artifactFile', { taskId: request.taskId, artifactId: request.artifactId });
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value as FileBytes;
+    }
+    if (typeof request?.raw === 'string') {
+      const spec = parseArtifactSpec(request.raw);
+      if (spec === null) throw new Error('That file isn’t finished yet.');
+      if (spec.kind === 'video') throw new Error('Videos are made in the Mac app. Open this chat there to watch it.');
+      const result = await this.deps.invoke('artifact.generate', { spec, images: {} });
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value as FileBytes;
+    }
+    throw new Error('Bad request.');
   }
 
   // ---- uploads ---------------------------------------------------------------
@@ -413,7 +463,9 @@ export class PhoneServer {
     }
     const working = isWorkingState(task.state);
     const activity = working ? latestActivity(items)?.label : undefined;
-    return { id: task.id, state: task.state, working, ...(activity !== undefined ? { activity } : {}), messages };
+    const files = (details?.artifacts ?? []).filter((artifact) => artifact.name !== undefined && artifact.name !== '')
+      .map((artifact): TurnFile => ({ id: artifact.id, name: artifact.name!, ...(artifact.mimeType !== undefined ? { mimeType: artifact.mimeType } : {}), ...(artifact.sizeBytes !== undefined ? { sizeBytes: artifact.sizeBytes } : {}) }));
+    return { id: task.id, state: task.state, working, ...(activity !== undefined ? { activity } : {}), files, messages };
   }
 
   /** A thread as plain turns for the phone: what was asked, what came back. */

@@ -18,6 +18,7 @@ import type {
 
 export class IpcTaskEventEmitter implements TaskEventEmitter {
   private getWebContents: () => WebContents | null = () => null;
+  private readonly listeners = new Set<(channel: TaskEventChannel, payload: unknown) => void>();
 
   constructor(private readonly router: IpcRouter) {}
 
@@ -26,7 +27,16 @@ export class IpcTaskEventEmitter implements TaskEventEmitter {
     this.getWebContents = resolver;
   }
 
+  /** Hear every event in this process too, whether or not a window is open. */
+  subscribe(listener: (channel: TaskEventChannel, payload: unknown) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
   emit(channel: TaskEventChannel, payload: unknown): void {
+    for (const listener of this.listeners) {
+      try { listener(channel, payload); } catch { /* a listener must never fail a step */ }
+    }
     const target = this.getWebContents();
     if (target === null || target.isDestroyed()) {
       return;

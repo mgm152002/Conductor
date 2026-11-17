@@ -1,10 +1,10 @@
 // Sandbox agents: named, single-purpose agents (a researcher, a QA tester, a
 // data wrangler…) that run on the user's installed agent CLIs and do their
-// work inside an isolated AIO Sandbox container (agent-infra/sandbox):
+// work inside an isolated sandbox container (AIO Sandbox, agent-infra/sandbox):
 // a real browser, a shell, files and code execution, reached over MCP.
 // Risky sandbox actions go through Conductor's approval gate.
 
-/** Tool families the AIO Sandbox exposes; an agent is given a subset. */
+/** Tool families a sandbox offers; an agent is given a subset. */
 export type SandboxToolGroup = 'browser' | 'shell' | 'files' | 'code' | 'documents';
 
 export const SANDBOX_TOOL_GROUPS: ReadonlyArray<{ id: SandboxToolGroup; label: string; description: string }> = [
@@ -90,6 +90,30 @@ export interface AgentGroupMessage {
    * was sent: queued behind that work, or steering it (stopping it to answer).
    */
   waiting?: Record<string, { queueId: string; mode: 'steer' | 'queue' }>;
+  /** How the members split this message; absent for messages sent before plans existed. */
+  plan?: AgentGroupPlan;
+}
+
+/**
+ * How a message to a group is carried out. `planning`: the planner is still
+ * deciding. `parallel`: independent parts, one sandbox each, all at once.
+ * `dag`: parts that build on each other, in one shared sandbox, each starting
+ * when the parts it needs have finished.
+ */
+export interface AgentGroupPlan {
+  mode: 'planning' | 'parallel' | 'dag';
+  summary: string;
+  steps: AgentGroupPlanStep[];
+}
+
+export interface AgentGroupPlanStep {
+  agentId: string;
+  instruction: string;
+  /** Positions in `steps` of the parts this one waits for. */
+  dependsOn: number[];
+  status: 'waiting' | 'running' | 'done' | 'failed' | 'skipped';
+  /** Why it did not run or finish, when it did not. */
+  note?: string;
 }
 
 /** Whether this machine can run sandboxes right now. */

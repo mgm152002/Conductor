@@ -274,7 +274,7 @@ export function AgentsScreen(): React.JSX.Element {
             onDelete={() => { setDeleting({ kind: 'agent', id: selectedAgent.id, name: selectedAgent.name }); }}
           />
         ) : selectedGroup !== undefined ? (
-          <GroupChat group={selectedGroup} agents={agents} onDelete={() => { setDeleting({ kind: 'group', id: selectedGroup.id, name: selectedGroup.name }); }} />
+          <GroupChat group={selectedGroup} agents={agents} sandboxRunning={status?.running.some((run) => run.state === 'ready' && (run.agentId === `group-${selectedGroup.id}` || selectedGroup.agentIds.includes(run.agentId))) === true} onDelete={() => { setDeleting({ kind: 'group', id: selectedGroup.id, name: selectedGroup.name }); }} />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
             <p className="text-sm font-semibold text-foreground">{loaded && agents.length === 0 ? 'Create your first agent' : 'Pick a conversation'}</p>

@@ -8,6 +8,7 @@ import type { CliMcpManager } from '../mcp/cli-mcp';
 import type { SandboxManager } from '../sandbox/sandbox-manager';
 import type { SandboxAgentService } from '../sandbox/sandbox-agents';
 import { openSandboxViewer } from '../sandbox/sandbox-viewer';
+import { groupSandboxKey } from '../sandbox/sandbox-agents';
 import type { McpService } from '../mcp/mcp-service';
 import type { RemoteHost, RemoteHostService } from '../adapters/remote-hosts';
 import type { ProactiveAssistant } from '../domain/proactive-assistant-service';
@@ -94,7 +95,7 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('agents.workspace', S['agents.workspace'], () => deps.sandboxAgents.agentWorkspaceId());
   router.handle('agents.group.list', S['agents.group.list'], () => ({ groups: deps.sandboxAgents.listGroups(), groupThreads: deps.sandboxAgents.groupThreadMap() }));
   router.handle('agents.group.create', S['agents.group.create'], (_e, input) => deps.sandboxAgents.createGroup(input.name, input.agentIds));
-  router.handle('agents.group.remove', S['agents.group.remove'], (_e, input) => { deps.sandboxAgents.removeGroup(input.id); });
+  router.handle('agents.group.remove', S['agents.group.remove'], async (_e, input) => { await deps.sandboxAgents.removeGroup(input.id); });
   router.handle('agents.group.messages', S['agents.group.messages'], (_e, input) => deps.sandboxAgents.groupMessages(input.groupId));
   router.handle('agents.group.send', S['agents.group.send'], (_e, input) => deps.sandboxAgents.sendGroup({
     groupId: input.groupId, text: input.text,
@@ -103,6 +104,11 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     ...(input.context !== undefined ? { context: input.context } : {}),
     ...(input.attachmentIds !== undefined ? { attachmentIds: input.attachmentIds } : {}),
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
+    ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+    ...(input.runOptions?.main !== undefined ? { runOptions: { main: {
+      ...(input.runOptions.main.model !== undefined ? { model: input.runOptions.main.model } : {}),
+      ...(input.runOptions.main.effort !== undefined ? { effort: input.runOptions.main.effort } : {}),
+    } } } : {}),
   }));
   router.handle('threadTiers.get', S['threadTiers.get'], () => deps.tiers.get());
   router.handle('threadTiers.put', S['threadTiers.put'], (_e, i) => deps.tiers.put(i.key, i.pref === null ? undefined : { mode: i.pref.mode, seenUpdatedAt: i.pref.seenUpdatedAt, ...(i.pref.snoozedUntil !== undefined ? { snoozedUntil: i.pref.snoozedUntil } : {}) }));
@@ -123,6 +129,20 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     const endpoint = deps.sandboxes.endpoint(input.agentId);
     if (endpoint === undefined) throw new Error('This agent’s sandbox isn’t running. It starts when the agent first uses a sandbox tool.');
     openSandboxViewer(endpoint, deps.sandboxAgents.get(input.agentId)?.name);
+  });
+  router.handle('sandbox.groupViewer', S['sandbox.groupViewer'], (_e, input) => {
+    const group = deps.sandboxAgents.listGroups().find((item) => item.id === input.groupId);
+    if (group === undefined) throw new Error('That group no longer exists.');
+    // Parts that build on each other share one sandbox; independent parts each use their member's own.
+    const shared = deps.sandboxes.endpoint(groupSandboxKey(group.id));
+    const open = shared !== undefined
+      ? [{ endpoint: shared, title: group.name }]
+      : group.agentIds.flatMap((id) => {
+        const endpoint = deps.sandboxes.endpoint(id);
+        return endpoint === undefined ? [] : [{ endpoint, title: deps.sandboxAgents.get(id)?.name }];
+      });
+    if (open.length === 0) throw new Error('No sandbox of this group is running. They start when a member first uses a sandbox tool.');
+    for (const view of open) openSandboxViewer(view.endpoint, view.title);
   });
   router.handle('mcp.cli.overview', S['mcp.cli.overview'], (_e, input) => deps.cliMcp.overview({ sync: input?.sync === true }));
   router.handle('mcp.cli.sync', S['mcp.cli.sync'], () => deps.cliMcp.sync());

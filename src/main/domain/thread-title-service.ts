@@ -228,6 +228,15 @@ export class AgentTitleGenerator {
     try { chmodSync(sandboxPath, 0o700); } catch { /* best effort */ }
   }
 
+  /**
+   * One read-only, tool-free question to the user's agents, tried in order of
+   * preference with each one's fallback model. Used where Conductor needs a
+   * short structured answer (the plan for a group message).
+   */
+  ask(label: string, prompt: string, guidance: string): Promise<string | undefined> {
+    return this.generateWith(label, (agentId, runOverride) => this.runWith(agentId, prompt, label, guidance, runOverride));
+  }
+
   async generate(objective: string, pin?: TitleRunPin): Promise<string | undefined> {
     if (pin !== undefined) return this.generatePinned(objective, pin);
     return this.generateWith('Thread title generation', async (agentId, runOverride) => {

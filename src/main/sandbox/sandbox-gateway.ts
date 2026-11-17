@@ -6,7 +6,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { SandboxApprovalPolicy, SandboxToolGroup } from '@shared/sandbox-agents';
 import type { GateRequest } from '../adapters/tool-gate';
 import type { ToolApprovalDecision } from '../adapters/tool-gate';
-import { SANDBOX_SHARED_DIR, type SandboxEndpoint } from './sandbox-manager';
+import { SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint } from './sandbox-manager';
+import shippedTools from './aio-tools.json';
 import { SharedLocks, refusal, type LockOwner } from './shared-locks';
 
 // The MCP server an agent CLI connects to for its sandbox tools.
@@ -57,7 +58,7 @@ export const LOCK_TOOL = 'lock_shared';
 export const UNLOCK_TOOL = 'unlock_shared';
 const LOCK_INPUT: Json = {
   type: 'object',
-  properties: { path: { type: 'string', description: `Absolute path of a file or subfolder inside ${SANDBOX_SHARED_DIR}. It does not have to exist yet.` } },
+  properties: { path: { type: 'string', description: `Absolute path of a file or subfolder inside ${SANDBOX_SHARED_DIR} (or inside ${SANDBOX_WORKSPACE_DIR} when your workspace is the shared folder). It does not have to exist yet.` } },
   required: ['path'],
   additionalProperties: false,
 };
@@ -134,12 +135,20 @@ export interface GatewaySessionConfig {
    * lock tools, and its calls are checked against other runs' locks.
    */
   lockOwner?: LockOwner;
+  /**
+   * The workspace folder is the shared volume (a group's sandbox), so a path
+   * in it is the same file as one in the shared folder and is locked as such.
+   */
+  workspaceIsShared?: boolean;
   /** Called after each forwarded call, for the thread's activity. */
   onCall?: (call: { tool: string; ok: boolean }) => void;
 }
 
 interface Session {
   config: GatewaySessionConfig;
+  /** Resolves once the CLI has asked for this session's tool list (it has picked the sandbox up). */
+  listed: Promise<void>;
+  markListed: () => void;
   client?: Promise<Client>;
   tools?: Promise<GatewayTool[]>;
 }
@@ -147,6 +156,12 @@ interface Session {
 export interface GatewaySession {
   /** The MCP URL to hand the CLI. */
   url: string;
+  /**
+   * Resolves once the CLI has fetched the tool list. Some CLIs (Kiro) load
+   * MCP servers in the background after a session starts, so a prompt sent
+   * straight away can reach the model before the sandbox's tools exist.
+   */
+  listed: Promise<void>;
   /** Tools this run may use, for the agent's prompt. */
   toolNames(): Promise<string[]>;
   dispose(): void;
@@ -207,7 +222,17 @@ function describeCall(name: string, args: Json): { summary: string; detail?: str
 }
 
 /** How long tools/list waits for the sandbox when it has no saved list to answer from. */
-const LIST_WAIT_MS = 8_000;
+const LIST_WAIT_MS = 1_500;
+
+const WORKSPACE_MENTION = new RegExp(`(?:${SANDBOX_WORKSPACE_DIR.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}|(?:~|\\$HOME|\\$\\{HOME\\})/${SANDBOX_WORKSPACE_DIR.slice(SANDBOX_WORKSPACE_DIR.lastIndexOf('/') + 1)})(?![\\w.-])`, 'g');
+
+/** The same value with every workspace path written as its place in the shared folder. */
+export function workspaceAsShared<T>(value: T): T {
+  if (typeof value === 'string') return value.replace(WORKSPACE_MENTION, SANDBOX_SHARED_DIR) as T;
+  if (Array.isArray(value)) return value.map(workspaceAsShared) as T;
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, workspaceAsShared(item)])) as T;
+  return value;
+}
 
 export class SandboxGateway {
   private server: Server | undefined;
@@ -219,10 +244,13 @@ export class SandboxGateway {
   async open(config: GatewaySessionConfig): Promise<GatewaySession> {
     const port = await this.listen();
     const token = randomBytes(24).toString('hex');
-    const session: Session = { config };
+    let markListed: () => void = () => {};
+    const listed = new Promise<void>((resolve) => { markListed = resolve; });
+    const session: Session = { config, listed, markListed };
     this.sessions.set(token, session);
     return {
       url: `http://127.0.0.1:${port}/g/${token}/mcp`,
+      listed,
       toolNames: async () => (await this.tools(session)).map((tool) => tool.name),
       dispose: () => {
         this.sessions.delete(token);
@@ -266,18 +294,25 @@ export class SandboxGateway {
   /** Every tool the sandbox offers, as last seen — so a CLI can be told them before the sandbox is up. */
   private upstream: GatewayTool[] | undefined;
 
-  constructor(private readonly cacheFile?: string) {
+  /**
+   * `cacheVersion` names what the saved list came from (the sandbox image):
+   * a list saved for a different one is ignored, so tools a previous sandbox
+   * had are never offered to an agent that no longer has them.
+   */
+  constructor(private readonly cacheFile?: string, private readonly cacheVersion = '') {
     if (cacheFile === undefined) return;
     try {
-      const saved = JSON.parse(readFileSync(cacheFile, 'utf8')) as unknown;
-      if (Array.isArray(saved)) this.upstream = saved.filter((tool): tool is GatewayTool => typeof (tool as GatewayTool | undefined)?.name === 'string');
+      const saved = JSON.parse(readFileSync(cacheFile, 'utf8')) as { version?: unknown; tools?: unknown } | null;
+      if (saved !== null && !Array.isArray(saved) && saved.version === this.cacheVersion && Array.isArray(saved.tools)) {
+        this.upstream = saved.tools.filter((tool): tool is GatewayTool => typeof (tool as GatewayTool | undefined)?.name === 'string');
+      }
     } catch { /* no saved list yet */ }
   }
 
   private remember(tools: GatewayTool[]): void {
     this.upstream = tools;
     if (this.cacheFile === undefined) return;
-    try { writeFileSync(this.cacheFile, JSON.stringify(tools)); } catch { /* the list is only a speed-up */ }
+    try { writeFileSync(this.cacheFile, JSON.stringify({ version: this.cacheVersion, tools })); } catch { /* the list is only a speed-up */ }
   }
 
   /** The tools this session's agent may use, out of what the sandbox offers. */
@@ -313,7 +348,8 @@ export class SandboxGateway {
    * server that does not answer within seconds, and the sandbox can take far
    * longer than that to start — so answer from the last list the sandbox gave
    * (it starts in the background meanwhile). With no list yet, wait briefly,
-   * then offer only Conductor's own tools rather than nothing.
+   * then answer with the list shipped with the app (read from this sandbox
+   * image) — a tool call itself waits for the sandbox to be ready.
    */
   private async listTools(session: Session): Promise<GatewayTool[]> {
     const real = this.tools(session);
@@ -324,7 +360,7 @@ export class SandboxGateway {
     const waited = await Promise.race([real, new Promise<undefined>((resolve) => setTimeout(resolve, LIST_WAIT_MS, undefined))]);
     if (waited !== undefined) return waited;
     real.catch(() => undefined);
-    return this.visible(session, []);
+    return this.visible(session, shippedTools as GatewayTool[]);
   }
 
   /** Approve (or not) and forward one tool call. */
@@ -348,7 +384,8 @@ export class SandboxGateway {
     }
     const owner = session.config.lockOwner;
     if (owner !== undefined && (name === LOCK_TOOL || name === UNLOCK_TOOL)) {
-      const path = typeof args['path'] === 'string' ? args['path'] : '';
+      const asked = typeof args['path'] === 'string' ? args['path'] : '';
+      const path = session.config.workspaceIsShared === true ? workspaceAsShared(asked) : asked;
       if (name === UNLOCK_TOOL) {
         const released = this.locks.release(path, owner.id);
         return { content: [{ type: 'text', text: released ? `Unlocked ${path}.` : `You hold no lock on ${path}.` }], ...(released ? {} : { isError: true }) };
@@ -363,7 +400,7 @@ export class SandboxGateway {
     // tool takes the lock itself; a command or code has to lock first, since
     // what it will touch can't be known from its text.
     if (owner !== undefined && !isLookOnly(name, args)) {
-      const paths = this.locks.mentioned(args);
+      const paths = this.locks.mentioned(session.config.workspaceIsShared === true ? workspaceAsShared(args) : args);
       for (const path of paths) {
         const holder = this.locks.blocker(path, owner.id);
         if (holder !== undefined) return { content: [{ type: 'text', text: refusal(holder) }], isError: true };
@@ -459,7 +496,7 @@ export class SandboxGateway {
         reply({});
         return;
       case 'tools/list':
-        try { reply({ tools: await this.listTools(session) }); }
+        try { reply({ tools: await this.listTools(session) }); session.markListed(); }
         catch (error) { fail(`The sandbox is not reachable: ${error instanceof Error ? error.message : 'unknown error'}`); }
         return;
       case 'tools/call': {

@@ -203,6 +203,25 @@ describe('tool-call classification', () => {
     expect(claudeGateRequest('mcp__gh__create_issue', { title: 't' })).toMatchObject({ kind: 'permissions', summary: 'Claude Code wants to use mcp__gh__create_issue' });
   });
 
+  it('recognises a local shell or file edit from Kiro, which sends no tool kind, so a sandbox-only agent is held to its sandbox', async () => {
+    // What Kiro's permission requests actually look like: a title and the raw input.
+    const shell = acpGateRequest('Kiro CLI', { toolCallId: 't', title: 'Running: cd /tmp && git clone x', rawInput: { command: 'cd /tmp && git clone x' } });
+    expect(shell).toMatchObject({ kind: 'command', detail: 'cd /tmp && git clone x' });
+    const write = acpGateRequest('Kiro CLI', { toolCallId: 't', title: 'Creating w.txt', rawInput: { command: 'create', path: '/tmp/w.txt', content: 'hi' } });
+    expect(write).toMatchObject({ kind: 'file_change', detail: '/tmp/w.txt' });
+    expect(acpGateRequest('Kiro CLI', { title: 'Deleting w.txt', rawInput: { command: 'delete', path: '/tmp/w.txt' } }).kind).toBe('file_change');
+    // An MCP server's tool is not a local tool, even when it takes a command.
+    expect(acpGateRequest('Kiro CLI', { title: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install poppler', rawInput: { command: 'HOMEBREW_NO_AUTO_UPDATE=1 brew install poppler' } }).kind).toBe('command');
+    expect(acpGateRequest('Kiro CLI', { title: 'Running: @sandbox/sandbox_execute_bash', rawInput: { command: 'ls' } }).kind).toBe('permissions');
+    // A tool kind the agent does send still wins.
+    expect(acpGateRequest('OpenCode', { kind: 'read', title: 'Running: x', locations: [{ path: '/w/a' }] }).kind).toBe('permissions');
+
+    // Even with auto-approve on, a sandbox-only run refuses them.
+    const gate = new ToolGate('trusted_automation', async () => 'accept', { taskId: 't', stepId: 's' }, { sandboxOnly: true, autoApprove: () => true });
+    expect(await gate.decide(shell)).toBe('decline');
+    expect(await gate.decide(write)).toBe('decline');
+  });
+
   it('treats reads and searches as approval-free except sensitive files', () => {
     expect(acpGateRequest('OpenCode', { kind: 'read', title: 'Read', locations: [{ path: '/w/src/a.ts' }] }).readOnly).toBe(true);
     expect(acpGateRequest('OpenCode', { kind: 'search', title: 'Search', rawInput: { path: '/w/src' } }).readOnly).toBe(true);

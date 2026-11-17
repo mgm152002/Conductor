@@ -107,3 +107,20 @@ header.bar.compact{border-bottom:1px solid var(--line);background:var(--surface)
 .appr .sum{font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
 .actions{display:flex;gap:10px;margin-top:12px}.actions .btn{flex:1}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* files the agent made */
+.fcard{display:flex;align-items:center;gap:10px;margin:8px 0 2px;padding:10px 10px 10px 12px;border:1px solid var(--line,rgba(127,127,127,.25));border-radius:14px;background:var(--bg,transparent)}
+.fcard .ficon{flex:none;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:rgba(127,127,127,.14)}
+.fcard .ficon svg,.fbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.fcard .fmeta{flex:1;min-width:0;display:flex;flex-direction:column}
+.fcard .fmeta b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fcard .fmeta span{font-size:12px;opacity:.6}
+.fbtn{flex:none;min-height:36px;min-width:36px;padding:0 12px;border-radius:10px;background:rgba(127,127,127,.16);font-weight:600;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+.fbtn.wide{width:100%;margin-top:12px;min-height:44px}
+.fview{max-height:62vh;overflow:auto;-webkit-overflow-scrolling:touch}
+.fview .fpage{display:block;width:100%;height:auto;margin:0 0 10px;border-radius:6px;border:1px solid rgba(127,127,127,.25);background:#fff}
+.fview .fpre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,Menlo,monospace;margin:0 0 10px}
+.fview .fnote{opacity:.65;font-size:13px}
+.flist{list-style:none;margin:0;padding:0;font:13px/1.6 ui-monospace,Menlo,monospace}
+.flist li{display:flex;justify-content:space-between;gap:12px;overflow-wrap:anywhere;border-bottom:1px solid rgba(127,127,127,.15);padding:4px 0}
+.flist li span{opacity:.55;flex:none}

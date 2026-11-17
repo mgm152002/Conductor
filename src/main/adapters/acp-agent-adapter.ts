@@ -39,6 +39,8 @@ export function acpMcpServers(servers: GatedLive['data']['mcpServers']): Json[] 
 }
 
 const RPC_TIMEOUT_MS = 120_000;
+/** How long a first prompt waits for the agent to pick up an MCP server. */
+const MCP_READY_MS = 15_000;
 const PROTOCOL_VERSION = 1;
 /** How many times a turn ended by a declined tool is continued. */
 const DECLINE_CONTINUATIONS = 2;
@@ -101,6 +103,27 @@ function openCodeConfig(existing: string | undefined, sandboxOnly = false): stri
 }
 
 /** What the user is asked for one ACP permission request. */
+/**
+ * The kind of a tool call that arrives without one. Kiro's permission
+ * requests carry only a title ("Running: …", "Creating w.txt") and the raw
+ * input, so reading the kind off them is what lets a sandbox agent's local
+ * shell and file edits be recognised and turned away rather than passed
+ * through as an unknown tool.
+ */
+export function inferToolKind(title: string, input: Json | null): 'execute' | 'edit' | undefined {
+  // An MCP server's tool ("Running: @sandbox/…") is not a local tool: it has its own gate.
+  if (/@[\w.-]+\//.test(title)) return undefined;
+  const path = str(input?.['path']) ?? str(input?.['filePath']) ?? str(input?.['file_path']);
+  const verb = str(input?.['command']);
+  const edits = /^(creat|writ|edit|replac|delet|remov|mov|renam|append|insert|updat|modif|patch|overwrit)/i;
+  if (path !== undefined && (edits.test(title) || (verb !== undefined && /^(create|write|str_replace|insert|delete|append|edit|replace|patch|move|rename)$/i.test(verb)))) return 'edit';
+  if (/^(running|executing):?\s/i.test(title)) return 'execute';
+  // Kiro often titles a shell call with the command itself ("set -e RUN=…", "brew install …"):
+  // anything carrying a command line and no file path is a local shell command.
+  if (path === undefined && (verb !== undefined || Array.isArray(input?.['command']) || str(input?.['cmd']) !== undefined)) return 'execute';
+  return undefined;
+}
+
 export function acpGateRequest(agentName: string, toolCall: Json): GateRequest {
   const title = str(toolCall['title']) ?? 'use a tool';
   const raw = toolCall['rawInput'];
@@ -108,7 +131,7 @@ export function acpGateRequest(agentName: string, toolCall: Json): GateRequest {
   const locations = Array.isArray(toolCall['locations'])
     ? (toolCall['locations'] as unknown[]).map((l) => str(obj(l)?.['path'])).filter((p): p is string => p !== undefined) : [];
   const paths = locations.length > 0 ? locations : [str(input?.['filePath']) ?? str(input?.['path']) ?? str(input?.['file_path'])].filter((p): p is string => p !== undefined);
-  switch (str(toolCall['kind'])) {
+  switch (str(toolCall['kind']) ?? inferToolKind(title, input)) {
     case 'read':
     case 'search': {
       const sensitive = paths.some(isSensitivePath);
@@ -488,6 +511,15 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
         else send({ id, error: { code: -32601, message: `Conductor does not provide ${method}` } });
         return;
       }
+      // Kiro says when it has connected an MCP server, under either of its namespaces.
+      if (method === '_kiro.dev/mcp/server_initialized' || method === '_kiro/mcp/status') {
+        const connected = method === '_kiro/mcp/status'
+          ? (Array.isArray(params['servers']) ? (params['servers'] as unknown[]).map(obj).filter((server) => server?.['status'] === 'connected').map((server) => str(server?.['name'])) : [])
+          : [str(params['serverName'])];
+        for (const server of connected) if (server !== undefined) initializedServers.add(server);
+        for (const wake of initializedWaiters.splice(0)) wake();
+        return;
+      }
       if (method === 'session/update' && (sessionId === undefined || params['sessionId'] === sessionId)) onUpdate(params);
     });
     child.once('close', () => {
@@ -500,11 +532,16 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
       else child.kill('SIGTERM');
     };
 
+    const initializedServers = new Set<string>();
+    const initializedWaiters: Array<() => void> = [];
     const run = async (): Promise<void> => {
       const initialized = obj(await request('initialize', {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        clientInfo: { name: 'conductor', version: '0.1.0' },
+        // Kiro decides how to treat a client from this name: under "conductor" (and most
+        // other names) its model is never offered the MCP servers we pass in, so the sandbox
+        // tools vanish. The generic ACP client name gets them (checked against a live sandbox).
+        clientInfo: { name: 'acp-client', version: '0.1.0' },
       }));
       const promptCapabilities = obj(obj(initialized?.['agentCapabilities'])?.['promptCapabilities']);
       const imageCapable = promptCapabilities?.['image'] === true;
@@ -536,6 +573,25 @@ export class AcpAgentAdapter extends GatedAgentAdapter {
         }
         return reply;
       };
+      // Kiro loads MCP servers in the background after session/new. A prompt sent
+      // straight away can reach the model before the sandbox's tools exist, and
+      // it then works with its local tools instead. Wait until it has fetched them.
+      const awaited = (data.mcpServers ?? []).filter((server) => server.ready !== undefined);
+      if (awaited.length > 0) {
+        const everyInitialized = async (): Promise<void> => {
+          while (!awaited.every((server) => initializedServers.has(server.key))) await new Promise<void>((resolve) => { initializedWaiters.push(resolve); });
+        };
+        const picked = await Promise.race([
+          Promise.all(awaited.map((server) => server.ready)).then(() => true),
+          new Promise<boolean>((resolve) => { setTimeout(resolve, MCP_READY_MS, false); }),
+        ]);
+        if (!picked) live.events.push('log', { message: `${name} had not loaded the sandbox’s tools after ${MCP_READY_MS / 1000}s; continuing without waiting.`, kind: 'other', source: name });
+        else {
+          // Agents that announce a connected server get a moment to say so; the rest just settle.
+          await Promise.race([everyInitialized(), new Promise<void>((resolve) => { setTimeout(resolve, 3_000); })]);
+          await new Promise<void>((resolve) => { setTimeout(resolve, 300); });
+        }
+      }
       let done = await turn(objectivePrompt(data), true);
       // A declined tool is not a user cancellation: OpenCode ends the turn
       // instead of carrying on, so continue the same session and ask it to use
