@@ -161,4 +161,23 @@ export class Mem0Client {
     try { await this.request(`/memories/${encodeURIComponent(id)}`, 'DELETE'); }
     catch (error) { if (!(error instanceof Mem0Error) || error.status !== 404) throw error; }
   }
+
+  /** Store one verbatim note under a namespace of its own (not tied to a project record). */
+  async addNote(userId: string, content: string, metadata: Record<string, unknown> = {}): Promise<Mem0Memory> {
+    const results = this.memories(await this.request('/memories', 'POST', {
+      user_id: userId, run_id: 'notes', messages: [{ role: 'user', content }], metadata, infer: false,
+    }));
+    if (results.length !== 1) throw new Mem0Error('Mem0 must acknowledge exactly one verbatim memory');
+    return results[0]!;
+  }
+
+  /** Notes in one namespace that best match a query. */
+  async searchNotes(userId: string, query: string, limit: number): Promise<Mem0Memory[]> {
+    return this.memories(await this.request('/search', 'POST', { query, filters: { user_id: userId }, top_k: limit }));
+  }
+
+  /** Every note in one namespace, newest first as the service returns them. */
+  async listNotes(userId: string, limit: number): Promise<Mem0Memory[]> {
+    return this.memories(await this.request(`/memories?${new URLSearchParams({ user_id: userId, top_k: String(limit) })}`));
+  }
 }
