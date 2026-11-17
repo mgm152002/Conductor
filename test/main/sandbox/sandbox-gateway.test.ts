@@ -109,6 +109,20 @@ describe('isLookOnly', () => {
 });
 
 describe('SandboxGateway', () => {
+  it('reports when the CLI has fetched the tool list, so a first prompt can wait for it', async () => {
+    const { session } = open({ tools: ['browser'] });
+    const opened = await session;
+    let listed = false;
+    void opened.listed.then(() => { listed = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(listed).toBe(false);
+    const cli = await connect(opened.url);
+    await cli.listTools();
+    await opened.listed;
+    expect(listed).toBe(true);
+    await cli.close();
+  });
+
   it('offers only the tool families the agent was given, and sends the sandbox key upstream', async () => {
     const { session } = open({ tools: ['browser', 'files'] });
     const cli = await connect((await session).url);
@@ -244,6 +258,28 @@ describe('locking the folder agents share', () => {
     expect(calls).toEqual([]);
   });
 
+  it('in a group sandbox, treats the workspace as the shared folder, so both paths lock the same files', async () => {
+    const group = (id: string, name: string) => gateway.open({
+      agentName: name, tools: ['files', 'shell'], approval: 'none',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'accept', lockOwner: { id, name }, workspaceIsShared: true,
+    });
+    const a = await connect((await group('task-a', 'Researcher')).url);
+    const b = await connect((await group('task-b', 'Writer')).url);
+    expect((await a.callTool({ name: 'lock_shared', arguments: { path: '/home/gem/workspace/report' } })).isError).not.toBe(true);
+    expect(gateway.locks.list().map((lock) => lock.path)).toEqual([`${S}/report`]);
+    for (const call of [
+      { name: 'file_write', arguments: { path: `${S}/report/a.md` } },
+      { name: 'file_write', arguments: { path: '/home/gem/workspace/report/a.md' } },
+      { name: 'terminal_execute', arguments: { command: 'echo x >> ~/workspace/report/a.md' } },
+      { name: 'lock_shared', arguments: { path: '$HOME/workspace/report' } },
+    ]) expect((await b.callTool(call)).isError).toBe(true);
+    // A similarly named folder is a different path.
+    expect((await b.callTool({ name: 'file_write', arguments: { path: '/home/gem/workspace-old/x' } })).isError).not.toBe(true);
+    expect((await a.callTool({ name: 'unlock_shared', arguments: { path: `${S}/report` } })).isError).not.toBe(true);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: '/home/gem/workspace/report/a.md' } })).isError).not.toBe(true);
+  });
+
   it('turns another agent away from a locked file or folder until it is unlocked', async () => {
     const a = await connect((await openAs('task-a', 'Researcher')).url);
     const b = await connect((await openAs('task-b', 'Writer')).url);
@@ -300,13 +336,13 @@ describe('SandboxGateway tools/list while the sandbox starts', () => {
 
   it('answers from the last list the sandbox gave, without waiting for it to start', async () => {
     const cache = join(dir, 'tools.json');
-    const first = new SandboxGateway(cache);
+    const first = new SandboxGateway(cache, 'image-1');
     const warm = await first.open({ agentName: 'Researcher', tools: ['browser', 'files'], approval: 'none', sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }), decide: async () => 'accept' });
     expect(await (await connect(warm.url)).listTools().then((r) => r.tools.length)).toBeGreaterThan(0);
     warm.dispose(); first.close();
 
     // A new app run with a sandbox that is still starting.
-    const second = new SandboxGateway(cache);
+    const second = new SandboxGateway(cache, 'image-1');
     const cold = await second.open({ agentName: 'Researcher', tools: ['browser'], approval: 'none', sandbox: never, decide: async () => 'accept' });
     const started = Date.now();
     const names = (await (await connect(cold.url)).listTools()).tools.map((tool) => tool.name);
@@ -314,6 +350,13 @@ describe('SandboxGateway tools/list while the sandbox starts', () => {
     expect(names).toContain('browser_navigate');
     expect(names).not.toContain('terminal_execute');
     cold.dispose(); second.close();
+
+    // A different sandbox image must not be shown the old list.
+    const other = new SandboxGateway(cache, 'image-2');
+    const fresh = await other.open({ agentName: 'Researcher', tools: ['browser'], approval: 'none', sandbox: never, decide: async () => 'accept' });
+    const stale = (await (await connect(fresh.url)).listTools()).tools.map((tool) => tool.name);
+    expect(stale).toContain('browser_get_markdown'); // the list shipped with the app, not the saved one
+    fresh.dispose(); other.close();
     rmSync(dir, { recursive: true, force: true });
-  });
+  }, 30_000);
 });
