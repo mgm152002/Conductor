@@ -130,6 +130,7 @@ const integrations: IntegrationsBridge = {
     pull: () => invoke('sandbox.pull'),
     stop: (agentId) => invoke('sandbox.stop', { agentId }),
     openViewer: (agentId) => invoke('sandbox.viewer', { agentId }),
+    openGroupViewer: (groupId) => invoke('sandbox.groupViewer', { groupId }),
   },
   mcp: {
     list: () => invoke('mcp.list'), discover: () => invoke('mcp.discover'), add: (input) => invoke('mcp.add', input),

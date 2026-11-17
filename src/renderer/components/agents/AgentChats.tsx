@@ -449,9 +449,11 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
 
 // ---- group ----------------------------------------------------------------------------
 
-export function GroupChat({ group, agents, onDelete }: {
+export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
   group: AgentGroup;
   agents: SandboxAgent[];
+  /** One of the group's sandboxes is up, so its browser can be watched. */
+  sandboxRunning: boolean;
   onDelete: () => void;
 }): React.JSX.Element {
   const members = useMemo(() => group.agentIds.map((id) => agents.find((agent) => agent.id === id)).filter((agent): agent is SandboxAgent => agent !== undefined), [group, agents]);
@@ -534,6 +536,9 @@ export function GroupChat({ group, agents, onDelete }: {
           <h2 className="truncate text-sm font-semibold text-foreground">{group.name}</h2>
           <p className="truncate text-2xs text-muted-foreground">{members.map((member) => member.name).join(', ')}</p>
         </div>
+        {sandboxRunning ? (
+          <Button size="sm" variant="ghost" title="Watch the group’s browsers live" onClick={() => { void window.conductor.sandbox.openGroupViewer(group.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
+        ) : null}
         <Button size="icon" variant="ghost" aria-label={`Delete group ${group.name}`} title="Delete group" onClick={onDelete} className="hover:text-destructive-foreground"><TrashIcon size={14} /></Button>
       </header>
       <div ref={scroll.ref} onScroll={scroll.onScroll} className="min-h-0 flex-1 overflow-y-auto">

@@ -90,8 +90,9 @@ export const INTEGRATION_SCHEMAS = {
   'phone.stop': z.void(),
   'sandbox.status': z.void(),
   'sandbox.pull': z.void(),
-  'sandbox.stop': z.object({ agentId: uuid }),
   'sandbox.viewer': z.object({ agentId: uuid }),
+  'sandbox.groupViewer': z.object({ groupId: uuid }),
+  'sandbox.stop': z.object({ agentId: uuid }),
 
   // MCP servers in each agent CLI's own configuration.
   'mcp.cli.overview': z.object({ sync: z.boolean().optional() }).optional(),
@@ -193,6 +194,8 @@ export interface IntegrationsBridge {
     stop(agentId: string): Promise<void>;
     /** Open a window showing the agent's sandbox desktop (live browser). */
     openViewer(agentId: string): Promise<void>;
+    /** Open a window for each running sandbox of a group chat (the shared one, or its members' own). */
+    openGroupViewer(groupId: string): Promise<void>;
   };
   mcp: {
     list(): Promise<McpServer[]>;
