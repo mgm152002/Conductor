@@ -59,8 +59,10 @@ function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JS
   // A running command/tool shows its output or arguments without a click, so
   // live threads explain what the agent is actually doing.
   const open = manualOpen ?? (live && entry.tone === 'running');
+  // Only the live part of a thread animates. A step still marked running in a
+  // finished or interrupted turn (or in an earlier group of a live one) is stale.
   const toneIcon = entry.tone === 'running'
-    ? <Spinner size={12} className="text-info" />
+    ? (live ? <Spinner size={12} className="text-info" /> : null)
     : entry.tone === 'error'
       ? <XIcon size={12} className="text-destructive" />
       : entry.tone === 'success' && (entry.icon === 'terminal' || entry.icon === 'tool')
