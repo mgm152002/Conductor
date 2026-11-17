@@ -340,6 +340,30 @@ export class SandboxManager {
   }
 
   /** The task stopped using the sandbox; stop it once idle for a while. */
+  /** Docker volumes holding sandbox data: the shared one, each agent's workspace, and the legacy one. */
+  async dataVolumes(): Promise<string[]> {
+    const out = await this.docker(['volume', 'ls', '-q', '--filter', 'name=conductor-sandbox'], { timeoutMs: 15_000 });
+    return out.split('\n').map((name) => name.trim()).filter((name) => name === SHARED_VOLUME || name === 'conductor-sandbox-workspace' || name.startsWith('conductor-sandbox-agent-'));
+  }
+
+  /**
+   * The text files in a volume (small, not hidden, not dependency folders),
+   * read through a throw-away container so no sandbox needs to be running.
+   * Paths are relative to the volume's root.
+   */
+  async readVolumeFiles(volume: string): Promise<Array<{ path: string; content: string }>> {
+    const script = 'cd /d && find . -type f -size -200k -not -path "*/.*" -not -path "*/node_modules/*" -not -path "*/.git/*" | head -400 | while IFS= read -r f; do '
+      + 'if [ -s "$f" ] && grep -Iq . "$f" 2>/dev/null; then printf "\\n@@FILE %s\\n" "$f"; cat "$f"; fi; done';
+    const out = await this.docker(['run', '--rm', '-v', `${volume}:/d:ro`, '--entrypoint', 'sh', SANDBOX_IMAGE, '-c', script], { timeoutMs: 120_000 });
+    const files: Array<{ path: string; content: string }> = [];
+    for (const part of out.split('\n@@FILE ').slice(1)) {
+      const end = part.indexOf('\n');
+      if (end < 0) continue;
+      files.push({ path: part.slice(0, end).replace(/^\.\//, ''), content: part.slice(end + 1) });
+    }
+    return files;
+  }
+
   release(agentId: string, taskId: string): void {
     const run = this.running.get(agentId);
     if (run === undefined) return;

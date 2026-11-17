@@ -10,6 +10,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { z } from 'zod';
 import { SandboxGateway, isLookOnly, toolGroup } from '@main/sandbox/sandbox-gateway';
 import { readSandboxFile } from '@main/sandbox/sandbox-agents';
+import { agentMemory, agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from '@main/sandbox/agent-memory';
+import { SharedKnowledgeSync, chunkText } from '@main/sandbox/shared-knowledge';
 import type { GateRequest, ToolApprovalDecision } from '@main/adapters/tool-gate';
 
 // The gateway sits between an agent CLI and the AIO Sandbox's MCP endpoint.
@@ -359,4 +361,110 @@ describe('SandboxGateway tools/list while the sandbox starts', () => {
     fresh.dispose(); other.close();
     rmSync(dir, { recursive: true, force: true });
   }, 30_000);
+});
+
+describe("an agent's private memory", () => {
+  /** A stand-in for Mem0 that keeps notes per user_id, like the real service. */
+  function fakeMem0() {
+    const notes: Array<{ id: string; memory: string; user_id: string; metadata?: Record<string, unknown> }> = [];
+    let seq = 0;
+    return {
+      notes,
+      addNote: async (user: string, memory: string, metadata: Record<string, unknown> = {}) => { const note = { id: `m${++seq}`, memory, user_id: user, metadata }; notes.push(note); return note; },
+      searchNotes: async (user: string, query: string) => notes.filter((n) => n.user_id === user && n.memory.includes(query)),
+      listNotes: async (user: string) => notes.filter((n) => n.user_id === user),
+      get: async (id: string) => notes.find((n) => n.id === id)!,
+      delete: async (id: string) => { notes.splice(notes.findIndex((n) => n.id === id), 1); },
+    };
+  }
+
+  it('saves, finds and forgets notes in a namespace of its own, never another agent\'s', async () => {
+    const mem0 = fakeMem0();
+    const a = agentMemory(mem0, 'agent-a');
+    const b = agentMemory(mem0, 'agent-b');
+    await a.save('The user prefers tables');
+    await b.save('Deploys go out on Fridays');
+    expect(mem0.notes.map((n) => n.user_id)).toEqual([agentMemoryNamespace('agent-a'), agentMemoryNamespace('agent-b')]);
+    expect(agentMemoryNamespace('agent-a')).not.toBe('conductor');
+    expect(await a.search('prefers')).toContain('tables');
+    expect(await a.search('Fridays')).toBe('Nothing saved matches.');
+    expect(await a.search('')).not.toContain('Fridays');
+    await expect(a.forget('m2')).rejects.toThrow(/not yours/);
+    expect(await a.forget('m1')).toContain('Forgot');
+    expect(mem0.notes).toHaveLength(1);
+    await expect(a.save('   ')).rejects.toThrow();
+  });
+
+  it('offers the memory tools only when configured, and never forwards them to the sandbox', async () => {
+    const plain = await connect((await open().session).url);
+    expect((await plain.listTools()).tools.map((tool) => tool.name)).not.toContain('memory_save');
+
+    const mem0 = fakeMem0();
+    const session = await gateway.open({
+      agentName: 'Researcher', tools: ['files'], approval: 'all',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'decline',
+      memory: agentMemory(mem0, 'agent-a'),
+    });
+    const cli = await connect(session.url);
+    expect((await cli.listTools()).tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['memory_save', 'memory_search', 'memory_forget']));
+    // No approval (decide would decline) and nothing reaches the sandbox.
+    expect((await cli.callTool({ name: 'memory_save', arguments: { text: 'Likes dark mode' } })).isError).not.toBe(true);
+    expect(text(await cli.callTool({ name: 'memory_search', arguments: { query: 'dark' } }))).toContain('Likes dark mode');
+    expect((await cli.callTool({ name: 'memory_forget', arguments: { id: 'm1' } })).isError).not.toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('tells the agent when Mem0 is down instead of failing the run', async () => {
+    const session = await gateway.open({
+      agentName: 'Researcher', tools: ['files'], approval: 'none',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'accept',
+      memory: { save: async () => { throw new Error('Mem0 is unavailable'); }, search: async () => '', forget: async () => '' },
+    });
+    const cli = await connect(session.url);
+    const result = await cli.callTool({ name: 'memory_save', arguments: { text: 'x' } });
+    expect(result.isError).toBe(true);
+    expect(text(result)).toContain('unavailable');
+  });
+
+  it('shares knowledge between agents through its own namespace', async () => {
+    const mem0 = fakeMem0();
+    const a = agentMemory(mem0, 'agent-a');
+    const b = agentMemory(mem0, 'agent-b');
+    await a.save('Staging is at example.test', 'shared');
+    await a.save('My private hunch', 'private');
+    expect(mem0.notes[0]!.user_id).toBe(SHARED_MEMORY_NAMESPACE);
+    expect(await b.search('Staging')).toContain('(shared) Staging is at example.test');
+    expect(await b.search('hunch')).toBe('Nothing saved matches.');
+    expect(await b.search('', 'private')).toBe('Nothing saved matches.');
+    expect(await b.forget('m1')).toContain('Forgot');
+  });
+
+  it('copies the shared volume into the shared namespace, only when a file changed or left', async () => {
+    const mem0 = fakeMem0();
+    let files = [{ path: 'notes/a.md', content: 'Alpha facts' }, { path: 'b.txt', content: 'Beta' }];
+    const dir = mkdtempSync(join(tmpdir(), 'knowledge-'));
+    try {
+      const sync = new SharedKnowledgeSync({ mem0, sources: async () => [{ namespace: SHARED_MEMORY_NAMESPACE, files }], stateFile: join(dir, 'state.json') });
+      await sync.sync();
+      expect(mem0.notes.map((n) => n.user_id)).toEqual([SHARED_MEMORY_NAMESPACE, SHARED_MEMORY_NAMESPACE]);
+      expect(mem0.notes[0]!.memory).toContain('notes/a.md');
+      await sync.sync();
+      expect(mem0.notes).toHaveLength(2);
+      files = [{ path: 'notes/a.md', content: 'Alpha facts, updated' }];
+      await sync.sync();
+      expect(mem0.notes.map((n) => n.memory).join('|')).toContain('updated');
+      expect(mem0.notes.some((n) => n.memory.includes('b.txt'))).toBe(false);
+      expect(mem0.notes).toHaveLength(1);
+      // The copied files are refreshed from their source, not removed by agents.
+      await expect(agentMemory(mem0, 'agent-a').forget(mem0.notes[0]!.id)).rejects.toThrow(/not yours/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('splits long files into bounded pieces', () => {
+    const pieces = chunkText(`${'x'.repeat(4_000)}\n\nshort`);
+    expect(pieces.length).toBeGreaterThan(2);
+    expect(pieces.every((piece) => piece.length <= 1_500)).toBe(true);
+  });
 });

@@ -33,6 +33,8 @@ import { IpcConnectorEventEmitter, registerConnectorHandlers } from './ipc/regis
 import { ContextEngine } from './domain/context-engine';
 import { MemoryEngine } from './domain/memory-engine';
 import { Mem0Client } from './domain/mem0-client';
+import { SharedKnowledgeSync } from './sandbox/shared-knowledge';
+import { agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from './sandbox/agent-memory';
 import { SkillsService } from './domain/skills-service';
 import { SkillTriggerService } from './domain/skill-trigger-service';
 import { SkillAuthoringService } from './domain/skill-authoring-service';
@@ -184,7 +186,8 @@ export async function bootstrap(): Promise<AppServices> {
 
   const dataControl = new DataControlService(store, settings, audit, externalFlowEvents);
   const context = new ContextEngine(store);
-  const memory = new MemoryEngine(store, Date.now, new Mem0Client({ connectionFile: join(app.getPath('userData'), 'mem0-connection.json') }));
+  const mem0 = new Mem0Client({ connectionFile: join(app.getPath('userData'), 'mem0-connection.json') });
+  const memory = new MemoryEngine(store, Date.now, mem0);
   const persistentContext = new PersistentContextProvider(store, Date.now, memory);
   // Do not prevent relational/workflow startup during a Mem0 outage. Every
   // explicit memory operation retries this durable queue and reports failures.
@@ -282,6 +285,16 @@ export async function bootstrap(): Promise<AppServices> {
     approver: (request, signal) => (sandboxApprover !== undefined ? sandboxApprover(request, signal) : Promise.resolve('decline' as const)),
     autoApprove,
     cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
+    mem0,
+    sharedKnowledge: new SharedKnowledgeSync({ mem0, sources: async () => {
+      const out: Array<{ namespace: string; files: Array<{ path: string; content: string }> }> = [];
+      for (const volume of await sandboxes.dataVolumes()) {
+        const files = await sandboxes.readVolumeFiles(volume).catch(() => []);
+        const agent = volume.startsWith('conductor-sandbox-agent-') ? volume.slice('conductor-sandbox-agent-'.length) : undefined;
+        out.push({ namespace: agent !== undefined ? agentMemoryNamespace(agent) : SHARED_MEMORY_NAMESPACE, files });
+      }
+      return out;
+    }, stateFile: join(app.getPath('userData'), 'shared-knowledge.json') }),
     agentWorkspace: () => workspaces.ensureHidden(AGENT_WORKSPACE_ID, 'Agents', join(app.getPath('userData'), 'agent-space')).id,
     // A file an agent handed back from its sandbox: stored as a blob and
     // linked to the task, so it shows as a card under the agent's reply.

@@ -13,7 +13,8 @@ import {
 import type { Store } from '../db/types';
 import type { CodexMcpServer } from '../adapters/objective-cli-adapter';
 import { ToolGate, type ToolApprover } from '../adapters/tool-gate';
-import { LOCK_TOOL, RETURN_FILE_TOOL, UNLOCK_TOOL, type SandboxGateway, type GatewaySession } from './sandbox-gateway';
+import { agentMemory } from './agent-memory';
+import { LOCK_TOOL, MEMORY_FORGET_TOOL, MEMORY_SAVE_TOOL, MEMORY_SEARCH_TOOL, RETURN_FILE_TOOL, UNLOCK_TOOL, type SandboxGateway, type GatewaySession } from './sandbox-gateway';
 import { GROUP_KEY_PREFIX, SANDBOX_MEMORY_FILE, SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint, type SandboxManager } from './sandbox-manager';
 
 // Sandbox agents: their definitions, which thread each one runs, and the
@@ -79,6 +80,10 @@ export interface SandboxAgentServiceDeps {
   deliverFile: (taskId: string, stepId: string, file: { name: string; bytes: Buffer }) => void;
   /** The hidden workspace agent chats use when no project is chosen. */
   agentWorkspace: () => string;
+  /** Mem0, for agents' private memory (kept apart from the project store). */
+  mem0?: Parameters<typeof agentMemory>[0];
+  /** Copies the shared volume's files into the shared Mem0 namespace. */
+  sharedKnowledge?: { request(force?: boolean): Promise<void> };
 }
 
 interface ActiveRun { agentId: string; session: GatewaySession }
@@ -658,6 +663,7 @@ export class SandboxAgentService {
   async prepareStep(task: Task, stepId: string, mode: PermissionProfile): Promise<{ server: CodexMcpServer; guidance: string } | undefined> {
     const agent = this.agentForTask(task);
     if (agent === undefined) return undefined;
+    void this.deps.sharedKnowledge?.request();
     const gate = new ToolGate(mode, this.deps.approver, { taskId: task.id, stepId }, { autoApprove: this.deps.autoApprove });
     let started: Promise<import('./sandbox-manager').SandboxEndpoint> | undefined;
     const scope = this.sandboxScope(task.id);
@@ -669,6 +675,7 @@ export class SandboxAgentService {
       approval: agent.approval,
       decide: (request, signal) => gate.decide(request, signal),
       lockOwner: { id: task.id, name: agent.name },
+      ...(this.deps.mem0 !== undefined ? { memory: agentMemory(this.deps.mem0, agent.id) } : {}),
       ...(sandboxKey.startsWith(GROUP_KEY_PREFIX) ? { workspaceIsShared: true } : {}),
       returnFile: async (input, endpoint) => {
         const bytes = await readSandboxFile(endpoint, input.path);
@@ -717,6 +724,7 @@ export class SandboxAgentService {
       `Your sandbox is rebuilt from scratch whenever it has been idle, so only two folders keep their contents: ${SANDBOX_WORKSPACE_DIR} is your own storage and survives restarts — keep work in progress, notes, downloads and anything you will want next time there, and look in it at the start of a task for what you left earlier. ${SANDBOX_SHARED_DIR} is shared with the user's other agents and also survives restarts — put files there to pass them to another agent, and check it when you are told another agent left something for you. Other agents may be working there at the same time, so it is locked per file or folder: before you create, change, move or delete anything in ${SANDBOX_SHARED_DIR}, call "${LOCK_TOOL}" with its path (lock a subfolder to cover several files), and call "${UNLOCK_TOOL}" as soon as it is complete. Always use full paths starting with ${SANDBOX_SHARED_DIR} in commands, never "cd" into it. If you are told another agent holds the lock, do not work around it: do something else and try again shortly. Reading needs no lock. Do not delete what you did not create. Everything outside these two folders is lost when the sandbox restarts.`,
       sandboxKey.startsWith(GROUP_KEY_PREFIX) ? `In this group chat ${SANDBOX_WORKSPACE_DIR} and ${SANDBOX_SHARED_DIR} are the same folder, shared with the other members, so the lock rules above apply to both: lock a path in ${SANDBOX_WORKSPACE_DIR} before you change it, exactly as you would in ${SANDBOX_SHARED_DIR}. Use a subfolder of your own for your files.` : '',
       this.memoryNote(resumed),
+      this.deps.mem0 !== undefined ? `You also have a long-term memory that outlives tasks and sandboxes: call "${MEMORY_SEARCH_TOOL}" at the start of a task for what you and the other agents already know (it also finds the files in ${SANDBOX_SHARED_DIR}), and "${MEMORY_SAVE_TOOL}" to keep the user's preferences, decisions and facts worth knowing next time (one short note each; "${MEMORY_FORGET_TOOL}" removes a wrong one). Notes are private to you unless you save them with scope "shared", which every agent can then find — use that for knowledge the others need. Never save secrets.` : '',
       fileNote,
     ].filter((line) => line.trim() !== '').join('\n\n');
     return { server: { key: SANDBOX_MCP_KEY, url: session.url, ready: session.listed }, guidance };
