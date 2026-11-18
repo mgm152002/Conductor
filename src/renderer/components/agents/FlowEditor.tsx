@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { flowProblem, FLOW_MAX_NODES, type AgentFlow, type FlowEdge, type FlowNode, type FlowRun, type FlowNodeStatus, type FlowSchedule } from '@shared/agent-flows';
+import { DEFAULT_REPLY_HOURS, flowProblem, FLOW_MAX_NODES, type AgentFlow, type FlowEdge, type FlowNode, type FlowRun, type FlowNodeStatus, type FlowSchedule } from '@shared/agent-flows';
 import type { SandboxAgent } from '@shared/sandbox-agents';
 import { buildCron, describeCron, readCron, WEEKDAYS, type ScheduleKind } from '../../lib/flow-schedule';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Switch, inputClassName, textareaClassName } from '../ui/primitives';
-import { ClockIcon, PlayIcon, PlusIcon, Spinner, TrashIcon, WorkflowIcon } from '../ui/icons';
+import { ClockIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon, WorkflowIcon } from '../ui/icons';
 import { message } from './AgentDialog';
+import { MailPanel } from './MailPanel';
+import { FLOW_TEMPLATES, pickAgent, type FlowTemplate } from '@shared/flow-templates';
 
 // The flow canvas: agent steps as cards, arrows between them. A step starts
 // when every step pointing at it has finished. Flows run by hand or on a schedule.
 
+const REPLY = '__reply__';
 const NODE_W = 232;
 const NODE_H = 92;
 
@@ -78,6 +81,9 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
   const [runs, setRuns] = useState<FlowRun[]>([]);
   const [busy, setBusy] = useState<'save' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mailReady, setMailReady] = useState(false);
+  const [describe, setDescribe] = useState('');
+  const [drafting, setDrafting] = useState(false);
   const [connecting, setConnecting] = useState<{ from: string; x: number; y: number } | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
   const agentById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents]);
@@ -93,6 +99,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
     try { setRuns(await window.conductor.flows.runs(flow.id)); } catch { /* shown on the next poll */ }
   }, [flow]);
   useEffect(() => { void loadRuns(); }, [loadRuns]);
+  useEffect(() => { void window.conductor.mail.status().then((status) => { setMailReady(status.configured); }).catch(() => undefined); }, []);
   useEffect(() => {
     if (flow === null) return undefined;
     const timer = window.setInterval(() => { void loadRuns(); }, live ? 2_000 : 10_000);
@@ -105,13 +112,31 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
   function addStep(agentId: string): void {
     if (draft.nodes.length >= FLOW_MAX_NODES) { setError(`A flow can have up to ${FLOW_MAX_NODES} steps.`); return; }
     const last = draft.nodes[draft.nodes.length - 1];
-    const node: FlowNode = { id: `step-${Math.random().toString(36).slice(2, 8)}`, agentId, prompt: '', x: last !== undefined ? last.x + NODE_W + 70 : 60, y: last !== undefined ? last.y : 80 };
+    const reply = agentId === REPLY;
+    const node: FlowNode = { id: `step-${Math.random().toString(36).slice(2, 8)}`, kind: reply ? 'reply' : 'agent', agentId: reply ? '' : agentId, ...(reply ? { waitHours: DEFAULT_REPLY_HOURS } : {}), prompt: '', x: last !== undefined ? last.x + NODE_W + 70 : 60, y: last !== undefined ? last.y : 80 };
     update({ nodes: [...draft.nodes, node], edges: last !== undefined ? [...draft.edges, { from: last.id, to: node.id }] : draft.edges });
     setSelected({ kind: 'node', id: node.id });
   }
 
   function removeNode(id: string): void {
     update({ nodes: draft.nodes.filter((node) => node.id !== id), edges: draft.edges.filter((edge) => edge.from !== id && edge.to !== id) });
+    setSelected(null);
+  }
+
+  async function buildFromText(): Promise<void> {
+    setDrafting(true); setError(null);
+    try {
+      const made = await window.conductor.flows.draft(describe);
+      setDraft({ name: made.name, input: made.input, nodes: made.nodes as FlowNode[], edges: made.edges, schedule: made.schedule });
+      setSelected(null);
+    } catch (err) { setError(message(err)); }
+    finally { setDrafting(false); }
+  }
+
+  function startFromTemplate(template: FlowTemplate): void {
+    const picks = Object.fromEntries(template.roles.map((role) => [role.role, pickAgent(role, agents) ?? ''])) as Record<'scraper' | 'tailor' | 'applier', string>;
+    const made = template.build(picks);
+    setDraft({ name: made.name, input: made.input, nodes: made.nodes, edges: made.edges, schedule: made.schedule });
     setSelected(null);
   }
 
@@ -227,7 +252,8 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
               ) : null}
             </svg>
             {draft.nodes.map((item) => {
-              const agent = agentById.get(item.agentId);
+              const isReply = item.kind === 'reply';
+              const agent = isReply ? undefined : agentById.get(item.agentId);
               const status = statusOf(item.id);
               const on = selected?.kind === 'node' && selected.id === item.id;
               return (
@@ -240,18 +266,24 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
                     onPointerDown={(e) => { startConnect(e, item); }}
                     className="absolute top-1/2 -right-2 size-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-primary bg-card hover:scale-125" />
                   <span className="flex items-center gap-2">
-                    {agent !== undefined ? <AgentAvatar agent={agent} size={26} /> : <span className="size-[26px] rounded-lg bg-muted" />}
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{agent?.name ?? 'Missing agent'}</span>
+                    {isReply ? <span className="grid size-[26px] place-items-center rounded-lg bg-info/15 text-info"><MailIcon size={14} /></span> : agent !== undefined ? <AgentAvatar agent={agent} size={26} /> : <span className="size-[26px] rounded-lg bg-muted" />}
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{isReply ? 'Wait for your reply' : agent?.name ?? 'Missing agent'}</span>
                     {status !== undefined ? <span className={cn('text-3xs font-medium', status === 'failed' ? 'text-destructive-foreground' : status === 'done' ? 'text-success' : 'text-muted-foreground')}>{status === 'running' ? <Spinner size={11} /> : STATUS_TEXT[status]}</span> : null}
                   </span>
-                  <span className="line-clamp-2 text-2xs text-muted-foreground">{item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}</span>
+                  <span className="line-clamp-2 text-2xs text-muted-foreground">{isReply ? `Pauses until you answer the email (up to ${item.waitHours ?? DEFAULT_REPLY_HOURS} h)` : item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}</span>
                 </div>
               );
             })}
             {draft.nodes.length === 0 ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-                <p className="text-sm font-semibold text-foreground">Build a flow</p>
-                <p className="max-w-xs text-xs text-muted-foreground">Add a step for each agent, then draw arrows to say what runs after what. Steps with no arrow between them run at the same time.</p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center" onPointerDown={(e) => { e.stopPropagation(); }}>
+                <p className="text-sm font-semibold text-foreground">Describe the flow you want</p>
+                <textarea aria-label="Describe the flow" rows={4} className={cn(textareaClassName, 'w-full max-w-md')} value={describe} onChange={(e) => { setDescribe(e.target.value); }}
+                  placeholder="e.g. Every morning at 9, have the scraper find new Summer 2027 backend internships, the resume agent tailor a resume for each and email me the list, then apply to the ones I reply with." />
+                <Button size="md" variant="primary" disabled={drafting || describe.trim().length < 3 || agents.length === 0} onClick={() => { void buildFromText(); }}>{drafting ? <Spinner size={13} /> : <SparklesIcon size={13} />}{drafting ? 'Building…' : 'Build it'}</Button>
+                <p className="max-w-sm text-2xs text-muted-foreground">It lays out the steps for you to review and edit. Or add steps yourself below and draw arrows between them; steps with no arrow between them run at the same time.</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {FLOW_TEMPLATES.map((template) => <Button key={template.id} size="sm" variant="outline" disabled={agents.length === 0} title={template.summary} onClick={() => { startFromTemplate(template); }}>Start from “{template.title}”</Button>)}
+                </div>
               </div>
             ) : null}
           </div>
@@ -260,6 +292,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
             <select aria-label="Add a step" className={cn(inputClassName, 'w-44')} value="" disabled={agents.length === 0} onChange={(e) => { if (e.target.value !== '') addStep(e.target.value); }}>
               <option value="">{agents.length === 0 ? 'Create an agent first' : 'Add a step…'}</option>
               {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+              <option value={REPLY}>Wait for my email reply</option>
             </select>
           </div>
         </div>
@@ -268,11 +301,21 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
           {node !== undefined ? (
             <section className="flex flex-col gap-2.5" aria-label="Step">
               <h3 className="text-xs font-semibold text-foreground">Step</h3>
-              <select aria-label="Agent" className={inputClassName} value={node.agentId} onChange={(e) => { patchNode(node.id, { agentId: e.target.value }); }}>
-                {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-              </select>
-              <textarea aria-label="What this step does" rows={7} className={textareaClassName} value={node.prompt} placeholder="What should this agent do? Use {{input}} for the flow's input." onChange={(e) => { patchNode(node.id, { prompt: e.target.value }); }} />
-              <p className="text-2xs text-muted-foreground">It also gets what the steps before it said.</p>
+              {node.kind === 'reply' ? (
+                <>
+                  <p className="text-2xs text-muted-foreground">The flow pauses here until you reply to the email a step before sent you. What you wrote is handed to the steps after this one (for example “apply to all”).</p>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">Give up after<input type="number" min={1} max={336} aria-label="Hours to wait" className={cn(inputClassName, 'w-20')} value={node.waitHours ?? DEFAULT_REPLY_HOURS} onChange={(e) => { patchNode(node.id, { waitHours: Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_REPLY_HOURS) }); }} />hours</label>
+                  {!mailReady ? <Alert tone="warning">Email isn’t connected, so this step can never be answered. Connect it below.</Alert> : null}
+                </>
+              ) : (
+                <>
+                  <select aria-label="Agent" className={inputClassName} value={node.agentId} onChange={(e) => { patchNode(node.id, { agentId: e.target.value }); }}>
+                    {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+                  </select>
+                  <textarea aria-label="What this step does" rows={9} className={textareaClassName} value={node.prompt} placeholder="What should this agent do? Use {{input}} for the flow's input." onChange={(e) => { patchNode(node.id, { prompt: e.target.value }); }} />
+                  <p className="text-2xs text-muted-foreground">It also gets what the steps before it said.</p>
+                </>
+              )}
               {statusOf(node.id) !== undefined ? <StepOutput run={latest} nodeId={node.id} /> : null}
               <Button size="sm" variant="ghost" className="self-start text-destructive-foreground" onClick={() => { removeNode(node.id); }}><TrashIcon size={13} />Remove step</Button>
             </section>
@@ -284,10 +327,11 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
           ) : (
             <>
               <section className="flex flex-col gap-2" aria-label="Input">
-                <h3 className="text-xs font-semibold text-foreground">Input</h3>
-                <textarea aria-label="Flow input" rows={4} className={textareaClassName} value={draft.input} placeholder="Text every run starts from (optional). Steps can use it as {{input}}." onChange={(e) => { update({ input: e.target.value }); }} />
+                <h3 className="text-xs font-semibold text-foreground">What this flow should do</h3>
+                <textarea aria-label="Flow input" rows={7} className={textareaClassName} value={draft.input} placeholder="The exact details of this run (for example which jobs you want). Steps use it as {{input}}, so edit it any time without touching the steps." onChange={(e) => { update({ input: e.target.value }); }} />
               </section>
               <SchedulePanel schedule={draft.schedule} nextRunAt={flow?.nextRunAt ?? null} onChange={(schedule) => { update({ schedule }); }} />
+              <MailPanel onChange={(status) => { setMailReady(status.configured); }} />
             </>
           )}
           {flow !== null ? (

@@ -8,7 +8,12 @@ export const FLOW_MAX_NODES = 24;
 
 export interface FlowNode {
   id: string;
+  /** An agent step does work; a reply step pauses the flow until the user answers by email. */
+  kind?: 'agent' | 'reply';
+  /** The agent that does the step (empty for a reply step). */
   agentId: string;
+  /** Reply steps: how long to wait for the answer before giving up. */
+  waitHours?: number;
   /** What this step should do. `{{input}}` stands for the flow's input text. */
   prompt: string;
   x: number;
@@ -50,8 +55,9 @@ export const FlowInputSchema = z.object({
   name: z.string().trim().min(1).max(80),
   input: z.string().max(10_000).default(''),
   nodes: z.array(z.object({
-    id, agentId: z.string().uuid(), prompt: z.string().max(10_000), x: z.number().finite(), y: z.number().finite(),
-  })).min(1).max(FLOW_MAX_NODES),
+    id, kind: z.enum(['agent', 'reply']).optional(), agentId: z.string().max(64), waitHours: z.number().int().min(1).max(24 * 14).optional(),
+    prompt: z.string().max(10_000), x: z.number().finite(), y: z.number().finite(),
+  }).refine((node) => node.kind === 'reply' || z.string().uuid().safeParse(node.agentId).success, { message: 'A step needs an agent.' })).min(1).max(FLOW_MAX_NODES),
   edges: z.array(z.object({ from: id, to: id })).max(FLOW_MAX_NODES * FLOW_MAX_NODES),
   schedule: z.object({ cron: z.string().trim().min(1).max(100), enabled: z.boolean() }).nullable().default(null),
 });
@@ -80,3 +86,5 @@ export function flowProblem(nodes: readonly Pick<FlowNode, 'id'>[], edges: reado
   }
   return seen === nodes.length ? undefined : 'The arrows form a loop; a step cannot wait on itself through other steps.';
 }
+
+export const DEFAULT_REPLY_HOURS = 24;

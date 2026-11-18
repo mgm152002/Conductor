@@ -40,6 +40,7 @@ export interface IntegrationDeps {
   tiers: import('../phone/thread-tier-store').ThreadTierStore;
   sandboxAgents: SandboxAgentService;
   flows: import('../sandbox/flow-service').AgentFlowService;
+  mail: import('../sandbox/agentmail').AgentMail;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -93,6 +94,10 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('flows.remove', S['flows.remove'], (_e, input) => { deps.flows.remove(input.id); });
   router.handle('flows.run', S['flows.run'], (_e, input) => deps.flows.run(input.id, 'manual', input.input));
   router.handle('flows.runs', S['flows.runs'], (_e, input) => deps.flows.runs(input.flowId));
+  router.handle('flows.draft', S['flows.draft'], (_e, input) => deps.flows.draft(input.description));
+  router.handle('mail.status', S['mail.status'], () => deps.mail.status());
+  router.handle('mail.connect', S['mail.connect'], (_e, input) => deps.mail.connect(input.apiKey, input.owner));
+  router.handle('mail.disconnect', S['mail.disconnect'], () => { deps.mail.disconnect(); });
   router.handle('agents.sandbox.list', S['agents.sandbox.list'], () => deps.sandboxAgents.list());
   router.handle('agents.sandbox.create', S['agents.sandbox.create'], (_e, input) => deps.sandboxAgents.create(input));
   router.handle('agents.sandbox.update', S['agents.sandbox.update'], (_e, { id, ...input }) => deps.sandboxAgents.update(id, input));

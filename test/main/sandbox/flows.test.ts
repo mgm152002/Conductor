@@ -55,7 +55,7 @@ describe('AgentFlowService', () => {
     let clock = new Date(2026, 10, 18, 8, 0);
     const service = new AgentFlowService({
       store,
-      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), startingCli: () => 'claude-code', bindThread: () => undefined },
+      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), list: () => Object.entries(names).map(([id, name]) => ({ id, name, description: '' })), startingCli: () => 'claude-code', bindThread: () => undefined },
       workspaceId: () => 'ws',
       now: () => clock,
     });

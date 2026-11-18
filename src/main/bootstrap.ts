@@ -33,6 +33,7 @@ import { IpcConnectorEventEmitter, registerConnectorHandlers } from './ipc/regis
 import { ContextEngine } from './domain/context-engine';
 import { MemoryEngine } from './domain/memory-engine';
 import { Mem0Client } from './domain/mem0-client';
+import { AgentMail } from './sandbox/agentmail';
 import { AgentFlowService } from './sandbox/flow-service';
 import { SharedKnowledgeSync } from './sandbox/shared-knowledge';
 import { agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from './sandbox/agent-memory';
@@ -187,6 +188,7 @@ export async function bootstrap(): Promise<AppServices> {
 
   const dataControl = new DataControlService(store, settings, audit, externalFlowEvents);
   const context = new ContextEngine(store);
+  const agentMail = new AgentMail({ file: join(app.getPath('userData'), 'agentmail.json') });
   const mem0 = new Mem0Client({ connectionFile: join(app.getPath('userData'), 'mem0-connection.json') });
   const memory = new MemoryEngine(store, Date.now, mem0);
   const persistentContext = new PersistentContextProvider(store, Date.now, memory);
@@ -287,6 +289,7 @@ export async function bootstrap(): Promise<AppServices> {
     autoApprove,
     cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
     mem0,
+    mail: agentMail,
     sharedKnowledge: new SharedKnowledgeSync({ mem0, sources: async () => {
       const out: Array<{ namespace: string; files: Array<{ path: string; content: string }> }> = [];
       for (const volume of await sandboxes.dataVolumes()) {
@@ -635,7 +638,7 @@ export async function bootstrap(): Promise<AppServices> {
   });
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
-  const flows = new AgentFlowService({ store, agents: sandboxAgents, workspaceId: () => sandboxAgents.agentWorkspaceId() });
+  const flows = new AgentFlowService({ store, mail: agentMail, agents: sandboxAgents, workspaceId: () => sandboxAgents.agentWorkspaceId() });
   flows.setTaskCreator((input) => runner.create(input));
   sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));
   sandboxAgents.setGroupPlanner((prompt) => groupPlanner.ask('Planning a group message', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));
@@ -651,6 +654,7 @@ export async function bootstrap(): Promise<AppServices> {
     const task = payload as Task | undefined;
     if (task !== undefined && typeof task.id === 'string') { void sandboxAgents.taskSettled(task).catch(() => undefined); void flows.taskSettled(task).catch(() => undefined); }
   });
+  flows.setPlanner((prompt) => groupPlanner.ask('Drafting a flow', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));
   flows.setReplyReader((taskId) => {
     const task = stateMachine.getTask(taskId);
     return task === undefined ? '' : buildTimeline(task, taskQueries.details(taskId)).filter((item) => item.kind === 'assistant').map((item) => item.text).join('\n\n');
@@ -785,7 +789,7 @@ export async function bootstrap(): Promise<AppServices> {
     sandboxEndpoint: (agentId) => sandboxes.endpoint(agentId),
   });
   app.once('before-quit', () => { void phone.stop(); });
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,mail:agentMail,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);

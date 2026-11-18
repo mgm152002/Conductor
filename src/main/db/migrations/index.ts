@@ -1660,6 +1660,14 @@ const migration043: Migration = {
   },
 };
 
+const migration044: Migration = {
+  version: 44,
+  name: 'agent_flow_step_started',
+  up({ db }: Tx): void {
+    db.exec('ALTER TABLE agent_flow_run_nodes ADD COLUMN started_at TEXT;');
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1705,4 +1713,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration041,
   migration042,
   migration043,
+  migration044,
 ];

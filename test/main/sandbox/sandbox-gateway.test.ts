@@ -415,6 +415,24 @@ describe("an agent's private memory", () => {
     expect(calls).toEqual([]);
   });
 
+  it('offers the email tools only when connected, handled outside the sandbox without approval', async () => {
+    const plain = await connect((await open().session).url);
+    expect((await plain.listTools()).tools.map((tool) => tool.name)).not.toContain('email_send');
+    const sent: string[] = [];
+    const session = await gateway.open({
+      agentName: 'Mailer', tools: ['files'], approval: 'all',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'decline',
+      mail: { send: async (subject, body) => { sent.push(`${subject}|${body}`); return 'Sent.'; }, inbox: async () => 'm1 · subject', read: async () => 'body' },
+    });
+    const cli = await connect(session.url);
+    expect((await cli.listTools()).tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['email_send', 'email_inbox', 'email_read']));
+    expect(text(await cli.callTool({ name: 'email_send', arguments: { subject: 'Jobs', body: 'one' } }))).toBe('Sent.');
+    expect(sent).toEqual(['Jobs|one']);
+    expect(text(await cli.callTool({ name: 'email_inbox', arguments: {} }))).toContain('m1');
+    expect(calls).toEqual([]);
+  });
+
   it('tells the agent when Mem0 is down instead of failing the run', async () => {
     const session = await gateway.open({
       agentName: 'Researcher', tools: ['files'], approval: 'none',

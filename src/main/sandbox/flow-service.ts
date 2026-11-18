@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Task } from '@shared/domain';
-import { flowProblem, type AgentFlow, type FlowEdge, type FlowInput, type FlowNode, type FlowNodeStatus, type FlowRun, type FlowSchedule } from '@shared/agent-flows';
+import { DEFAULT_REPLY_HOURS, flowProblem, type AgentFlow, type FlowEdge, type FlowInput, type FlowNode, type FlowNodeStatus, type FlowRun, type FlowSchedule } from '@shared/agent-flows';
 import type { Store } from '../db/types';
 import { nextCronRun } from './cron';
 import type { TaskCreator, ReplyReader } from './sandbox-agents';
+import { draftPrompt, parseDraft } from './flow-draft';
+import type { AgentMail, MailMessage } from './agentmail';
 
 const SETTLED = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED', 'RECOVERABLE_INTERRUPTION']);
 const MAX_HANDOFF = 6_000;
@@ -12,7 +14,7 @@ const TICK_MS = 30_000;
 
 interface FlowRow { id: string; name: string; input: string; nodes: string; edges: string; schedule: string | null; next_run_at: string | null; last_run_at: string | null; created_at: string; updated_at: string }
 interface RunRow { id: string; flow_id: string; trigger: 'manual' | 'schedule'; status: FlowRun['status']; input: string; definition: string; started_at: string; finished_at: string | null }
-interface NodeRow { run_id: string; node_id: string; status: FlowNodeStatus; task_id: string | null; output: string; note: string }
+interface NodeRow { run_id: string; node_id: string; status: FlowNodeStatus; task_id: string | null; output: string; note: string; started_at: string | null }
 interface Definition { name: string; nodes: FlowNode[]; edges: FlowEdge[] }
 
 export interface FlowServiceDeps {
@@ -20,11 +22,14 @@ export interface FlowServiceDeps {
   /** The sandbox agents a flow's steps run as. */
   agents: {
     get(id: string): { id: string; name: string } | undefined;
+    list(): Array<{ id: string; name: string; description: string }>;
     startingCli(agentId: string): string;
     bindThread(threadId: string, agentId: string): void;
   };
   /** The hidden workspace agent chats use. */
   workspaceId: () => string;
+  /** The email inbox reply steps wait on. */
+  mail?: AgentMail;
   now?: () => Date;
 }
 
@@ -34,12 +39,28 @@ const parse = <T>(text: string, fallback: T): T => { try { return JSON.parse(tex
 export class AgentFlowService {
   private createTask: TaskCreator | undefined;
   private readReply: ReplyReader | undefined;
+  private planner: ((prompt: string) => Promise<string | undefined>) | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private stopMail: (() => void) | undefined;
 
   constructor(private readonly deps: FlowServiceDeps) {}
 
   setTaskCreator(create: TaskCreator): void { this.createTask = create; }
   setReplyReader(read: ReplyReader): void { this.readReply = read; }
+  setPlanner(ask: (prompt: string) => Promise<string | undefined>): void { this.planner = ask; }
+
+  /** A flow drafted from a description, not saved. */
+  async draft(description: string): Promise<Omit<FlowInput, 'id'>> {
+    const agents = this.deps.agents.list();
+    if (agents.length === 0) throw new Error('Create at least one agent first; a flow is made of their steps.');
+    if (this.planner === undefined) throw new Error('Conductor is still starting.');
+    const mail = this.deps.mail?.status().configured === true;
+    const reply = await this.planner(draftPrompt(description, agents, mail));
+    if (reply === undefined || reply.trim() === '') throw new Error('No agent CLI answered. Sign in to one in Settings and try again.');
+    const drafted = parseDraft(reply, agents, mail);
+    if ('error' in drafted) throw new Error(drafted.error);
+    return drafted.flow;
+  }
 
   private now(): Date { return (this.deps.now ?? (() => new Date()))(); }
   private get db() { return this.deps.store.db; }
@@ -66,7 +87,7 @@ export class AgentFlowService {
   save(input: FlowInput): AgentFlow {
     const problem = flowProblem(input.nodes, input.edges);
     if (problem !== undefined) throw new Error(problem);
-    for (const node of input.nodes) if (this.deps.agents.get(node.agentId) === undefined) throw new Error('A step uses an agent that no longer exists.');
+    for (const node of input.nodes) if (node.kind !== 'reply' && this.deps.agents.get(node.agentId) === undefined) throw new Error('A step uses an agent that no longer exists.');
     let next: string | null = null;
     if (input.schedule !== null) {
       const at = nextCronRun(input.schedule.cron, this.now());
@@ -93,6 +114,8 @@ export class AgentFlowService {
   /** Check for due flows now and every half minute. A flow overdue after the app was closed runs once. */
   start(): void {
     if (this.timer !== undefined) return;
+    this.stopMail = this.deps.mail?.onMessage((message) => { void this.mailArrived(message).catch(() => undefined); });
+    this.deps.mail?.listen();
     void this.tick();
     this.timer = setInterval(() => { void this.tick(); }, TICK_MS);
     this.timer.unref();
@@ -101,9 +124,13 @@ export class AgentFlowService {
   stop(): void {
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
+    this.stopMail?.();
+    this.stopMail = undefined;
+    this.deps.mail?.stop();
   }
 
   async tick(): Promise<void> {
+    await this.checkReplies().catch(() => undefined);
     const now = this.now();
     const due = this.db.prepare('SELECT id FROM agent_flows WHERE next_run_at IS NOT NULL AND next_run_at <= ?').all(now.toISOString()) as Array<{ id: string }>;
     for (const { id } of due) {
@@ -167,9 +194,10 @@ export class AgentFlowService {
           this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'skipped', note = ? WHERE run_id = ? AND node_id = ?").run('A step before this one did not finish.', runId, node.id);
           changed = true;
         } else if (before.every((status) => status === 'done')) {
-          this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'running' WHERE run_id = ? AND node_id = ?").run(runId, node.id);
+          this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?").run(this.now().toISOString(), runId, node.id);
           changed = true;
-          await this.startNode(run, definition, node, states);
+          if (node.kind === 'reply') this.db.prepare('UPDATE agent_flow_run_nodes SET note = ? WHERE run_id = ? AND node_id = ?').run('Waiting for your reply by email.', runId, node.id);
+          else await this.startNode(run, definition, node, states);
         }
       }
       if (changed) continue;
@@ -190,7 +218,7 @@ export class AgentFlowService {
       const source = definition.nodes.find((item) => item.id === edge.from);
       const done = states.get(edge.from);
       if (source === undefined || done === undefined) return [];
-      const who = this.deps.agents.get(source.agentId)?.name ?? 'An earlier step';
+      const who = source.kind === 'reply' ? 'The user replied by email' : this.deps.agents.get(source.agentId)?.name ?? 'An earlier step';
       return [`${who} finished and said:\n${done.output.trim() === '' ? '(no written answer; look at the files it saved)' : done.output.slice(0, MAX_HANDOFF)}`];
     });
     const task = node.prompt.replace(/\{\{\s*input\s*\}\}/g, run.input).trim();
@@ -227,10 +255,61 @@ export class AgentFlowService {
     await this.advance(node.run_id);
   }
 
+  // ---- reply steps ----------------------------------------------------------
+
+  /** Reply steps still waiting, with what is needed to match an answer to them. */
+  private waitingReplies(): Array<{ runId: string; nodeId: string; startedAt: string; upstreamTasks: string[]; waitHours: number }> {
+    const rows = this.db.prepare(`SELECT n.run_id, n.node_id, n.started_at, r.definition FROM agent_flow_run_nodes n JOIN agent_flow_runs r ON r.id = n.run_id
+      WHERE n.status = 'running' AND n.task_id IS NULL AND r.status = 'running'`).all() as Array<{ run_id: string; node_id: string; started_at: string | null; definition: string }>;
+    const out: ReturnType<AgentFlowService['waitingReplies']> = [];
+    for (const row of rows) {
+      const definition = parse<Definition>(row.definition, { name: '', nodes: [], edges: [] });
+      const node = definition.nodes.find((item) => item.id === row.node_id);
+      if (node?.kind !== 'reply') continue;
+      const before = definition.edges.filter((edge) => edge.to === node.id).map((edge) => edge.from);
+      const tasks = (this.db.prepare('SELECT node_id, task_id FROM agent_flow_run_nodes WHERE run_id = ?').all(row.run_id) as Array<{ node_id: string; task_id: string | null }>)
+        .filter((item) => before.includes(item.node_id) && item.task_id !== null).map((item) => item.task_id as string);
+      out.push({ runId: row.run_id, nodeId: row.node_id, startedAt: row.started_at ?? '', upstreamTasks: tasks, waitHours: node.waitHours ?? DEFAULT_REPLY_HOURS });
+    }
+    return out;
+  }
+
+  /** The user wrote to the inbox: it answers the waiting step whose email started that thread (or, if none is known, the oldest waiting). */
+  async mailArrived(message: MailMessage): Promise<void> {
+    const mail = this.deps.mail;
+    if (mail === undefined || !mail.isOwner(message)) return;
+    const waiting = this.waitingReplies().filter((item) => item.startedAt <= (message.at || '9999'));
+    const sorted = waiting.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    const byThread = sorted.find((item) => mail.threadsFor(item.upstreamTasks).includes(message.threadId));
+    const target = byThread ?? sorted.find((item) => mail.threadsFor(item.upstreamTasks).length === 0);
+    if (target === undefined) return;
+    this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'done', output = ?, note = '' WHERE run_id = ? AND node_id = ? AND status = 'running'")
+      .run(`Subject: ${message.subject}\n${message.text}`.slice(0, MAX_OUTPUT), target.runId, target.nodeId);
+    await this.advance(target.runId);
+  }
+
+  /** Give up on replies that never came, and pick up replies that arrived while the app was closed or offline. */
+  private async checkReplies(): Promise<void> {
+    const waiting = this.waitingReplies();
+    if (waiting.length === 0) return;
+    const now = this.now().getTime();
+    for (const item of waiting) {
+      if (item.startedAt !== '' && now - new Date(item.startedAt).getTime() > item.waitHours * 3_600_000) {
+        this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'failed', note = ? WHERE run_id = ? AND node_id = ? AND status = 'running'").run(`No reply came within ${item.waitHours} hours.`, item.runId, item.nodeId);
+        await this.advance(item.runId);
+      }
+    }
+    const mail = this.deps.mail;
+    if (mail === undefined || !mail.status().configured) return;
+    const since = waiting.map((item) => item.startedAt).filter((value) => value !== '').sort()[0];
+    if (since === undefined) return;
+    for (const message of await mail.repliesSince(since)) await this.mailArrived(message);
+  }
+
   /** After a restart: settle steps whose task ended meanwhile, fail ones that never got a task. */
   async reconcile(): Promise<void> {
     this.db.prepare(`UPDATE agent_flow_run_nodes SET status = 'failed', note = 'The app closed before this step started.'
-      WHERE status = 'running' AND task_id IS NULL AND run_id IN (SELECT id FROM agent_flow_runs WHERE status = 'running')`).run();
+      WHERE status = 'running' AND task_id IS NULL AND note NOT LIKE 'Waiting for your reply%' AND run_id IN (SELECT id FROM agent_flow_runs WHERE status = 'running')`).run();
     const rows = this.db.prepare(`SELECT n.task_id AS id, t.state FROM agent_flow_run_nodes n JOIN tasks t ON t.id = n.task_id WHERE n.status = 'running'`).all() as Array<{ id: string; state: string }>;
     for (const row of rows) await this.taskSettled({ id: row.id, state: row.state as Task['state'] });
     const open = this.db.prepare("SELECT id FROM agent_flow_runs WHERE status = 'running'").all() as Array<{ id: string }>;
