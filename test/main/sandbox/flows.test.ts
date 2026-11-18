@@ -101,6 +101,7 @@ describe('AgentFlowService', () => {
     expect(started).toHaveLength(2);
     expect(started[1]!.objective).toContain('Researcher finished and said:\nreply of 0');
     expect(started[1]!.objective).toContain('Your step:\nWrite it up');
+    expect(started[1]!.objective).toContain('This is a new run: build everything fresh');
     await service.taskSettled({ id: started[1]!.id, state: 'COMPLETED' });
     const [finished] = service.runs(flow.id);
     expect(finished!.status).toBe('done');

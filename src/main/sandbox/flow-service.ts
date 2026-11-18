@@ -275,7 +275,7 @@ export class AgentFlowService {
     });
     const task = node.prompt.replace(/\{\{\s*input\s*\}\}/g, run.input).trim();
     const objective = [
-      `[Workflow “${definition.name}” — you are ${agent.name}. Do your step; the steps after yours build on what you leave.]`,
+      `[Workflow “${definition.name}” — you are ${agent.name}. Do your step; the steps after yours build on what you leave. This is a new run: build everything fresh, and do not reuse files, links or results from earlier runs of this workflow unless your step says to.]`,
       run.input.trim() !== '' && !/\{\{\s*input\s*\}\}/.test(node.prompt) ? `Workflow input:\n${run.input}` : '',
       built.length > 0 ? `Work you build on:\n${built.join('\n\n')}` : '',
       task !== '' ? `Your step:\n${task}` : 'Your step: continue the workflow with what you were given.',
