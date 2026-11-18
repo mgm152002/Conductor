@@ -53,6 +53,14 @@ const RETURN_FILE: GatewayTool = {
   },
 };
 
+/** The gateway's own tool: copy a sandbox file onto the user's Mac, for tools that run there. */
+export const EXPORT_FILE_TOOL = 'save_to_mac';
+const EXPORT_FILE: GatewayTool = {
+  name: EXPORT_FILE_TOOL,
+  description: 'Copy a file from the sandbox onto the user\'s Mac and get its absolute path there. Tools that run on the Mac (Google Drive upload from a local path, email attachments, other MCP servers) cannot see the sandbox\'s files; call this first and give them the returned path as the file path. Call once per file.',
+  inputSchema: RETURN_FILE.inputSchema,
+};
+
 /** The gateway's own tools: lock and unlock part of the folder all agents share. */
 export const LOCK_TOOL = 'lock_shared';
 export const UNLOCK_TOOL = 'unlock_shared';
@@ -174,6 +182,8 @@ export interface GatewaySessionConfig {
    * agent is told. When set, the run gets the `return_file` tool.
    */
   returnFile?: (input: { path: string; name?: string }, endpoint: SandboxEndpoint) => Promise<string>;
+  /** Copy a sandbox file to the user's Mac and return its path there. */
+  exportFile?: (input: { path: string; name?: string }, endpoint: SandboxEndpoint) => Promise<string>;
   /**
    * This run, for locks on the shared folder. When set, the run gets the
    * lock tools, and its calls are checked against other runs' locks.
@@ -368,6 +378,7 @@ export class SandboxGateway {
     const allowed = new Set(session.config.tools);
     const out = upstream.filter((tool) => allowedTool(tool.name, allowed));
     if (session.config.returnFile !== undefined) out.push(RETURN_FILE);
+    if (session.config.exportFile !== undefined) out.push(EXPORT_FILE);
     if (session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
     if (session.config.memory !== undefined) out.push(...MEMORY_TOOLS);
     if (session.config.mail !== undefined) out.push(...EMAIL_TOOLS);
@@ -433,6 +444,17 @@ export class SandboxGateway {
         return { content: [{ type: 'text', text }] };
       } catch (error) {
         return { content: [{ type: 'text', text: `The file could not be handed back: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
+      }
+    }
+    if (name === EXPORT_FILE_TOOL && session.config.exportFile !== undefined) {
+      const path = typeof args['path'] === 'string' ? args['path'].trim() : '';
+      if (path === '') return { content: [{ type: 'text', text: 'Give the path of the file in the sandbox.' }], isError: true };
+      try {
+        const displayName = typeof args['name'] === 'string' && args['name'].trim() !== '' ? args['name'].trim() : undefined;
+        const text = await session.config.exportFile({ path, ...(displayName !== undefined ? { name: displayName } : {}) }, await session.config.sandbox());
+        return { content: [{ type: 'text', text }] };
+      } catch (error) {
+        return { content: [{ type: 'text', text: `The file could not be copied to the Mac: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
       }
     }
     // The agent's own notes live in Mem0, outside the sandbox: no approval.

@@ -433,6 +433,22 @@ describe("an agent's private memory", () => {
     expect(calls).toEqual([]);
   });
 
+  it('copies a sandbox file to the Mac for tools that cannot see the sandbox', async () => {
+    const copied: string[] = [];
+    const session = await gateway.open({
+      agentName: 'Tailor', tools: ['files'], approval: 'all',
+      sandbox: async () => ({ baseUrl: upstreamUrl, apiKey: API_KEY }),
+      decide: async () => 'decline',
+      exportFile: async (input) => { copied.push(input.path); return `now at /Users/me/exports/${input.name ?? 'x.pdf'}`; },
+    });
+    const cli = await connect(session.url);
+    expect((await cli.listTools()).tools.map((tool) => tool.name)).toContain('save_to_mac');
+    expect(text(await cli.callTool({ name: 'save_to_mac', arguments: { path: '/home/gem/out/r.pdf', name: 'r.pdf' } }))).toContain('/Users/me/exports/r.pdf');
+    expect((await cli.callTool({ name: 'save_to_mac', arguments: {} })).isError).toBe(true);
+    expect(copied).toEqual(['/home/gem/out/r.pdf']);
+    expect(calls).toEqual([]);
+  });
+
   it('sends email and saves memory even when the sandbox cannot start', async () => {
     const sent: string[] = [];
     const session = await gateway.open({

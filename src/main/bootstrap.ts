@@ -299,6 +299,7 @@ export async function bootstrap(): Promise<AppServices> {
       }
       return out;
     }, stateFile: join(app.getPath('userData'), 'shared-knowledge.json') }),
+    exportDir: join(app.getPath('userData'), 'agent-space', 'exports'),
     agentWorkspace: () => workspaces.ensureHidden(AGENT_WORKSPACE_ID, 'Agents', join(app.getPath('userData'), 'agent-space')).id,
     // A file an agent handed back from its sandbox: stored as a blob and
     // linked to the task, so it shows as a card under the agent's reply.
