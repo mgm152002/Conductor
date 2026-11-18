@@ -23,7 +23,7 @@ export interface FlowServiceDeps {
   agents: {
     get(id: string): { id: string; name: string } | undefined;
     list(): Array<{ id: string; name: string; description: string }>;
-    startingCli(agentId: string): string;
+    startingCli(agentId: string, preferred?: string, anyCli?: boolean): string;
     bindThread(threadId: string, agentId: string): void;
   };
   /** The hidden workspace agent chats use. */
@@ -229,10 +229,13 @@ export class AgentFlowService {
       task !== '' ? `Your step:\n${task}` : 'Your step: continue the workflow with what you were given.',
     ].filter((part) => part !== '').join('\n\n');
     try {
+      // A step may name any installed CLI; otherwise the agent's first available one runs it.
+      const cli = this.deps.agents.startingCli(node.agentId, node.cli, true);
       await this.createTask({
         workspaceId: this.deps.workspaceId(),
         objective,
-        agentId: this.deps.agents.startingCli(node.agentId),
+        agentId: cli,
+        ...(node.model !== undefined || node.effort !== undefined ? { runOptions: { main: { ...(node.model !== undefined ? { model: node.model } : {}), ...(node.effort !== undefined ? { effort: node.effort } : {}) }, mainAgentId: cli } } : {}),
         onCreated: (created) => {
           this.deps.agents.bindThread(created.threadId ?? created.id, node.agentId);
           this.db.prepare('UPDATE agent_flow_run_nodes SET task_id = ? WHERE run_id = ? AND node_id = ?').run(created.id, run.id, node.id);

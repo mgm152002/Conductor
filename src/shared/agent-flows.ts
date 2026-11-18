@@ -12,6 +12,11 @@ export interface FlowNode {
   kind?: 'agent' | 'reply';
   /** The agent that does the step (empty for a reply step). */
   agentId: string;
+  /** Run this step on this CLI instead of the agent's first available one. */
+  cli?: string;
+  /** Model and effort for that CLI; omitted means Auto. */
+  model?: string;
+  effort?: string;
   /** Reply steps: how long to wait for the answer before giving up. */
   waitHours?: number;
   /** What this step should do. `{{input}}` stands for the flow's input text. */
@@ -56,6 +61,7 @@ export const FlowInputSchema = z.object({
   input: z.string().max(10_000).default(''),
   nodes: z.array(z.object({
     id, kind: z.enum(['agent', 'reply']).optional(), agentId: z.string().max(64), waitHours: z.number().int().min(1).max(24 * 14).optional(),
+    cli: z.string().regex(/^[\w:.-]{1,200}$/).optional(), model: z.string().regex(/^[\w./:@-]{1,100}$/).optional(), effort: z.string().regex(/^[a-z]{2,12}$/).optional(),
     prompt: z.string().max(10_000), x: z.number().finite(), y: z.number().finite(),
   }).refine((node) => node.kind === 'reply' || z.string().uuid().safeParse(node.agentId).success, { message: 'A step needs an agent.' })).min(1).max(FLOW_MAX_NODES),
   edges: z.array(z.object({ from: id, to: id })).max(FLOW_MAX_NODES * FLOW_MAX_NODES),

@@ -55,13 +55,13 @@ describe('AgentFlowService', () => {
     let clock = new Date(2026, 10, 18, 8, 0);
     const service = new AgentFlowService({
       store,
-      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), list: () => Object.entries(names).map(([id, name]) => ({ id, name, description: '' })), startingCli: () => 'claude-code', bindThread: () => undefined },
+      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), list: () => Object.entries(names).map(([id, name]) => ({ id, name, description: '' })), startingCli: (_id: string, cli?: string) => cli ?? 'claude-code', bindThread: () => undefined },
       workspaceId: () => 'ws',
       now: () => clock,
     });
     service.setTaskCreator(async (input) => {
       const task = { id: randomUUID(), threadId: undefined } as never;
-      started.push({ id: (task as { id: string }).id, objective: input.objective });
+      started.push({ id: (task as { id: string }).id, objective: input.objective, ...(input as object) } as never);
       input.onCreated?.(task);
       return task;
     });
@@ -118,6 +118,16 @@ describe('AgentFlowService', () => {
     expect(started).toHaveLength(2);
     await service.taskSettled({ id: started[1]!.id, state: 'COMPLETED' });
     expect(started).toHaveLength(3);
+  });
+
+  it('runs a step on the CLI and model chosen for it', async () => {
+    const { service, started, A } = await setup();
+    const flow = service.save({ name: 'Pinned', input: '', nodes: [{ id: 'a', agentId: A, cli: 'codex', model: 'gpt-5', effort: 'high', prompt: 'go', x: 0, y: 0 }, { id: 'b', agentId: A, prompt: 'go', x: 0, y: 100 }], edges: [], schedule: null });
+    await service.run(flow.id, 'manual');
+    const [pinned, plain] = started as unknown as Array<{ agentId: string; runOptions?: unknown }>;
+    expect(pinned).toMatchObject({ agentId: 'codex', runOptions: { main: { model: 'gpt-5', effort: 'high' }, mainAgentId: 'codex' } });
+    expect(plain).toMatchObject({ agentId: 'claude-code' });
+    expect(plain!.runOptions).toBeUndefined();
   });
 
   it('skips what follows a failed step and marks the run failed', async () => {

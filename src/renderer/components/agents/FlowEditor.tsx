@@ -9,6 +9,8 @@ import { Alert, Button, Switch, inputClassName, textareaClassName } from '../ui/
 import { ClockIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon, WorkflowIcon } from '../ui/icons';
 import { message } from './AgentDialog';
 import { MailPanel } from './MailPanel';
+import { ModelEffortPicker } from '../chat/ModelEffortPicker';
+import type { AgentOption } from '@shared/integrations-contract';
 import { FLOW_TEMPLATES, pickAgent, type FlowTemplate } from '@shared/flow-templates';
 
 // The flow canvas: agent steps as cards, arrows between them. A step starts
@@ -82,6 +84,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
   const [busy, setBusy] = useState<'save' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mailReady, setMailReady] = useState(false);
+  const [clis, setClis] = useState<AgentOption[]>([]);
   const [describe, setDescribe] = useState('');
   const [drafting, setDrafting] = useState(false);
   const [connecting, setConnecting] = useState<{ from: string; x: number; y: number } | null>(null);
@@ -99,6 +102,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
     try { setRuns(await window.conductor.flows.runs(flow.id)); } catch { /* shown on the next poll */ }
   }, [flow]);
   useEffect(() => { void loadRuns(); }, [loadRuns]);
+  useEffect(() => { void window.conductor.agents.list().then(setClis).catch(() => undefined); }, []);
   useEffect(() => { void window.conductor.mail.status().then((status) => { setMailReady(status.configured); }).catch(() => undefined); }, []);
   useEffect(() => {
     if (flow === null) return undefined;
@@ -107,7 +111,14 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
   }, [flow, live, loadRuns]);
 
   const update = (patch: Partial<Draft>): void => { setDraft((current) => ({ ...current, ...patch })); setError(null); };
-  const patchNode = (id: string, patch: Partial<FlowNode>): void => { update({ nodes: draft.nodes.map((node) => (node.id === id ? { ...node, ...patch } : node)) }); };
+  const patchNode = (id: string, patch: { [K in keyof FlowNode]?: FlowNode[K] | undefined }): void => {
+    update({ nodes: draft.nodes.map((node) => {
+      if (node.id !== id) return node;
+      const next: Record<string, unknown> = { ...node, ...patch };
+      for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
+      return next as unknown as FlowNode;
+    }) });
+  };
 
   function addStep(agentId: string): void {
     if (draft.nodes.length >= FLOW_MAX_NODES) { setError(`A flow can have up to ${FLOW_MAX_NODES} steps.`); return; }
@@ -312,6 +323,19 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
                   <select aria-label="Agent" className={inputClassName} value={node.agentId} onChange={(e) => { patchNode(node.id, { agentId: e.target.value }); }}>
                     {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
                   </select>
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-2xs font-medium text-muted-foreground">Runs on</span>
+                    <select aria-label="CLI for this step" className={inputClassName} value={node.cli ?? ''} onChange={(e) => { patchNode(node.id, { cli: e.target.value === '' ? undefined : e.target.value, model: undefined, effort: undefined }); }}>
+                      <option value="">The agent’s own order ({(agentById.get(node.agentId)?.clis ?? []).map((id) => clis.find((c) => c.id === id)?.name ?? id).join(' → ') || 'none'})</option>
+                      {clis.filter((c) => !c.remote).map((c) => <option key={c.id} value={c.id} disabled={!c.available}>{c.name}{c.available ? '' : ' (not available)'}</option>)}
+                    </select>
+                    {(node.cli ?? agentById.get(node.agentId)?.clis[0]) !== undefined ? (
+                      <ModelEffortPicker variant="box" agentId={(node.cli ?? agentById.get(node.agentId)?.clis[0])!} label="Step model"
+                        value={{ ...(node.model !== undefined ? { model: node.model } : {}), ...(node.effort !== undefined ? { effort: node.effort } : {}) }}
+                        onChange={(choice) => { patchNode(node.id, { model: choice.model, effort: choice.effort }); }} />
+                    ) : null}
+                    <p className="text-2xs text-muted-foreground">{node.model === undefined && node.effort === undefined ? 'Model and effort: Auto (or what the agent set for that CLI).' : 'This step overrides the agent’s model.'}</p>
+                  </div>
                   <textarea aria-label="What this step does" rows={9} className={textareaClassName} value={node.prompt} placeholder="What should this agent do? Use {{input}} for the flow's input." onChange={(e) => { patchNode(node.id, { prompt: e.target.value }); }} />
                   <p className="text-2xs text-muted-foreground">It also gets what the steps before it said.</p>
                 </>

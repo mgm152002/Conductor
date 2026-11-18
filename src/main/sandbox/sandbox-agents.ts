@@ -269,11 +269,11 @@ export class SandboxAgentService {
   // ---- threads --------------------------------------------------------------
 
   /** The CLI a new run of this agent starts on: its first available one. */
-  startingCli(agentId: string, preferred?: string): string {
+  startingCli(agentId: string, preferred?: string, anyCli = false): string {
     const agent = this.get(agentId);
     if (agent === undefined) throw new Error('That agent no longer exists.');
     if (preferred !== undefined) {
-      if (!agent.clis.includes(preferred)) throw new Error(`${agent.name} isn’t set up to run on ${preferred}.`);
+      if (!anyCli && !agent.clis.includes(preferred)) throw new Error(`${agent.name} isn’t set up to run on ${preferred}.`);
       if (!this.deps.cliAvailable(preferred)) throw new Error(`${preferred} isn’t available right now. Check Connections, or pick another CLI.`);
       return preferred;
     }
