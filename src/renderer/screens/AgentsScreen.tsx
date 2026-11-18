@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SANDBOX_AGENT_COLORS, type AgentGroup, type SandboxAgent, type SandboxAgentInput, type SandboxStatus } from '@shared/sandbox-agents';
 import { useAgents } from '../hooks/useAgents';
 import { useAgentActivity } from '../hooks/useAgentActivity';
@@ -217,6 +217,9 @@ export function AgentsScreen(): React.JSX.Element {
   const selectedAgent = selection?.kind === 'agent' ? agents.find((agent) => agent.id === selection.id) : undefined;
   const selectedFlowId = selection?.kind === 'flow' ? selection.id : undefined;
   const selectedFlow = selectedFlowId === undefined ? undefined : flows.find((flow) => flow.id === selectedFlowId);
+  // The flow to go back to from the history.
+  const lastFlow = useRef<string | undefined>(undefined);
+  if (selectedFlowId !== undefined && selectedFlowId !== 'new') lastFlow.current = selectedFlowId;
   const shownFlows = flows.filter((flow) => q === '' || flow.name.toLowerCase().includes(q));
   const selectedGroup = selection?.kind === 'group' ? groups.find((group) => group.id === selection.id) : undefined;
   const defaultClis = clis.filter((cli) => cli.available && !cli.remote).map((cli) => cli.id);
@@ -246,12 +249,11 @@ export function AgentsScreen(): React.JSX.Element {
           </label>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {flows.length > 0 ? (
             <button type="button" onClick={() => { select({ kind: 'history', id: 'all' }); }} aria-current={selection?.kind === 'history' ? 'page' : undefined}
               className={cn('mb-1 flex w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-row-hover', selection?.kind === 'history' && 'bg-sidebar-row-active')}>
               <ClockIcon size={15} className="text-sidebar-muted-foreground" />Workflow history
             </button>
-          ) : null}
+
           {shownFlows.length > 0 ? (
             <>
               <h2 className="px-2.5 pt-2 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Flows</h2>
@@ -308,11 +310,13 @@ export function AgentsScreen(): React.JSX.Element {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {error !== null ? <div className="px-4 pt-3"><Alert action={<Button size="xs" variant="ghost" onClick={() => { setError(null); }}>Dismiss</Button>}>{error}</Alert></div> : null}
         {selection?.kind === 'history' ? (
-          <FlowHistory onOpenFlow={(flowId) => { select({ kind: 'flow', id: flowId }); }} />
+          <FlowHistory onOpenFlow={(flowId) => { select({ kind: 'flow', id: flowId }); }}
+            onBack={() => { const target = flows.find((flow) => flow.id === lastFlow.current)?.id ?? flows[0]?.id; select(target !== undefined ? { kind: 'flow', id: target } : shownAgents[0] !== undefined ? { kind: 'agent', id: shownAgents[0].id } : null); }} />
         ) : selectedFlowId !== undefined && (selectedFlow !== undefined || selectedFlowId === 'new') ? (
           <FlowEditor key={selectedFlow?.id ?? 'new'} flow={selectedFlow ?? null} agents={agents}
             onSaved={(flow) => { void loadFlows(); if (selectedFlowId === 'new') select({ kind: 'flow', id: flow.id }); }}
-            onDeleted={() => { if (selectedFlow !== undefined) setDeleting({ kind: 'flow', id: selectedFlow.id, name: selectedFlow.name }); }} />
+            onDeleted={() => { if (selectedFlow !== undefined) setDeleting({ kind: 'flow', id: selectedFlow.id, name: selectedFlow.name }); }}
+            onOpenHistory={() => { select({ kind: 'history', id: 'all' }); }} />
         ) : selectedAgent !== undefined ? (
           <AgentChat
             agent={selectedAgent}

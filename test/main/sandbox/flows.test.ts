@@ -138,7 +138,7 @@ describe('AgentFlowService', () => {
 
   it('stops a run: cancels working steps, skips the rest, and lists it in the history without binding steps to agent chats', async () => {
     const { service, started, bound, cancelled, A, B } = await setup();
-    const flow = service.save({ name: 'Stoppable', input: '', nodes: [{ id: 'a', agentId: A, prompt: 'a', x: 0, y: 0 }, { id: 'b', agentId: B, prompt: 'b', x: 200, y: 0 }], edges: [{ from: 'a', to: 'b' }], schedule: null });
+    const flow = service.save({ name: 'Stoppable', input: 'only backend roles', nodes: [{ id: 'a', agentId: A, prompt: 'a', x: 0, y: 0 }, { id: 'b', agentId: B, prompt: 'b', x: 200, y: 0 }], edges: [{ from: 'a', to: 'b' }], schedule: null });
     const run = await service.run(flow.id, 'manual');
     expect(bound).toEqual([]);
     expect(service.agentIdForTask(started[0]!.id)).toBe(A);
@@ -151,7 +151,7 @@ describe('AgentFlowService', () => {
     await service.taskSettled({ id: started[0]!.id, state: 'CANCELLED' });
     expect(started).toHaveLength(1);
     const [item] = service.history();
-    expect(item).toMatchObject({ flowName: 'Stoppable', labels: { a: 'Researcher', b: 'Writer' } });
+    expect(item).toMatchObject({ flowName: 'Stoppable', input: 'only backend roles', labels: { a: 'Researcher', b: 'Writer' } });
     expect(item!.nodes.map((n) => n.nodeId)).toEqual(['a', 'b']);
   });
 

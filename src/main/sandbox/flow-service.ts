@@ -178,7 +178,7 @@ export class AgentFlowService {
 
   /** Recent runs of every flow, newest first, with the flow's name. */
   history(limit = 50): Array<FlowRun & { flowName: string; labels: Record<string, string> }> {
-    const rows = this.db.prepare('SELECT r.id, r.definition FROM agent_flow_runs r ORDER BY r.started_at DESC LIMIT ?').all(limit) as Array<{ id: string; definition: string }>;
+    const rows = this.db.prepare('SELECT r.id, r.definition, r.input FROM agent_flow_runs r ORDER BY r.started_at DESC LIMIT ?').all(limit) as Array<{ id: string; definition: string; input: string }>;
     return rows.flatMap((row) => {
       const run = this.runById(row.id);
       if (run === undefined) return [];
@@ -215,7 +215,7 @@ export class AgentFlowService {
     if (row === undefined) return undefined;
     const nodes = (this.db.prepare('SELECT * FROM agent_flow_run_nodes WHERE run_id = ?').all(runId) as NodeRow[])
       .map((node) => ({ nodeId: node.node_id, status: node.status, taskId: node.task_id, output: node.output, note: node.note }));
-    return { id: row.id, flowId: row.flow_id, trigger: row.trigger, status: row.status, startedAt: row.started_at, finishedAt: row.finished_at, nodes };
+    return { id: row.id, flowId: row.flow_id, trigger: row.trigger, status: row.status, input: row.input, startedAt: row.started_at, finishedAt: row.finished_at, nodes };
   }
 
   /** The most recent runs of a flow, newest first. */

@@ -72,11 +72,12 @@ function SchedulePanel({ schedule, onChange, nextRunAt }: { schedule: FlowSchedu
   );
 }
 
-export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
+export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: {
   flow: AgentFlow | null;
   agents: SandboxAgent[];
   onSaved: (flow: AgentFlow) => void;
   onDeleted: () => void;
+  onOpenHistory: () => void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<Draft>(() => fromFlow(flow));
   const [selected, setSelected] = useState<{ kind: 'node'; id: string } | { kind: 'edge'; index: number } | null>(null);
@@ -207,6 +208,13 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
     setError(null);
     try { await window.conductor.flows.stopRun(runId); await loadRuns(); } catch (err) { setError(message(err)); }
   }
+  async function runAgain(input: string): Promise<void> {
+    if (flow === null) return;
+    setBusy('run'); setError(null);
+    try { await window.conductor.flows.run(flow.id, input); await loadRuns(); }
+    catch (err) { setError(message(err)); }
+    finally { setBusy(null); }
+  }
   async function runNow(): Promise<void> {
     setBusy('run'); setError(null);
     try {
@@ -232,6 +240,8 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
         <input aria-label="Flow name" value={draft.name} maxLength={80} onChange={(e) => { update({ name: e.target.value }); }} className="min-w-0 flex-1 bg-transparent font-display text-[15px] font-semibold text-foreground outline-none" />
         {live ? <span className="flex items-center gap-1.5 text-2xs text-info"><Spinner size={12} />Running</span> : null}
         {live && latest !== undefined ? <Button size="md" variant="outline" disabled={busy !== null} onClick={() => { void stopRun(latest.id); }}>Stop</Button> : null}
+        <Button size="md" variant="ghost" title="Every run of your flows" onClick={onOpenHistory}><ClockIcon size={13} />History</Button>
+        {flow !== null && latest !== undefined && !live ? <Button size="md" variant="outline" disabled={busy !== null || dirty} title={dirty ? 'Save your changes first' : 'Run again with the input of the last run'} onClick={() => { void runAgain(latest.input); }}><PlayIcon size={13} />Run again</Button> : null}
         <Button size="md" variant="outline" disabled={busy !== null || !dirty || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void save(); }}>{busy === 'save' ? <Spinner size={13} /> : null}{dirty ? 'Save' : 'Saved'}</Button>
         <Button size="md" variant="primary" disabled={busy !== null || live || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void runNow(); }}>{busy === 'run' ? <Spinner size={13} /> : <PlayIcon size={13} />}Run now</Button>
         {flow !== null ? <Button size="icon" variant="ghost" aria-label="Delete flow" title="Delete flow" onClick={onDeleted}><TrashIcon size={15} /></Button> : null}

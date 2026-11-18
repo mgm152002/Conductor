@@ -3,7 +3,7 @@ import type { FlowNodeStatus, FlowRun } from '@shared/agent-flows';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { Alert, Button, EmptyState } from '../ui/primitives';
-import { ClockIcon, Spinner } from '../ui/icons';
+import { ArrowLeftIcon, ClockIcon, PlayIcon, Spinner } from '../ui/icons';
 import { message } from './AgentDialog';
 
 type Item = FlowRun & { flowName: string; labels: Record<string, string> };
@@ -18,10 +18,11 @@ const duration = (run: FlowRun): string => {
 };
 
 /** Every flow run, newest first: what each step did and said. Runs are kept here, not in the agents' chats. */
-export function FlowHistory({ onOpenFlow }: { onOpenFlow: (flowId: string) => void }): React.JSX.Element {
+export function FlowHistory({ onOpenFlow, onBack }: { onOpenFlow: (flowId: string) => void; onBack: () => void }): React.JSX.Element {
   const [runs, setRuns] = useState<Item[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
+  const [rerunning, setRerunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -41,9 +42,17 @@ export function FlowHistory({ onOpenFlow }: { onOpenFlow: (flowId: string) => vo
     finally { setStopping(null); }
   }
 
+  async function rerun(run: Item): Promise<void> {
+    setRerunning(run.id); setError(null);
+    try { await window.conductor.flows.run(run.flowId, run.input); await load(); }
+    catch (err) { setError(message(err)); }
+    finally { setRerunning(null); }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Button size="md" variant="ghost" aria-label="Back to workflows" title="Back to workflows" onClick={onBack}><ArrowLeftIcon size={14} />Back</Button>
         <ClockIcon size={16} className="text-muted-foreground" />
         <h2 className="flex-1 font-display text-[15px] font-semibold text-foreground">Workflow history</h2>
         {live ? <span className="flex items-center gap-1.5 text-2xs text-info"><Spinner size={12} />Running</span> : null}
@@ -64,7 +73,8 @@ export function FlowHistory({ onOpenFlow }: { onOpenFlow: (flowId: string) => vo
                           {run.status === 'running' ? 'Running' : run.status === 'done' ? 'Finished' : 'Failed or stopped'} · {run.trigger === 'schedule' ? 'scheduled' : 'by hand'} · {relativeTime(run.startedAt)} · {duration(run)}
                         </span>
                       </button>
-                      {run.status === 'running' ? <Button size="sm" variant="outline" disabled={stopping === run.id} onClick={() => { void stop(run.id); }}>{stopping === run.id ? <Spinner size={12} /> : null}Stop</Button> : null}
+                      {run.status === 'running' ? <Button size="sm" variant="outline" disabled={stopping === run.id} onClick={() => { void stop(run.id); }}>{stopping === run.id ? <Spinner size={12} /> : null}Stop</Button>
+                        : <Button size="sm" variant="outline" disabled={rerunning === run.id || runs.some((other) => other.flowId === run.flowId && other.status === 'running')} title="Start this flow again with the same input" onClick={() => { void rerun(run); }}>{rerunning === run.id ? <Spinner size={12} /> : <PlayIcon size={12} />}Run again</Button>}
                       <Button size="sm" variant="ghost" onClick={() => { onOpenFlow(run.flowId); }}>Open flow</Button>
                     </div>
                     {open === run.id ? (

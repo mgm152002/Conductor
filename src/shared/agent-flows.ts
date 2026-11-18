@@ -49,6 +49,8 @@ export interface FlowRun {
   flowId: string;
   trigger: 'manual' | 'schedule';
   status: 'running' | 'done' | 'failed';
+  /** The input this run started from. */
+  input: string;
   startedAt: string;
   finishedAt: string | null;
   nodes: FlowRunNode[];
