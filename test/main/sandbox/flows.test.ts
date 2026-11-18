@@ -120,6 +120,19 @@ describe('AgentFlowService', () => {
     expect(started).toHaveLength(3);
   });
 
+  it('puts every step of a flow, whichever agent runs it, in one shared sandbox', async () => {
+    const { service, started, A, B } = await setup();
+    const flow = service.save({ name: 'Shared', input: '', nodes: [{ id: 'a', agentId: A, prompt: 'a', x: 0, y: 0 }, { id: 'b', agentId: B, prompt: 'b', x: 200, y: 0 }], edges: [{ from: 'a', to: 'b' }], schedule: null });
+    await service.run(flow.id, 'manual');
+    await service.taskSettled({ id: started[0]!.id, state: 'COMPLETED' });
+    const first = service.sandboxScopeFor(started[0]!.id)!;
+    const second = service.sandboxScopeFor(started[1]!.id)!;
+    expect(first.key).toBe(second.key);
+    expect(first.key.startsWith('group-')).toBe(true);
+    expect(first).toMatchObject({ name: 'Shared', label: 'workflow' });
+    expect(service.sandboxScopeFor('not-a-flow-task')).toBeUndefined();
+  });
+
   it('runs a step on the CLI and model chosen for it', async () => {
     const { service, started, A } = await setup();
     const flow = service.save({ name: 'Pinned', input: '', nodes: [{ id: 'a', agentId: A, cli: 'codex', model: 'gpt-5', effort: 'high', prompt: 'go', x: 0, y: 0 }, { id: 'b', agentId: A, prompt: 'go', x: 0, y: 100 }], edges: [], schedule: null });

@@ -639,6 +639,7 @@ export async function bootstrap(): Promise<AppServices> {
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
   const flows = new AgentFlowService({ store, mail: agentMail, agents: sandboxAgents, workspaceId: () => sandboxAgents.agentWorkspaceId() });
+  sandboxAgents.setSandboxScope((taskId) => flows.sandboxScopeFor(taskId));
   flows.setTaskCreator((input) => runner.create(input));
   sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));
   sandboxAgents.setGroupPlanner((prompt) => groupPlanner.ask('Planning a group message', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));

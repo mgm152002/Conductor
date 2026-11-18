@@ -11,6 +11,8 @@ const SETTLED = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED', 'RECOVER
 const MAX_HANDOFF = 6_000;
 const MAX_OUTPUT = 20_000;
 const TICK_MS = 30_000;
+/** Sandbox keys starting with `group-` use the shared workspace volume. */
+const FLOW_SANDBOX_PREFIX = 'group-flow-';
 
 interface FlowRow { id: string; name: string; input: string; nodes: string; edges: string; schedule: string | null; next_run_at: string | null; last_run_at: string | null; created_at: string; updated_at: string }
 interface RunRow { id: string; flow_id: string; trigger: 'manual' | 'schedule'; status: FlowRun['status']; input: string; definition: string; started_at: string; finished_at: string | null }
@@ -144,6 +146,13 @@ export class AgentFlowService {
     }
   }
 
+  /** The steps of one flow share one sandbox, so files (resumes, lists) carry from step to step and only one sandbox's memory is used. */
+  sandboxScopeFor(taskId: string): { key: string; name: string; label: string } | undefined {
+    const row = this.db.prepare(`SELECT r.flow_id AS id, r.definition FROM agent_flow_run_nodes n JOIN agent_flow_runs r ON r.id = n.run_id WHERE n.task_id = ?`).get(taskId) as { id: string; definition: string } | undefined;
+    if (row === undefined) return undefined;
+    return { key: `${FLOW_SANDBOX_PREFIX}${row.id}`, name: parse<Definition>(row.definition, { name: 'Workflow', nodes: [], edges: [] }).name, label: 'workflow' };
+  }
+
   // ---- runs -----------------------------------------------------------------
 
   /** Start a run. Resolves once the first steps are started. */
@@ -194,8 +203,15 @@ export class AgentFlowService {
           this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'skipped', note = ? WHERE run_id = ? AND node_id = ?").run('A step before this one did not finish.', runId, node.id);
           changed = true;
         } else if (before.every((status) => status === 'done')) {
-          this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?").run(this.now().toISOString(), runId, node.id);
           changed = true;
+          if (node.kind === 'reply') {
+            // Waiting only makes sense if the step before really emailed the user.
+            const sources = definition.edges.filter((edge) => edge.to === node.id).map((edge) => states.get(edge.from)?.task_id).filter((id): id is string => typeof id === 'string');
+            const mail = this.deps.mail;
+            if (mail === undefined || !mail.status().configured) { this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'failed', note = ? WHERE run_id = ? AND node_id = ?").run('Email is not connected, so there is nothing to wait for.', runId, node.id); continue; }
+            if (mail.threadsFor(sources).length === 0) { this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'failed', note = ? WHERE run_id = ? AND node_id = ?").run('The step before this one never sent you an email, so there is no reply to wait for.', runId, node.id); continue; }
+          }
+          this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'running', started_at = ? WHERE run_id = ? AND node_id = ?").run(this.now().toISOString(), runId, node.id);
           if (node.kind === 'reply') this.db.prepare('UPDATE agent_flow_run_nodes SET note = ? WHERE run_id = ? AND node_id = ?').run('Waiting for your reply by email.', runId, node.id);
           else await this.startNode(run, definition, node, states);
         }

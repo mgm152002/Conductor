@@ -129,6 +129,16 @@ describe('a flow that waits for an email reply', () => {
     expect(service.runs(flow.id)[0]!.status).toBe('done');
   });
 
+  it('does not wait for a reply when the step before never sent the email', async () => {
+    const { service, started, flow } = await setup();
+    await service.run(flow.id, 'manual');
+    await service.taskSettled({ id: started[0]!.id, state: 'COMPLETED' });
+    const run = service.runs(flow.id)[0]!;
+    expect(run.status).toBe('failed');
+    expect(Object.fromEntries(run.nodes.map((n) => [n.nodeId, n.status]))).toEqual({ mail: 'done', wait: 'failed', apply: 'skipped' });
+    expect(run.nodes.find((n) => n.nodeId === 'wait')!.note).toContain('never sent you an email');
+  });
+
   it('keeps waiting across a restart and gives up after the wait time', async () => {
     const { service, started, flow, mail, setClock } = await setup();
     await service.run(flow.id, 'manual');
