@@ -91,14 +91,34 @@ describe('CliMcpManager', () => {
     expect(overview.servers.every((server) => !server.portable)).toBe(true);
   });
 
-  it('skips CLIs that cannot store a remote server’s headers', async () => {
+  it('writes a remote server’s headers into the config of CLIs whose command line cannot take them', async () => {
     write(join(home, '.claude.json'), { mcpServers: { api: { type: 'http', url: 'https://api.example.com/mcp', headers: { Authorization: 'Bearer t' } } } });
-    await manager().sync();
-    const targets = adds().map((call) => call.exe).sort();
-    expect(targets).toEqual(['/bin/agy', '/bin/opencode']);
+    const report = await manager().sync();
+    expect(adds().map((call) => call.exe).sort()).toEqual(['/bin/agy', '/bin/opencode']);
+    expect(report.failed).toEqual([]);
+    const kiro = JSON.parse(readFileSync(join(home, '.kiro/settings/mcp.json'), 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(kiro.mcpServers['api']).toEqual({ url: 'https://api.example.com/mcp', headers: { Authorization: 'Bearer t' } });
+    const codex = readFileSync(join(home, '.codex/config.toml'), 'utf8');
+    expect(codex).toContain('[mcp_servers."api"]');
+    expect(codex).toContain('url = "https://api.example.com/mcp"');
+    expect(codex).toContain('http_headers = { "Authorization" = "Bearer t" }');
+  });
+
+  it('reads the newer OpenCode and Antigravity config layouts', async () => {
+    write(join(home, '.config/opencode/opencode.json'), { mcp: { servers: { docs: { type: 'local', command: ['npx', '-y', 'pkg'] }, hub: { type: 'remote', url: 'https://h.example.com/mcp' } } } });
+    write(join(home, '.gemini/config/mcp_config.json'), { mcpServers: { docs: { command: 'npx', args: ['-y', 'pkg'], disabled: false } } });
+    mkdirSync(join(home, '.gemini/antigravity'), { recursive: true });
+    writeFileSync(join(home, '.gemini/antigravity/mcp_config.json'), '');
     const overview = await manager().overview();
-    expect(overview.servers[0]!.presence['codex']?.state).toBe('unsupported');
-    expect(overview.servers[0]!.presence['kiro']?.state).toBe('unsupported');
+    const docs = overview.servers.find((server) => server.name === 'docs')!;
+    expect(docs.presence['opencode']?.state).toBe('installed');
+    expect(docs.presence['antigravity']?.state).toBe('installed');
+    expect(overview.servers.find((server) => server.name === 'hub')!.presence['opencode']?.state).toBe('installed');
+    expect(overview.servers.some((server) => server.name === 'servers')).toBe(false);
+    // Removing it from OpenCode takes it out of the nested map and leaves the others.
+    await manager().removeFromCli('docs', 'opencode');
+    const after = JSON.parse(readFileSync(join(home, '.config/opencode/opencode.json'), 'utf8')) as { mcp: { servers: Record<string, unknown> } };
+    expect(Object.keys(after.mcp.servers)).toEqual(['hub']);
   });
 
   it('does not put back a server the user removed from one CLI', async () => {

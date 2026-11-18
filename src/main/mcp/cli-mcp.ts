@@ -111,6 +111,18 @@ function stdioPortability(command: string, cwd: string | undefined, inherited: r
 }
 
 /** Parse a `{ name: { command, args, env, url, headers, ... } }` map used by most CLIs. */
+/** A server definition, as opposed to a group of them. */
+const isServerDef = (value: unknown): boolean => { const def = obj(value); return def !== null && (def['type'] !== undefined || def['command'] !== undefined || def['url'] !== undefined); };
+
+/** OpenCode's servers: `mcp.<name>` in older versions, `mcp.servers.<name>` in newer ones. */
+function openCodeServers(config: Json): Json {
+  const mcp = obj(config['mcp']) ?? {};
+  const nested = obj(mcp['servers']);
+  if (nested === null || isServerDef(mcp['servers'])) return mcp;
+  const { servers: _servers, ...flat } = mcp;
+  return { ...flat, ...nested };
+}
+
 function parseStandardMap(cli: McpCliId, map: Json): FullEntry[] {
   const entries: FullEntry[] = [];
   for (const [name, raw] of Object.entries(map)) {
@@ -168,7 +180,11 @@ export class CliMcpManager {
       case 'claude-code': return join(this.home, '.claude.json');
       case 'codex': return join(this.home, '.codex', 'config.toml');
       case 'opencode': return this.openCodeConfigPath();
-      case 'antigravity': return join(this.home, '.gemini', 'antigravity', 'mcp_config.json');
+      case 'antigravity': {
+        // Newer versions keep it in ~/.gemini/config; older ones in ~/.gemini/antigravity.
+        const current = join(this.home, '.gemini', 'config', 'mcp_config.json');
+        return existsSync(current) || !existsSync(join(this.home, '.gemini', 'antigravity', 'mcp_config.json')) ? current : join(this.home, '.gemini', 'antigravity', 'mcp_config.json');
+      }
       case 'kiro': return join(this.home, '.kiro', 'settings', 'mcp.json');
     }
   }
@@ -231,7 +247,18 @@ export class CliMcpManager {
         const config = await readJson(this.configPath(cli));
         return config === null ? [] : parseStandardMap(cli, obj(config['mcpServers']) ?? {});
       }
-      case 'antigravity':
+      case 'antigravity': {
+        const paths = [join(this.home, '.gemini', 'config', 'mcp_config.json'), join(this.home, '.gemini', 'antigravity', 'mcp_config.json')];
+        const seen = new Set<string>();
+        const out: FullEntry[] = [];
+        for (const path of paths) {
+          const config = await readJson(path);
+          for (const entry of config === null ? [] : parseStandardMap(cli, obj(config['mcpServers']) ?? {})) {
+            if (!seen.has(entry.name)) { seen.add(entry.name); out.push(entry); }
+          }
+        }
+        return out;
+      }
       case 'kiro': {
         const config = await readJson(this.configPath(cli));
         return config === null ? [] : parseStandardMap(cli, obj(config['mcpServers']) ?? {});
@@ -241,7 +268,7 @@ export class CliMcpManager {
 
   private parseOpenCode(config: Json): FullEntry[] {
     const out: FullEntry[] = [];
-    for (const [name, raw] of Object.entries(obj(config['mcp']) ?? {})) {
+    for (const [name, raw] of Object.entries(openCodeServers(config))) {
       const def = obj(raw);
       if (def === null) continue;
       const disabled = def['enabled'] === false;
@@ -263,13 +290,44 @@ export class CliMcpManager {
     return out;
   }
 
-  /** Why a CLI cannot hold this server as-is, if it cannot. */
-  private unsupported(cli: McpCliId, server: PortableMcpServer): string | undefined {
-    const headers = Object.keys(server.headers ?? {});
-    if (server.transport === 'http' && headers.length > 0 && (cli === 'codex' || cli === 'kiro')) {
-      return `${MCP_CLI_NAMES[cli]} cannot store HTTP headers from the command line (${headers.join(', ')}).`;
-    }
+  /** Why a CLI cannot hold this server as-is, if it cannot. Headers are written to its config file directly where its command line cannot take them. */
+  private unsupported(_cli: McpCliId, _server: PortableMcpServer): string | undefined {
     return undefined;
+  }
+
+  /** Whether this CLI's `mcp add` cannot carry the server, so its config file is edited instead. */
+  private writesConfigFile(cli: McpCliId, server: PortableMcpServer): boolean {
+    return server.transport === 'http' && Object.keys(server.headers ?? {}).length > 0 && (cli === 'codex' || cli === 'kiro');
+  }
+
+  private async atomicWrite(path: string, text: string): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    const temp = `${path}.conductor-${process.pid}.tmp`;
+    await writeFile(temp, text, { mode: 0o600 });
+    await rename(temp, path);
+  }
+
+  /** Kiro: add the server to ~/.kiro/settings/mcp.json. */
+  private async writeKiroConfig(server: PortableMcpServer): Promise<void> {
+    const path = this.configPath('kiro');
+    const config = (await readJson(path)) ?? {};
+    const servers = obj(config['mcpServers']) ?? {};
+    if (server.name in servers) return;
+    servers[server.name] = { url: server.url, headers: server.headers };
+    config['mcpServers'] = servers;
+    await this.atomicWrite(path, `${JSON.stringify(config, null, 2)}\n`);
+  }
+
+  /** Codex: append a [mcp_servers.<name>] table with static headers to ~/.codex/config.toml. */
+  private async writeCodexConfig(server: PortableMcpServer): Promise<void> {
+    const path = this.configPath('codex');
+    let text = '';
+    try { text = await readFile(path, 'utf8'); } catch { /* a new file */ }
+    const header = `[mcp_servers.${JSON.stringify(server.name)}]`;
+    if (text.includes(header) || text.includes(`[mcp_servers.${server.name}]`)) return;
+    const headers = Object.entries(server.headers ?? {}).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(', ');
+    const block = `${header}\nurl = ${JSON.stringify(server.url ?? '')}\nhttp_headers = { ${headers} }\n`;
+    await this.atomicWrite(path, `${text}${text === '' || text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n'}${block}`);
   }
 
   private addArgs(cli: McpCliId, server: PortableMcpServer): string[] {
@@ -311,6 +369,10 @@ export class CliMcpManager {
     if (exe === undefined) throw new Error(`${MCP_CLI_NAMES[cli]} is not installed`);
     const reason = this.unsupported(cli, server);
     if (reason !== undefined) throw new Error(reason);
+    if (this.writesConfigFile(cli, server)) {
+      if (cli === 'kiro') await this.writeKiroConfig(server); else await this.writeCodexConfig(server);
+      return;
+    }
     await this.run(exe, this.addArgs(cli, server));
   }
 
@@ -322,8 +384,11 @@ export class CliMcpManager {
       if (path.endsWith('.jsonc')) throw new Error('OpenCode uses opencode.jsonc here; remove the server from that file by hand.');
       const config = await readJson(path);
       const mcp = obj(config?.['mcp']);
-      if (config === null || mcp === null || !(name in mcp)) return;
-      delete mcp[name];
+      if (config === null || mcp === null) return;
+      const nested = obj(mcp['servers']);
+      if (nested !== null && !isServerDef(mcp['servers']) && name in nested) delete nested[name];
+      else if (name in mcp) delete mcp[name];
+      else return;
       await mkdir(dirname(path), { recursive: true });
       const temp = `${path}.conductor-${process.pid}.tmp`;
       await writeFile(temp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });

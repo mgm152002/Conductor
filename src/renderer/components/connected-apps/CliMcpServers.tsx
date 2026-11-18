@@ -167,6 +167,9 @@ interface FormState {
   everywhere: boolean;
 }
 
+/** A name the CLIs accept: letters, digits, dots, dashes and underscores. */
+const serverSlug = (name: string): string => name.trim().replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').replace(/-+$/, '');
+
 function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
   open: boolean;
   clis: CliMcpCliView[];
@@ -194,7 +197,7 @@ function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
     setBusy(true);
     try {
       onAdded(await window.conductor.mcp.cli.add({
-        name: form.name.trim(), endpoint,
+        name: serverSlug(form.name), endpoint,
         ...(!http && Object.keys(env.pairs).length > 0 ? { env: env.pairs } : {}),
         ...(http && Object.keys(headers.pairs).length > 0 ? { headers: headers.pairs } : {}),
         clis: targets,
@@ -213,7 +216,7 @@ function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
       width="max-w-lg"
       footer={<>
         <Button size="md" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button size="md" variant="primary" disabled={busy || form.name.trim() === '' || form.endpoint.trim() === ''} onClick={() => { void submit(); }}>
+        <Button size="md" variant="primary" disabled={busy || serverSlug(form.name) === '' || form.endpoint.trim() === ''} onClick={() => { void submit(); }}>
           {busy ? <><Spinner size={13} />Installing…</> : form.cli === null ? 'Install' : form.everywhere ? `Install into ${installed.length} CLIs` : `Install into ${MCP_CLI_NAMES[form.cli]}`}
         </Button>
       </>}
@@ -222,16 +225,19 @@ function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
         <div className="flex flex-col gap-1">
           <label htmlFor={ids.name} className="text-2xs font-medium text-muted-foreground">Name</label>
           <input id={ids.name} className={inputClassName} value={form.name} maxLength={64} placeholder="github" onChange={(e) => { setForm({ ...form, name: e.target.value }); }} />
+          {form.name.trim() !== '' && serverSlug(form.name) !== form.name.trim() ? <p className="text-3xs text-muted-foreground">Saved as <span className="font-mono">{serverSlug(form.name) || '…'}</span> (names can only use letters, digits, dots, dashes and underscores).</p> : null}
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor={ids.endpoint} className="text-2xs font-medium text-muted-foreground">Command or URL</label>
           <input id={ids.endpoint} className={cn(inputClassName, 'font-mono')} value={form.endpoint} placeholder="npx -y @modelcontextprotocol/server-github  or  https://mcp.example.com/mcp" onChange={(e) => { setForm({ ...form, endpoint: e.target.value }); }} />
         </div>
+        {/\bgoogle-drive-mcp\s+auth\b/.test(form.endpoint) ? <Alert tone="warning">“auth” is this package’s one-time sign-in command; it exits when done and isn’t the server. Run it yourself in a terminal first, then install the server without “auth”: <span className="font-mono">npx -y @piotr-agier/google-drive-mcp</span>.</Alert> : null}
+        <p className="text-3xs text-muted-foreground">Conductor only registers the server with your CLIs; it doesn’t sign you in. If the server needs a login (for example an <span className="font-mono">auth</span> command, or Google/OAuth), run that yourself in a terminal before an agent uses it.</p>
         {http ? (
           <div className="flex flex-col gap-1">
             <label htmlFor={ids.headers} className="text-2xs font-medium text-muted-foreground">Headers <span className="font-normal">(optional, one per line: Name: value)</span></label>
             <textarea id={ids.headers} rows={2} className={cn(textareaClassName, 'font-mono text-xs')} value={form.headers} placeholder="Authorization: Bearer …" onChange={(e) => { setForm({ ...form, headers: e.target.value }); }} />
-            <p className="text-3xs text-muted-foreground">Codex and Kiro can’t take headers from the command line, so a server with headers skips them. Servers that use sign-in ask for it the first time an agent connects.</p>
+            <p className="text-3xs text-muted-foreground">Codex and Kiro get headers written into their config files. Servers that use sign-in ask for it the first time an agent connects.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-1">
