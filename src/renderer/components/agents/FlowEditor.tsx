@@ -84,6 +84,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
   const [busy, setBusy] = useState<'save' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mailReady, setMailReady] = useState(false);
+  const onMailChange = useCallback((status: { configured: boolean }) => { setMailReady(status.configured); }, []);
   const [clis, setClis] = useState<AgentOption[]>([]);
   const [describe, setDescribe] = useState('');
   const [drafting, setDrafting] = useState(false);
@@ -316,7 +317,12 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
                 <>
                   <p className="text-2xs text-muted-foreground">The flow pauses here until you reply to the email a step before sent you. What you wrote is handed to the steps after this one (for example “apply to all”).</p>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">Give up after<input type="number" min={1} max={336} aria-label="Hours to wait" className={cn(inputClassName, 'w-20')} value={node.waitHours ?? DEFAULT_REPLY_HOURS} onChange={(e) => { patchNode(node.id, { waitHours: Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_REPLY_HOURS) }); }} />hours</label>
-                  {!mailReady ? <Alert tone="warning">Email isn’t connected, so this step can never be answered. Connect it below.</Alert> : null}
+                  {!mailReady ? (
+                    <>
+                      <Alert tone="warning">Email isn’t connected yet, so this step can’t be answered. Connect AgentMail here.</Alert>
+                      <MailPanel onChange={onMailChange} />
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -355,7 +361,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted }: {
                 <textarea aria-label="Flow input" rows={7} className={textareaClassName} value={draft.input} placeholder="The exact details of this run (for example which jobs you want). Steps use it as {{input}}, so edit it any time without touching the steps." onChange={(e) => { update({ input: e.target.value }); }} />
               </section>
               <SchedulePanel schedule={draft.schedule} nextRunAt={flow?.nextRunAt ?? null} onChange={(schedule) => { update({ schedule }); }} />
-              <MailPanel onChange={(status) => { setMailReady(status.configured); }} />
+              <MailPanel onChange={onMailChange} />
             </>
           )}
           {flow !== null ? (
