@@ -433,6 +433,21 @@ describe("an agent's private memory", () => {
     expect(calls).toEqual([]);
   });
 
+  it('sends email and saves memory even when the sandbox cannot start', async () => {
+    const sent: string[] = [];
+    const session = await gateway.open({
+      agentName: 'Mailer', tools: ['files'], approval: 'none',
+      sandbox: async () => { throw new Error('Docker has too little memory'); },
+      decide: async () => 'accept',
+      memory: agentMemory(fakeMem0(), 'agent-a'),
+      mail: { send: async (subject) => { sent.push(subject); return 'Sent.'; }, inbox: async () => '', read: async () => '' },
+    });
+    const cli = await connect(session.url);
+    expect(text(await cli.callTool({ name: 'email_send', arguments: { subject: 'Jobs', body: 'x' } }))).toBe('Sent.');
+    expect((await cli.callTool({ name: 'memory_save', arguments: { text: 'note' } })).isError).not.toBe(true);
+    expect(sent).toEqual(['Jobs']);
+  });
+
   it('tells the agent when Mem0 is down instead of failing the run', async () => {
     const session = await gateway.open({
       agentName: 'Researcher', tools: ['files'], approval: 'none',

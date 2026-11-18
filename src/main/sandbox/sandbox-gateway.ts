@@ -415,8 +415,11 @@ export class SandboxGateway {
 
   /** Approve (or not) and forward one tool call. */
   async call(session: Session, name: string, args: Json, signal: AbortSignal): Promise<Json> {
-    const tools = await this.tools(session);
-    if (!tools.some((tool) => tool.name === name)) {
+    // Memory and email live outside the sandbox: they work even when it can't start.
+    const outside = (session.config.memory !== undefined && (name === MEMORY_SAVE_TOOL || name === MEMORY_SEARCH_TOOL || name === MEMORY_FORGET_TOOL))
+      || (session.config.mail !== undefined && (name === EMAIL_SEND_TOOL || name === EMAIL_INBOX_TOOL || name === EMAIL_READ_TOOL));
+    const tools = outside ? [] : await this.tools(session);
+    if (!outside && !tools.some((tool) => tool.name === name)) {
       return { content: [{ type: 'text', text: `The tool ${name} is not available to this agent.` }], isError: true };
     }
     // Handing a file to the user's own chat changes nothing in the sandbox
