@@ -1618,6 +1618,56 @@ const migration042: Migration = {
   },
 };
 
+const migration043: Migration = {
+  version: 43,
+  name: 'agent_flows',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE agent_flows (
+        id          TEXT PRIMARY KEY NOT NULL,
+        name        TEXT NOT NULL,
+        input       TEXT NOT NULL DEFAULT '',
+        nodes       TEXT NOT NULL,
+        edges       TEXT NOT NULL,
+        schedule    TEXT,
+        next_run_at TEXT,
+        last_run_at TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE TABLE agent_flow_runs (
+        id          TEXT PRIMARY KEY NOT NULL,
+        flow_id     TEXT NOT NULL REFERENCES agent_flows(id) ON DELETE CASCADE,
+        trigger     TEXT NOT NULL CHECK (trigger IN ('manual', 'schedule')),
+        status      TEXT NOT NULL CHECK (status IN ('running', 'done', 'failed')),
+        input       TEXT NOT NULL DEFAULT '',
+        definition  TEXT NOT NULL,
+        started_at  TEXT NOT NULL,
+        finished_at TEXT
+      );
+      CREATE INDEX idx_agent_flow_runs_flow ON agent_flow_runs(flow_id, started_at);
+      CREATE TABLE agent_flow_run_nodes (
+        run_id  TEXT NOT NULL REFERENCES agent_flow_runs(id) ON DELETE CASCADE,
+        node_id TEXT NOT NULL,
+        status  TEXT NOT NULL CHECK (status IN ('waiting', 'running', 'done', 'failed', 'skipped')),
+        task_id TEXT,
+        output  TEXT NOT NULL DEFAULT '',
+        note    TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (run_id, node_id)
+      );
+      CREATE INDEX idx_agent_flow_run_nodes_task ON agent_flow_run_nodes(task_id);
+    `);
+  },
+};
+
+const migration044: Migration = {
+  version: 44,
+  name: 'agent_flow_step_started',
+  up({ db }: Tx): void {
+    db.exec('ALTER TABLE agent_flow_run_nodes ADD COLUMN started_at TEXT;');
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1662,4 +1712,6 @@ export const MIGRATIONS: readonly Migration[] = [
   migration040,
   migration041,
   migration042,
+  migration043,
+  migration044,
 ];
