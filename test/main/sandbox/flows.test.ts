@@ -52,13 +52,16 @@ describe('AgentFlowService', () => {
     const A = randomUUID(); const B = randomUUID();
     const names: Record<string, string> = { [A]: 'Researcher', [B]: 'Writer' };
     const started: Array<{ id: string; objective: string }> = [];
+    const bound: string[] = [];
+    const cancelled: string[] = [];
     let clock = new Date(2026, 10, 18, 8, 0);
     const service = new AgentFlowService({
       store,
-      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), list: () => Object.entries(names).map(([id, name]) => ({ id, name, description: '' })), startingCli: (_id: string, cli?: string) => cli ?? 'claude-code', bindThread: () => undefined },
+      agents: { get: (id) => (names[id] !== undefined ? { id, name: names[id]! } : undefined), list: () => Object.entries(names).map(([id, name]) => ({ id, name, description: '' })), startingCli: (_id: string, cli?: string) => cli ?? 'claude-code', bindThread: (threadId: string) => { bound.push(threadId); } },
       workspaceId: () => 'ws',
       now: () => clock,
     });
+    service.setTaskCanceller(async (id) => { cancelled.push(id); });
     service.setTaskCreator(async (input) => {
       const task = { id: randomUUID(), threadId: undefined } as never;
       started.push({ id: (task as { id: string }).id, objective: input.objective, ...(input as object) } as never);
@@ -66,7 +69,7 @@ describe('AgentFlowService', () => {
       return task;
     });
     service.setReplyReader((taskId) => `reply of ${started.findIndex((s) => s.id === taskId)}`);
-    return { service, started, A, B, setClock: (d: Date) => { clock = d; } };
+    return { service, started, bound, cancelled, A, B, setClock: (d: Date) => { clock = d; } };
   }
 
   it('saves flows, validating the graph, agents and schedule', async () => {
@@ -131,6 +134,25 @@ describe('AgentFlowService', () => {
     expect(first.key.startsWith('group-')).toBe(true);
     expect(first).toMatchObject({ name: 'Shared', label: 'workflow' });
     expect(service.sandboxScopeFor('not-a-flow-task')).toBeUndefined();
+  });
+
+  it('stops a run: cancels working steps, skips the rest, and lists it in the history without binding steps to agent chats', async () => {
+    const { service, started, bound, cancelled, A, B } = await setup();
+    const flow = service.save({ name: 'Stoppable', input: '', nodes: [{ id: 'a', agentId: A, prompt: 'a', x: 0, y: 0 }, { id: 'b', agentId: B, prompt: 'b', x: 200, y: 0 }], edges: [{ from: 'a', to: 'b' }], schedule: null });
+    const run = await service.run(flow.id, 'manual');
+    expect(bound).toEqual([]);
+    expect(service.agentIdForTask(started[0]!.id)).toBe(A);
+    expect(service.agentIdForTask('other')).toBeUndefined();
+    const stopped = await service.stopRun(run.id);
+    expect(cancelled).toEqual([started[0]!.id]);
+    expect(stopped.status).toBe('failed');
+    expect(Object.fromEntries(stopped.nodes.map((n) => [n.nodeId, [n.status, n.note]]))).toEqual({ a: ['failed', 'Stopped by you.'], b: ['skipped', expect.stringContaining('stopped')] });
+    // The cancelled task's update arrives afterwards and changes nothing.
+    await service.taskSettled({ id: started[0]!.id, state: 'CANCELLED' });
+    expect(started).toHaveLength(1);
+    const [item] = service.history();
+    expect(item).toMatchObject({ flowName: 'Stoppable', labels: { a: 'Researcher', b: 'Writer' } });
+    expect(item!.nodes.map((n) => n.nodeId)).toEqual(['a', 'b']);
   });
 
   it('runs a step on the CLI and model chosen for it', async () => {

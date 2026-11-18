@@ -41,6 +41,7 @@ const parse = <T>(text: string, fallback: T): T => { try { return JSON.parse(tex
 export class AgentFlowService {
   private createTask: TaskCreator | undefined;
   private readReply: ReplyReader | undefined;
+  private canceller: ((taskId: string) => Promise<unknown>) | undefined;
   private planner: ((prompt: string) => Promise<string | undefined>) | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private stopMail: (() => void) | undefined;
@@ -49,6 +50,7 @@ export class AgentFlowService {
 
   setTaskCreator(create: TaskCreator): void { this.createTask = create; }
   setReplyReader(read: ReplyReader): void { this.readReply = read; }
+  setTaskCanceller(cancel: (taskId: string) => Promise<unknown>): void { this.canceller = cancel; }
   setPlanner(ask: (prompt: string) => Promise<string | undefined>): void { this.planner = ask; }
 
   /** A flow drafted from a description, not saved. */
@@ -153,6 +155,40 @@ export class AgentFlowService {
     return { key: `${FLOW_SANDBOX_PREFIX}${row.id}`, name: parse<Definition>(row.definition, { name: 'Workflow', nodes: [], edges: [] }).name, label: 'workflow' };
   }
 
+  /** The agent a flow step's task runs as (steps are not part of the agent's own chats). */
+  agentIdForTask(taskId: string): string | undefined {
+    const row = this.db.prepare('SELECT n.node_id, r.definition FROM agent_flow_run_nodes n JOIN agent_flow_runs r ON r.id = n.run_id WHERE n.task_id = ?').get(taskId) as { node_id: string; definition: string } | undefined;
+    if (row === undefined) return undefined;
+    const agentId = parse<Definition>(row.definition, { name: '', nodes: [], edges: [] }).nodes.find((node) => node.id === row.node_id)?.agentId;
+    return agentId === undefined || agentId === '' ? undefined : agentId;
+  }
+
+  /** Stop a run: cancel the steps that are working, skip the ones still waiting. */
+  async stopRun(runId: string): Promise<FlowRun> {
+    const run = this.db.prepare('SELECT status FROM agent_flow_runs WHERE id = ?').get(runId) as { status: string } | undefined;
+    if (run === undefined) throw new Error('That run no longer exists.');
+    if (run.status !== 'running') return this.runById(runId)!;
+    const working = this.db.prepare("SELECT task_id FROM agent_flow_run_nodes WHERE run_id = ? AND status = 'running' AND task_id IS NOT NULL").all(runId) as Array<{ task_id: string }>;
+    this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'failed', note = 'Stopped by you.' WHERE run_id = ? AND status = 'running'").run(runId);
+    this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'skipped', note = 'The run was stopped before this step.' WHERE run_id = ? AND status = 'waiting'").run(runId);
+    this.db.prepare("UPDATE agent_flow_runs SET status = 'failed', finished_at = ? WHERE id = ?").run(this.now().toISOString(), runId);
+    for (const { task_id } of working) await this.canceller?.(task_id).catch(() => undefined);
+    return this.runById(runId)!;
+  }
+
+  /** Recent runs of every flow, newest first, with the flow's name. */
+  history(limit = 50): Array<FlowRun & { flowName: string; labels: Record<string, string> }> {
+    const rows = this.db.prepare('SELECT r.id, r.definition FROM agent_flow_runs r ORDER BY r.started_at DESC LIMIT ?').all(limit) as Array<{ id: string; definition: string }>;
+    return rows.flatMap((row) => {
+      const run = this.runById(row.id);
+      if (run === undefined) return [];
+      const definition = parse<Definition>(row.definition, { name: 'Flow', nodes: [], edges: [] });
+      const labels = Object.fromEntries(definition.nodes.map((node) => [node.id, node.kind === 'reply' ? 'Wait for your email reply' : this.deps.agents.get(node.agentId)?.name ?? 'Agent']));
+      const order = new Map(definition.nodes.map((node, index) => [node.id, index]));
+      return [{ ...run, nodes: [...run.nodes].sort((a, b) => (order.get(a.nodeId) ?? 0) - (order.get(b.nodeId) ?? 0)), flowName: definition.name, labels }];
+    });
+  }
+
   // ---- runs -----------------------------------------------------------------
 
   /** Start a run. Resolves once the first steps are started. */
@@ -253,7 +289,7 @@ export class AgentFlowService {
         agentId: cli,
         ...(node.model !== undefined || node.effort !== undefined ? { runOptions: { main: { ...(node.model !== undefined ? { model: node.model } : {}), ...(node.effort !== undefined ? { effort: node.effort } : {}) }, mainAgentId: cli } } : {}),
         onCreated: (created) => {
-          this.deps.agents.bindThread(created.threadId ?? created.id, node.agentId);
+          // Not bound to the agent's chat: a flow's steps are shown in the flow's history instead.
           this.db.prepare('UPDATE agent_flow_run_nodes SET task_id = ? WHERE run_id = ? AND node_id = ?').run(created.id, run.id, node.id);
         },
       });

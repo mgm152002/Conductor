@@ -69,6 +69,8 @@ export const INTEGRATION_SCHEMAS = {
   'flows.remove': z.object({ id: uuid }),
   'flows.run': z.object({ id: uuid, input: z.string().max(10_000).optional() }),
   'flows.runs': z.object({ flowId: uuid }),
+  'flows.stop': z.object({ runId: uuid }),
+  'flows.history': z.void(),
   'flows.draft': z.object({ description: z.string().trim().min(3).max(4000) }),
   'mail.status': z.void(),
   'mail.connect': z.object({ apiKey: z.string().trim().min(8).max(200), owner: z.string().trim().min(3).max(200) }),
@@ -205,6 +207,10 @@ export interface IntegrationsBridge {
     run(id: string, input?: string): Promise<FlowRun>;
     /** The flow's recent runs, newest first. */
     runs(flowId: string): Promise<FlowRun[]>;
+    /** Stop a run that is going. */
+    stopRun(runId: string): Promise<FlowRun>;
+    /** Recent runs of every flow, newest first. */
+    history(): Promise<Array<FlowRun & { flowName: string; labels: Record<string, string> }>>;
     /** A flow written from a description (not saved). */
     draft(description: string): Promise<Omit<FlowInput, 'id'>>;
   };

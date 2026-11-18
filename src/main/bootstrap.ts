@@ -639,6 +639,8 @@ export async function bootstrap(): Promise<AppServices> {
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
   const flows = new AgentFlowService({ store, mail: agentMail, agents: sandboxAgents, workspaceId: () => sandboxAgents.agentWorkspaceId() });
+  sandboxAgents.setOutsideAgent((taskId) => flows.agentIdForTask(taskId));
+  flows.setTaskCanceller((taskId) => canceller.cancelTask(taskId));
   sandboxAgents.setSandboxScope((taskId) => flows.sandboxScopeFor(taskId));
   flows.setTaskCreator((input) => runner.create(input));
   sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));

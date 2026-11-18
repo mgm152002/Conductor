@@ -189,6 +189,7 @@ export class SandboxAgentService {
   private enqueue: MessageEnqueuer | undefined;
   private deleteThread: ThreadDeleter | undefined;
   private planner: GroupPlannerFn | undefined;
+  private outsideAgent: ((taskId: string) => string | undefined) | undefined;
   private outsideScope: ((taskId: string) => { key: string; name: string; label: string } | undefined) | undefined;
   private readReply: ReplyReader | undefined;
   /** Files already copied into a running sandbox (keyed by its address and key). */
@@ -207,6 +208,9 @@ export class SandboxAgentService {
   setGroupPlanner(plan: GroupPlannerFn): void {
     this.planner = plan;
   }
+
+  /** Tasks that run as an agent without being part of its chats (a workflow's steps). */
+  setOutsideAgent(resolve: (taskId: string) => string | undefined): void { this.outsideAgent = resolve; }
 
   /** Tasks outside group chats that should share one sandbox (a workflow's steps). */
   setSandboxScope(scope: (taskId: string) => { key: string; name: string; label: string } | undefined): void {
@@ -296,7 +300,9 @@ export class SandboxAgentService {
   /** The agent that runs a task's thread, if any. */
   agentForTask(task: Pick<Task, 'id' | 'threadId'>): SandboxAgent | undefined {
     const row = this.deps.store.db.prepare('SELECT agent_id FROM thread_sandbox_agents WHERE thread_id = ?').get(task.threadId ?? task.id) as { agent_id: string } | undefined;
-    return row === undefined ? undefined : this.get(row.agent_id);
+    if (row !== undefined) return this.get(row.agent_id);
+    const outside = this.outsideAgent?.(task.id);
+    return outside === undefined ? undefined : this.get(outside);
   }
 
   /** Thread id → agent id, for the renderer to label threads. */

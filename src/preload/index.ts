@@ -119,6 +119,8 @@ const integrations: IntegrationsBridge = {
     remove: (id) => invoke('flows.remove', { id }),
     run: (id, input) => invoke('flows.run', { id, ...(input !== undefined ? { input } : {}) }),
     runs: (flowId) => invoke('flows.runs', { flowId }),
+    stopRun: (runId) => invoke('flows.stop', { runId }),
+    history: () => invoke('flows.history'),
     draft: (description) => invoke('flows.draft', { description }),
   },
   mail: {
