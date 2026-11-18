@@ -33,6 +33,7 @@ import { IpcConnectorEventEmitter, registerConnectorHandlers } from './ipc/regis
 import { ContextEngine } from './domain/context-engine';
 import { MemoryEngine } from './domain/memory-engine';
 import { Mem0Client } from './domain/mem0-client';
+import { AgentFlowService } from './sandbox/flow-service';
 import { SharedKnowledgeSync } from './sandbox/shared-knowledge';
 import { agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from './sandbox/agent-memory';
 import { SkillsService } from './domain/skills-service';
@@ -634,6 +635,8 @@ export async function bootstrap(): Promise<AppServices> {
   });
   runnerRef = runner;
   sandboxAgents.setTaskCreator((input) => runner.create(input));
+  const flows = new AgentFlowService({ store, agents: sandboxAgents, workspaceId: () => sandboxAgents.agentWorkspaceId() });
+  flows.setTaskCreator((input) => runner.create(input));
   sandboxAgents.setMessageQueue((input) => runner.enqueueMessage(input));
   sandboxAgents.setGroupPlanner((prompt) => groupPlanner.ask('Planning a group message', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));
   sandboxAgents.setReplyReader((taskId) => {
@@ -646,8 +649,14 @@ export async function bootstrap(): Promise<AppServices> {
   taskEvents.subscribe((channel, payload) => {
     if (channel !== 'task.updated') return;
     const task = payload as Task | undefined;
-    if (task !== undefined && typeof task.id === 'string') void sandboxAgents.taskSettled(task).catch(() => undefined);
+    if (task !== undefined && typeof task.id === 'string') { void sandboxAgents.taskSettled(task).catch(() => undefined); void flows.taskSettled(task).catch(() => undefined); }
   });
+  flows.setReplyReader((taskId) => {
+    const task = stateMachine.getTask(taskId);
+    return task === undefined ? '' : buildTimeline(task, taskQueries.details(taskId)).filter((item) => item.kind === 'assistant').map((item) => item.text).join('\n\n');
+  });
+  void flows.reconcile().then(() => { flows.start(); }).catch(() => { flows.start(); });
+  app.once('before-quit', () => { flows.stop(); });
   sandboxAgents.setThreadDeleter((threadId) => deleteThread({ store, storage, attachments, audit, flushMemories: () => memory.synchronize() }, threadId));
   // Group threads left behind by a group deleted earlier no longer show up as members' own chats.
   void sandboxAgents.purgeOrphanGroupThreads().then(() => sandboxAgents.reconcileGroupSteps()).catch(() => undefined);
@@ -776,7 +785,7 @@ export async function bootstrap(): Promise<AppServices> {
     sandboxEndpoint: (agentId) => sandboxes.endpoint(agentId),
   });
   app.once('before-quit', () => { void phone.stop(); });
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);

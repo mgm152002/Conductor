@@ -113,6 +113,13 @@ const integrations: IntegrationsBridge = {
     groupMessages: (groupId) => invoke('agents.group.messages', { groupId }),
     sendGroup: (input) => invoke('agents.group.send', input),
   },
+  flows: {
+    list: () => invoke('flows.list'),
+    save: (input) => invoke('flows.save', input),
+    remove: (id) => invoke('flows.remove', { id }),
+    run: (id, input) => invoke('flows.run', { id, ...(input !== undefined ? { input } : {}) }),
+    runs: (flowId) => invoke('flows.runs', { flowId }),
+  },
   threadTiers: {
     get: () => invoke('threadTiers.get'),
     put: (key, pref) => invoke('threadTiers.put', { key, pref }),

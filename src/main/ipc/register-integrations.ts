@@ -39,6 +39,7 @@ export interface IntegrationDeps {
   phone: import('../phone/phone-control').PhoneControl;
   tiers: import('../phone/thread-tier-store').ThreadTierStore;
   sandboxAgents: SandboxAgentService;
+  flows: import('../sandbox/flow-service').AgentFlowService;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -87,6 +88,11 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('mcp.oauth.cancel', S['mcp.oauth.cancel'], (_e, input) => { deps.mcp.cancelOAuth(input.id); });
   router.handle('mcp.setSecret', S['mcp.setSecret'], (_e, input) => deps.mcp.setSecret(input.id, input.name, input.value));
   router.handle('mcp.clearSecret', S['mcp.clearSecret'], (_e, input) => deps.mcp.clearSecret(input.id, input.name));
+  router.handle('flows.list', S['flows.list'], () => deps.flows.list());
+  router.handle('flows.save', S['flows.save'], (_e, input) => deps.flows.save(input));
+  router.handle('flows.remove', S['flows.remove'], (_e, input) => { deps.flows.remove(input.id); });
+  router.handle('flows.run', S['flows.run'], (_e, input) => deps.flows.run(input.id, 'manual', input.input));
+  router.handle('flows.runs', S['flows.runs'], (_e, input) => deps.flows.runs(input.flowId));
   router.handle('agents.sandbox.list', S['agents.sandbox.list'], () => deps.sandboxAgents.list());
   router.handle('agents.sandbox.create', S['agents.sandbox.create'], (_e, input) => deps.sandboxAgents.create(input));
   router.handle('agents.sandbox.update', S['agents.sandbox.update'], (_e, { id, ...input }) => deps.sandboxAgents.update(id, input));

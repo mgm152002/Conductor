@@ -4,6 +4,7 @@ import type { McpMarketplaceEntry } from './mcp-marketplace';
 import type { CliMcpOverview, CliMcpSyncReport } from './cli-mcp';
 import { AttachmentIdsSchema } from './attachments';
 import { AGENT_ICON_PATTERN, MAX_AGENT_ICON_CHARS, type AgentGroup, type AgentGroupMessage, type SandboxAgent, type SandboxStatus } from './sandbox-agents';
+import { FlowInputSchema, type AgentFlow, type FlowRun } from './agent-flows';
 import type { AgentModelCatalog } from './agent-models';
 import type { AutoExecuteRule, ImprovementProposal, PerformanceBaseline, Suggestion } from './domain';
 import type { LearningConfig, LearningRun, LearningStatus, RoutingPurgeResult } from './learning-contract';
@@ -63,6 +64,11 @@ export const INTEGRATION_SCHEMAS = {
   'agents.sandbox.threads': z.void(),
   'agents.workspace': z.void(),
   'agents.group.list': z.void(),
+  'flows.list': z.void(),
+  'flows.save': FlowInputSchema,
+  'flows.remove': z.object({ id: uuid }),
+  'flows.run': z.object({ id: uuid, input: z.string().max(10_000).optional() }),
+  'flows.runs': z.object({ flowId: uuid }),
   'agents.group.create': z.object({ name: z.string().max(60), agentIds: z.array(uuid).min(2).max(12) }),
   'agents.group.remove': z.object({ id: uuid }),
   'agents.group.messages': z.object({ groupId: uuid }),
@@ -186,6 +192,15 @@ export interface IntegrationsBridge {
     removeGroup(id: string): Promise<void>;
     groupMessages(groupId: string): Promise<AgentGroupMessage[]>;
     sendGroup(input: IntegrationRequest<'agents.group.send'>): Promise<AgentGroupMessage>;
+  };
+  flows: {
+    list(): Promise<AgentFlow[]>;
+    save(input: IntegrationRequest<'flows.save'>): Promise<AgentFlow>;
+    remove(id: string): Promise<void>;
+    /** Start a run now; resolves once its first steps are started. */
+    run(id: string, input?: string): Promise<FlowRun>;
+    /** The flow's recent runs, newest first. */
+    runs(flowId: string): Promise<FlowRun[]>;
   };
   sandbox: {
     status(): Promise<SandboxStatus>;

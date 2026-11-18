@@ -9,9 +9,12 @@ import { relativeTime } from '../lib/time';
 import { cn } from '../lib/cn';
 import { AgentAvatar } from '../components/ui/AgentAvatar';
 import { Alert, Button, Dialog, inputClassName } from '../components/ui/primitives';
-import { CheckIcon, DownloadIcon, PlusIcon, SearchIcon, Spinner, UsersIcon } from '../components/ui/icons';
+import { CheckIcon, DownloadIcon, PlusIcon, SearchIcon, Spinner, UsersIcon, WorkflowIcon } from '../components/ui/icons';
 import { AgentDialog, TEMPLATES, message } from '../components/agents/AgentDialog';
 import { AgentChat, GroupAvatar, GroupChat } from '../components/agents/AgentChats';
+import { FlowEditor } from '../components/agents/FlowEditor';
+import { describeCron } from '../lib/flow-schedule';
+import type { AgentFlow } from '@shared/agent-flows';
 
 // Agents, as a messenger: your agents and group chats on the left, the open
 // conversation on the right. Talk to one agent, or to a group of them at once.
@@ -56,6 +59,22 @@ function GroupRow({ group, agents, selected, onSelect }: { group: AgentGroup; ag
             <span className="shrink-0 text-3xs text-sidebar-muted-foreground">{relativeTime(group.updatedAt)}</span>
           </span>
           <span className="block truncate text-2xs text-sidebar-muted-foreground">{members.map((member) => member.name).join(', ')}</span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function FlowRow({ flow, selected, onSelect }: { flow: AgentFlow; selected: boolean; onSelect: () => void }): React.JSX.Element {
+  return (
+    <li>
+      <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} className={rowClass(selected)}>
+        <span className="flex size-[38px] shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><WorkflowIcon size={18} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-semibold text-sidebar-foreground">{flow.name}</span>
+          <span className="block truncate text-2xs text-sidebar-muted-foreground">
+            {flow.nodes.length} step{flow.nodes.length === 1 ? '' : 's'}{flow.schedule?.enabled === true ? ` · ${describeCron(flow.schedule.cron)}` : ''}
+          </span>
         </span>
       </button>
     </li>
@@ -154,7 +173,10 @@ export function AgentsScreen(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string | null; input: SandboxAgentInput } | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
-  const [deleting, setDeleting] = useState<{ kind: 'agent' | 'group'; id: string; name: string } | null>(null);
+  const [flows, setFlows] = useState<AgentFlow[]>([]);
+  const loadFlows = useCallback(async () => { try { setFlows(await window.conductor.flows.list()); } catch { /* none shown */ } }, []);
+  useEffect(() => { void loadFlows(); }, [loadFlows]);
+  const [deleting, setDeleting] = useState<{ kind: 'agent' | 'group' | 'flow'; id: string; name: string } | null>(null);
 
   const loadStatus = useCallback(async () => {
     try { setStatus(await window.conductor.sandbox.status()); } catch { /* shown as unknown */ }
@@ -192,6 +214,9 @@ export function AgentsScreen(): React.JSX.Element {
     .filter((agent) => q === '' || agent.name.toLowerCase().includes(q))
     .sort((a, b) => (lastByAgent.get(b.id)?.at ?? b.createdAt).localeCompare(lastByAgent.get(a.id)?.at ?? a.createdAt)), [agents, q, lastByAgent]);
   const selectedAgent = selection?.kind === 'agent' ? agents.find((agent) => agent.id === selection.id) : undefined;
+  const selectedFlowId = selection?.kind === 'flow' ? selection.id : undefined;
+  const selectedFlow = selectedFlowId === undefined ? undefined : flows.find((flow) => flow.id === selectedFlowId);
+  const shownFlows = flows.filter((flow) => q === '' || flow.name.toLowerCase().includes(q));
   const selectedGroup = selection?.kind === 'group' ? groups.find((group) => group.id === selection.id) : undefined;
   const defaultClis = clis.filter((cli) => cli.available && !cli.remote).map((cli) => cli.id);
   const blank = (): SandboxAgentInput => ({ name: '', description: '', instructions: '', clis: defaultClis, tools: ['browser', 'files'], approval: 'risky', color: SANDBOX_AGENT_COLORS[agents.length % SANDBOX_AGENT_COLORS.length]! });
@@ -199,15 +224,16 @@ export function AgentsScreen(): React.JSX.Element {
   // Open the first conversation when nothing (or something deleted) is selected.
   const firstAgentId = shownAgents[0]?.id;
   useEffect(() => {
-    if (!loaded || selectedAgent !== undefined || selectedGroup !== undefined || firstAgentId === undefined) return;
+    if (!loaded || selectedAgent !== undefined || selectedGroup !== undefined || selectedFlowId !== undefined || firstAgentId === undefined) return;
     select({ kind: 'agent', id: firstAgentId });
-  }, [loaded, selectedAgent, selectedGroup, firstAgentId, select]);
+  }, [loaded, selectedAgent, selectedGroup, selectedFlowId, firstAgentId, select]);
 
   return (
     <div data-screen="agents" className="flex h-full min-h-0">
       <aside aria-label="Conversations" className="flex w-[300px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
         <div className="flex h-14 shrink-0 items-center gap-1 px-4">
           <h1 className="flex-1 font-display text-[17px] font-semibold text-sidebar-foreground">Agents</h1>
+          <Button size="icon" variant="ghost" aria-label="New flow" title="New flow" onClick={() => { select({ kind: 'flow', id: 'new' }); }}><WorkflowIcon size={16} /></Button>
           <Button size="icon" variant="ghost" aria-label="New group" title={agents.length < 2 ? 'Create two agents to start a group' : 'New group'} disabled={agents.length < 2} onClick={() => { setCreatingGroup(true); }}><UsersIcon size={16} /></Button>
           <Button size="icon" variant="ghost" aria-label="New agent" title="New agent" onClick={() => { setEditing({ id: null, input: blank() }); }}><PlusIcon size={16} /></Button>
         </div>
@@ -219,6 +245,14 @@ export function AgentsScreen(): React.JSX.Element {
           </label>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+          {shownFlows.length > 0 ? (
+            <>
+              <h2 className="px-2.5 pt-2 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Flows</h2>
+              <ul className="flex flex-col gap-0.5">
+                {shownFlows.map((flow) => <FlowRow key={flow.id} flow={flow} selected={selectedFlowId === flow.id} onSelect={() => { select({ kind: 'flow', id: flow.id }); }} />)}
+              </ul>
+            </>
+          ) : null}
           {shownGroups.length > 0 ? (
             <>
               <h2 className="px-2.5 pt-2 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Groups</h2>
@@ -266,7 +300,11 @@ export function AgentsScreen(): React.JSX.Element {
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {error !== null ? <div className="px-4 pt-3"><Alert action={<Button size="xs" variant="ghost" onClick={() => { setError(null); }}>Dismiss</Button>}>{error}</Alert></div> : null}
-        {selectedAgent !== undefined ? (
+        {selectedFlowId !== undefined && (selectedFlow !== undefined || selectedFlowId === 'new') ? (
+          <FlowEditor key={selectedFlow?.id ?? 'new'} flow={selectedFlow ?? null} agents={agents}
+            onSaved={(flow) => { void loadFlows(); if (selectedFlowId === 'new') select({ kind: 'flow', id: flow.id }); }}
+            onDeleted={() => { if (selectedFlow !== undefined) setDeleting({ kind: 'flow', id: selectedFlow.id, name: selectedFlow.name }); }} />
+        ) : selectedAgent !== undefined ? (
           <AgentChat
             agent={selectedAgent}
             sandboxRunning={status?.running.some((run) => run.agentId === selectedAgent.id && run.state === 'ready') === true}
@@ -298,8 +336,8 @@ export function AgentsScreen(): React.JSX.Element {
             const target = deleting;
             setDeleting(null);
             if (target === null) return;
-            const run = target.kind === 'agent' ? window.conductor.sandboxAgents.remove(target.id) : window.conductor.sandboxAgents.removeGroup(target.id);
-            void run.then(() => { select(null); return refresh(); }).catch((err: unknown) => { setError(message(err)); });
+            const run = target.kind === 'agent' ? window.conductor.sandboxAgents.remove(target.id) : target.kind === 'group' ? window.conductor.sandboxAgents.removeGroup(target.id) : window.conductor.flows.remove(target.id);
+            void run.then(() => { select(null); return Promise.all([refresh(), loadFlows()]); }).catch((err: unknown) => { setError(message(err)); });
           }}>Delete</Button>
         </>}
       />

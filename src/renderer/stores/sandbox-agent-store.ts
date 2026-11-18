@@ -30,7 +30,7 @@ interface SandboxAgentState {
   openThread: (threadKey: string) => boolean;
 }
 
-export type AgentSelection = { kind: 'agent' | 'group'; id: string } | null;
+export type AgentSelection = { kind: 'agent' | 'group' | 'flow'; id: string } | null;
 const SELECTION_KEY = 'conductor.agents.selection';
 
 function loadSelection(): AgentSelection {
