@@ -273,7 +273,7 @@ export async function bootstrap(): Promise<AppServices> {
   // fallback order) with an AIO Sandbox container per agent for
   // browsing, commands and files, behind Conductor's approval gate. The renderer polls
   // sandbox status while it shows it.
-  const sandboxes = new SandboxManager();
+  const sandboxes = new SandboxManager({ browserPolicyFile: join(app.getPath('userData'), 'sandbox-browser-policy.json') });
   const sandboxGateway = new SandboxGateway(join(app.getPath('userData'), 'sandbox-tools.json'), SANDBOX_IMAGE);
   // Managed_Local_Storage for artifacts persisted during step execution lives
   // beside the DB under userData.

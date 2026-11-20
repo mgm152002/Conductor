@@ -1,8 +1,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import type { SandboxRun, SandboxStatus } from '@shared/sandbox-agents';
 
 // AIO Sandbox containers (github.com/agent-infra/sandbox), one per agent:
@@ -51,6 +51,27 @@ export function agentVolume(agentId: string): string {
   const safe = agentId.replace(/[^a-zA-Z0-9_.-]/g, '');
   return `conductor-sandbox-agent-${safe === '' ? 'default' : safe}`;
 }
+
+/** Where the sandbox's Chromium keeps its profile (cookies, logins). Fixed by the image's start-browser.sh. */
+export const SANDBOX_BROWSER_DIR = '/home/gem/.config/browser';
+
+/**
+ * The volume holding one sandbox's browser profile, so a login made once
+ * survives the container being thrown away. It is per sandbox key (an agent,
+ * a group chat, or a flow), never shared, so an agent only gets the logins
+ * made in its own sandbox.
+ */
+export function browserVolume(key: string): string {
+  const safe = key.replace(/[^a-zA-Z0-9_.-]/g, '');
+  return `conductor-sandbox-browser-${safe === '' ? 'default' : safe}`;
+}
+
+/** A file here is read by Chromium as managed policy, which overrides the image's own preferences. */
+export const BROWSER_POLICY_FILE = '/etc/browser/policies/managed/conductor.json';
+/** Allow cookies to be kept after the browser closes (the image defaults to session-only, which forgets every login on exit). */
+const BROWSER_POLICY = '{"DefaultCookiesSetting":1}\n';
+/** Run inside the sandbox: ask Chromium to quit cleanly so it writes its cookies out. */
+const CLOSE_BROWSER = `fetch('http://127.0.0.1:9222/json/version').then(r=>r.json()).then(v=>{const w=new WebSocket(v.webSocketDebuggerUrl);w.onopen=()=>w.send('{"id":1,"method":"Browser.close"}');setTimeout(()=>process.exit(0),2500)}).catch(()=>process.exit(0))`;
 
 /** How the sandbox's API is reached from this process. */
 export interface SandboxEndpoint {
@@ -119,6 +140,8 @@ export interface SandboxManagerOptions {
   waitReady?: (endpoint: SandboxEndpoint, signal: AbortSignal) => Promise<void>;
   idleStopMs?: number;
   onChange?: () => void;
+  /** Where to keep the browser policy file mounted into each sandbox. Without it, cookies stay session-only. */
+  browserPolicyFile?: string;
 }
 
 /** Poll the sandbox API until it answers (it boots a desktop, browser and services). */
@@ -154,6 +177,19 @@ export class SandboxManager {
     this.waitReady = options.waitReady ?? defaultWaitReady;
     this.idleStopMs = options.idleStopMs ?? IDLE_STOP_MS;
     this.onChange = options.onChange ?? (() => {});
+    this.browserPolicyFile = options.browserPolicyFile;
+  }
+
+  private readonly browserPolicyFile: string | undefined;
+
+  /** `-v` arguments that mount the browser policy file, writing it first. */
+  private policyMount(): string[] {
+    if (this.browserPolicyFile === undefined) return [];
+    try {
+      mkdirSync(dirname(this.browserPolicyFile), { recursive: true });
+      writeFileSync(this.browserPolicyFile, BROWSER_POLICY, { mode: 0o644 });
+    } catch { return []; }
+    return ['-v', `${this.browserPolicyFile}:${BROWSER_POLICY_FILE}:ro`];
   }
 
   // ---- status & image -----------------------------------------------------
@@ -295,6 +331,15 @@ export class SandboxManager {
       ready: Promise.resolve({ baseUrl: '', apiKey }),
     };
     run.ready = (async (): Promise<SandboxEndpoint> => {
+      // Before the browser starts: clear Chromium's lock files in the profile (a
+      // container that was killed leaves ones naming itself, and the new browser
+      // would refuse the profile as "in use by another computer"), and hand the
+      // profile to the sandbox user (a new volume is owned by root).
+      await this.docker([
+        'run', '--rm', '-v', `${browserVolume(input.agentId)}:/b`, '--entrypoint', 'sh', SANDBOX_IMAGE, '-c',
+        'rm -f /b/SingletonLock /b/SingletonCookie /b/SingletonSocket; chown 1000:1000 /b',
+      ], { timeoutMs: 60_000 }).catch(() => {});
+      const policy = this.policyMount();
       await this.docker([
         'run', '-d', '--name', container,
         '--label', `${LABEL}=1`, '--label', `${LABEL}.agent=${input.agentId}`,
@@ -305,6 +350,11 @@ export class SandboxManager {
         // Docker creates a named volume the first time it is mounted.
         '-v', `${workspaceVolume(input.agentId)}:${SANDBOX_WORKSPACE_DIR}`,
         '-v', `${SHARED_VOLUME}:${SANDBOX_SHARED_DIR}`,
+        // Docker would create ~/.config as root to hold the browser volume, and
+        // other tools could not write there; a small owned tmpfs under it fixes that.
+        '--tmpfs', '/home/gem/.config:uid=1000,gid=1000,mode=0775,size=64m',
+        '-v', `${browserVolume(input.agentId)}:${SANDBOX_BROWSER_DIR}`,
+        ...policy,
         SANDBOX_IMAGE,
       ], { timeoutMs: 120_000 });
       // A fresh volume is owned by root; hand both mounts to the sandbox user.
@@ -379,14 +429,24 @@ export class SandboxManager {
     if (run.idleTimer !== undefined) clearTimeout(run.idleTimer);
     run.state = 'stopping';
     this.onChange();
+    // Close the browser cleanly first so it writes its cookies to the profile volume.
+    if (run.endpoint !== undefined) {
+      try { await this.docker(['exec', run.container, 'node', '-e', CLOSE_BROWSER], { timeoutMs: 10_000 }); } catch { /* not running, or no browser */ }
+    }
     try { await this.docker(['rm', '-f', run.container], { timeoutMs: 60_000 }); } catch { /* already gone */ }
     this.running.delete(agentId);
     this.onChange();
   }
 
-  /** The agent was deleted: stop its sandbox and delete its own volume. The shared volume stays. */
-  async forget(agentId: string): Promise<void> {
+  /** Forget the logins saved in a sandbox's browser: stop the sandbox, delete its profile volume. */
+  async clearBrowser(agentId: string): Promise<void> {
     await this.stop(agentId);
+    try { await this.docker(['volume', 'rm', '-f', browserVolume(agentId)], { timeoutMs: 30_000 }); } catch { /* Docker absent, or never created */ }
+  }
+
+  /** The agent was deleted: stop its sandbox and delete its own volumes. The shared volume stays. */
+  async forget(agentId: string): Promise<void> {
+    await this.clearBrowser(agentId);
     if (agentId.startsWith(GROUP_KEY_PREFIX)) return; // a group's workspace is the shared volume: never delete it
     try { await this.docker(['volume', 'rm', '-f', agentVolume(agentId)], { timeoutMs: 30_000 }); } catch { /* Docker absent, or never created */ }
   }

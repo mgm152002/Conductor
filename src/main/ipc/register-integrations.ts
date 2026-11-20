@@ -138,6 +138,7 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
     return deps.sandboxes.status();
   });
   router.handle('sandbox.stop', S['sandbox.stop'], (_e, input) => deps.sandboxes.stop(input.agentId));
+  router.handle('sandbox.clearBrowser', S['sandbox.clearBrowser'], (_e, input) => deps.sandboxes.clearBrowser(input.agentId));
   router.handle('sandbox.viewer', S['sandbox.viewer'], (_e, input) => {
     const endpoint = deps.sandboxes.endpoint(input.agentId);
     if (endpoint === undefined) throw new Error('This agent’s sandbox isn’t running. It starts when the agent first uses a sandbox tool.');
