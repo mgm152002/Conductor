@@ -83,7 +83,8 @@ function FlowRow({ flow, selected, onSelect }: { flow: AgentFlow; selected: bool
 }
 
 /** One line about sandboxes; expands only when something needs doing. */
-function SandboxBar({ status, onPull, onStop }: { status: SandboxStatus | null; onPull: () => void; onStop: (agentId: string) => void }): React.JSX.Element | null {
+function SandboxBar({ status, onPull, onStop, onClearLogins }: { status: SandboxStatus | null; onPull: () => void; onStop: (agentId: string) => void; onClearLogins: (agentId: string) => void }): React.JSX.Element | null {
+  const [confirming, setConfirming] = useState<string | null>(null);
   if (status === null) return null;
   const gib = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1);
   if (status.docker !== 'ready') {
@@ -110,6 +111,11 @@ function SandboxBar({ status, onPull, onStop }: { status: SandboxStatus | null; 
       {status.running.map((run) => (
         <p key={run.agentId} className="flex items-center gap-1.5 pl-3">
           <span className="min-w-0 flex-1 truncate">{run.agentName}{run.state !== 'ready' ? ` (${run.state})` : ''}</span>
+          {confirming === run.agentId ? (
+            <button type="button" onClick={() => { setConfirming(null); onClearLogins(run.agentId); }} title="Stops this sandbox and signs it out of every site" className="cursor-pointer rounded px-1 text-destructive-foreground hover:bg-sidebar-row-hover">Sign out of all sites?</button>
+          ) : (
+            <button type="button" onClick={() => { setConfirming(run.agentId); }} title="Forget the logins saved in this sandbox's browser" className="cursor-pointer rounded px-1 hover:bg-sidebar-row-hover hover:text-sidebar-foreground">Clear logins</button>
+          )}
           <button type="button" onClick={() => { onStop(run.agentId); }} className="cursor-pointer rounded px-1 hover:bg-sidebar-row-hover hover:text-sidebar-foreground">Stop</button>
         </p>
       ))}
@@ -303,6 +309,7 @@ export function AgentsScreen(): React.JSX.Element {
             status={status}
             onPull={() => { void window.conductor.sandbox.pull().then(setStatus).catch((err: unknown) => { setError(message(err)); }); }}
             onStop={(agentId) => { void window.conductor.sandbox.stop(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
+            onClearLogins={(agentId) => { void window.conductor.sandbox.clearBrowser(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
           />
         </div>
       </aside>

@@ -105,6 +105,7 @@ export const INTEGRATION_SCHEMAS = {
   'sandbox.viewer': z.object({ agentId: uuid }),
   'sandbox.groupViewer': z.object({ groupId: uuid }),
   'sandbox.stop': z.object({ agentId: uuid }),
+  'sandbox.clearBrowser': z.object({ agentId: z.string().min(1) }),
 
   // MCP servers in each agent CLI's own configuration.
   'mcp.cli.overview': z.object({ sync: z.boolean().optional() }).optional(),
@@ -224,6 +225,8 @@ export interface IntegrationsBridge {
     /** Start downloading the sandbox image; poll status for progress. */
     pull(): Promise<SandboxStatus>;
     stop(agentId: string): Promise<void>;
+    /** Forget the logins saved in a sandbox's browser (stops that sandbox). */
+    clearBrowser(agentId: string): Promise<void>;
     /** Open a window showing the agent's sandbox desktop (live browser). */
     openViewer(agentId: string): Promise<void>;
     /** Open a window for each running sandbox of a group chat (the shared one, or its members' own). */

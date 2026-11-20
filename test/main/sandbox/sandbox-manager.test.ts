@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SandboxManager, SANDBOX_IMAGE, agentVolume, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
+import { SandboxManager, SANDBOX_IMAGE, agentVolume, browserVolume, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
 import { SandboxAgentService, groupSandboxKey } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
@@ -44,7 +44,7 @@ beforeEach(() => {
 describe('SandboxManager', () => {
   it('starts a locked-down container bound to loopback with a random key', async () => {
     const endpoint = await manager().acquire({ taskId: 'task-1', agentId: 'a', agentName: 'Researcher' });
-    const run = dockerCalls.find((args) => args[0] === 'run')!;
+    const run = dockerCalls.find((args) => args[0] === 'run' && args.includes('-d'))!;
     expect(run).toContain('--security-opt');
     expect(run).toContain('seccomp=unconfined');
     expect(run).toContain('127.0.0.1::8080');
@@ -58,10 +58,10 @@ describe('SandboxManager', () => {
     const subject = manager();
     await subject.acquire({ taskId: 'task-1', agentId: 'agent-1', agentName: 'A' });
     await subject.acquire({ taskId: 'task-2', agentId: 'agent-2', agentName: 'B' });
-    const runs = dockerCalls.filter((args) => args[0] === 'run');
+    const runs = dockerCalls.filter((args) => args[0] === 'run' && args.includes('-d'));
     const mounts = (args: string[]): string[] => args.flatMap((arg, index) => (arg === '-v' ? [args[index + 1]!] : []));
-    expect(mounts(runs[0]!)).toEqual(['conductor-sandbox-agent-agent-1:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
-    expect(mounts(runs[1]!)).toEqual(['conductor-sandbox-agent-agent-2:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
+    expect(mounts(runs[0]!)).toEqual(['conductor-sandbox-agent-agent-1:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared', 'conductor-sandbox-browser-agent-1:/home/gem/.config/browser']);
+    expect(mounts(runs[1]!)).toEqual(['conductor-sandbox-agent-agent-2:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared', 'conductor-sandbox-browser-agent-2:/home/gem/.config/browser']);
     expect(dockerCalls.some((args) => args[0] === 'exec' && args.at(-1)!.includes('chown gem:gem /home/gem/workspace /home/gem/shared'))).toBe(true);
 
     await subject.stop('agent-1');
@@ -71,15 +71,50 @@ describe('SandboxManager', () => {
 
     // Restarting the agent mounts the same volume again.
     await subject.acquire({ taskId: 'task-3', agentId: 'agent-1', agentName: 'A' });
-    expect(mounts(dockerCalls.filter((args) => args[0] === 'run')[2]!)[0]).toBe('conductor-sandbox-agent-agent-1:/home/gem/workspace');
+    expect(mounts(dockerCalls.filter((args) => args[0] === 'run' && args.includes('-d'))[2]!)[0]).toBe('conductor-sandbox-agent-agent-1:/home/gem/workspace');
   });
 
   it('deletes only the agent’s own volume when the agent is deleted', async () => {
     const subject = manager();
     await subject.acquire({ taskId: 'task-1', agentId: 'agent-1', agentName: 'A' });
     await subject.forget('agent-1');
-    expect(dockerCalls.filter((args) => args[0] === 'volume')).toEqual([['volume', 'rm', '-f', 'conductor-sandbox-agent-agent-1']]);
+    expect(dockerCalls.filter((args) => args[0] === 'volume')).toEqual([['volume', 'rm', '-f', 'conductor-sandbox-browser-agent-1'], ['volume', 'rm', '-f', 'conductor-sandbox-agent-agent-1']]);
     expect(agentVolume('a/b c:d')).toBe('conductor-sandbox-agent-abcd');
+  });
+
+  it('keeps a sandbox’s browser logins in a volume of its own and lets them be cleared', async () => {
+    const subject = manager();
+    await subject.acquire({ taskId: 'task-1', agentId: 'agent-1', agentName: 'A' });
+    // Before the browser starts: stale lock files go, and cookies are allowed to outlive the browser.
+    const prep = dockerCalls.find((args) => args[0] === 'run' && !args.includes('-d'))!;
+    expect(prep.join(' ')).toContain('conductor-sandbox-browser-agent-1:/b');
+    expect(prep.at(-1)).toContain('rm -f /b/SingletonLock');
+    expect(prep.at(-1)).toContain('chown 1000:1000 /b');
+    const sandbox = dockerCalls.find((args) => args[0] === 'run' && args.includes('-d'))!;
+    // ~/.config is an owned tmpfs so the browser volume under it doesn't leave it root-owned.
+    expect(sandbox[sandbox.indexOf('--tmpfs') + 1]).toMatch(/^\/home\/gem\/\.config:uid=1000,gid=1000/);
+    expect(dockerCalls.indexOf(prep)).toBeLessThan(dockerCalls.findIndex((args) => args[0] === 'run' && args.includes('-d')));
+    // Stopping asks the browser to close cleanly (so cookies are written) before removing the container.
+    await subject.stop('agent-1');
+    const closeAt = dockerCalls.findIndex((args) => args[0] === 'exec' && args.includes('node'));
+    expect(closeAt).toBeGreaterThan(-1);
+    expect(closeAt).toBeLessThan(dockerCalls.findIndex((args) => args[0] === 'rm' && args[1] === '-f' && args.length === 3 && args[2]!.startsWith('conductor-sbx-')));
+    expect(dockerCalls.some((args) => args[0] === 'volume')).toBe(false);
+    // Clearing logins deletes only that profile volume.
+    await subject.clearBrowser('agent-1');
+    expect(dockerCalls.filter((args) => args[0] === 'volume')).toEqual([['volume', 'rm', '-f', 'conductor-sandbox-browser-agent-1']]);
+    expect(browserVolume('a/b c:d')).toBe('conductor-sandbox-browser-abcd');
+  });
+
+  it('mounts a browser policy that lets cookies outlive the browser', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'policy-'));
+    const file = join(dir, 'sub', 'policy.json');
+    try {
+      await new SandboxManager({ docker, waitReady: async () => {}, browserPolicyFile: file }).acquire({ taskId: 't', agentId: 'a', agentName: 'A' });
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ DefaultCookiesSetting: 1 });
+      const sandbox = dockerCalls.find((args) => args[0] === 'run' && args.includes('-d'))!;
+      expect(sandbox).toContain(`${file}:/etc/browser/policies/managed/conductor.json:ro`);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('reuses the thread’s sandbox for follow-ups', async () => {
@@ -87,7 +122,7 @@ describe('SandboxManager', () => {
     const first = await subject.acquire({ taskId: 'task-1', agentId: 'a', agentName: 'A' });
     const second = await subject.acquire({ taskId: 'task-2', agentId: 'a', agentName: 'A' });
     expect(second).toEqual(first);
-    expect(dockerCalls.filter((args) => args[0] === 'run')).toHaveLength(1);
+    expect(dockerCalls.filter((args) => args[0] === 'run' && args.includes('-d'))).toHaveLength(1);
   });
 
   it('runs as many sandboxes as Docker’s memory allows, then warns instead of starting another', async () => {
@@ -135,10 +170,11 @@ describe('SandboxManager', () => {
   it('works a group’s sandbox in the shared volume and never deletes it', async () => {
     const subject = manager();
     await subject.acquire({ taskId: 'task-1', agentId: 'group-g1', agentName: 'Group' });
-    const mounts = dockerCalls.find((args) => args[0] === 'run')!.flatMap((arg, index, all) => (arg === '-v' ? [all[index + 1]!] : []));
-    expect(mounts).toEqual(['conductor-sandbox-shared:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared']);
+    const mounts = dockerCalls.find((args) => args[0] === 'run' && args.includes('-d'))!.flatMap((arg, index, all) => (arg === '-v' ? [all[index + 1]!] : []));
+    expect(mounts.slice(0, 3)).toEqual(['conductor-sandbox-shared:/home/gem/workspace', 'conductor-sandbox-shared:/home/gem/shared', 'conductor-sandbox-browser-group-g1:/home/gem/.config/browser']);
     await subject.forget('group-g1');
-    expect(dockerCalls.some((args) => args[0] === 'volume')).toBe(false);
+    // Only the group's own browser profile goes; the shared files stay.
+    expect(dockerCalls.filter((args) => args[0] === 'volume')).toEqual([['volume', 'rm', '-f', 'conductor-sandbox-browser-group-g1']]);
   });
 
   it('removes containers left over from an earlier run', async () => {

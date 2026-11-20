@@ -144,6 +144,7 @@ const integrations: IntegrationsBridge = {
     status: () => invoke('sandbox.status'),
     pull: () => invoke('sandbox.pull'),
     stop: (agentId) => invoke('sandbox.stop', { agentId }),
+    clearBrowser: (agentId) => invoke('sandbox.clearBrowser', { agentId }),
     openViewer: (agentId) => invoke('sandbox.viewer', { agentId }),
     openGroupViewer: (groupId) => invoke('sandbox.groupViewer', { groupId }),
   },
