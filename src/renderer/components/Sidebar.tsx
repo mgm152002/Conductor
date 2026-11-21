@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ChatSpace, ChatThread } from '@shared/chat-contract';
 import type { Task, Workspace } from '@shared/domain';
 import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore, useWorkspaceStore } from '../stores';
@@ -16,9 +16,13 @@ import {
 import { prNumberFromUrl, prPath } from '../lib/pull-request';
 import { cn } from '../lib/cn';
 import {
-  CheckIcon, ChevronRightIcon, ClockIcon, FolderPlusIcon, ImageIcon, PanelLeftIcon, PencilIcon,
-  PlusIcon, PullRequestIcon, RotateIcon, SearchIcon, SquarePenIcon, TrashIcon, XIcon,
+  BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, FolderIcon, FolderPlusIcon, GradCapIcon, ImageIcon, ListChecksIcon,
+  MessageIcon, PanelLeftIcon, PencilIcon, PhoneIcon, PlugIcon, PlusIcon, PullRequestIcon, RotateIcon, SearchIcon,
+  SettingsIcon, SparklesIcon, SquarePenIcon, TerminalIcon, TrashIcon, UsageIcon,
 } from './ui/icons';
+import { isTerminalTask } from '../stores/task-store';
+import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
+import { PhoneControlDialog } from './phone/PhoneControlDialog';
 import { EntityIcon } from './ui/EntityIcon';
 import { IconPickerDialog } from './icons/IconPickerDialog';
 import { SnoozePickerDialog } from './threads/SnoozePickerDialog';
@@ -31,12 +35,9 @@ import { DeleteSpaceDialog, SpaceNameDialog } from './threads/SpaceDialogs';
 import { RenameThreadDialog } from './threads/RenameThreadDialog';
 import { useChatStore } from '../stores/chat-store';
 
-// The thread drawer: an optional list beside the board or the open thread
-// (⌘B). It shows what is on the programme for the surface you are on.
-// In Work it lists projects as collapsible groups with their threads sorted
-// into tiers; in Chat it lists spaces and personal chats. Each row leads with
-// a status dot, so a column of threads can be scanned by colour alone.
-// Destinations live on the top bar (TopBar), not here.
+// The app sidebar. In Work it lists projects as collapsible groups with their
+// threads sorted into tiers; in Chat it lists spaces and personal chats. Each
+// thread row leads with a status dot, so a column can be scanned by colour.
 
 const ATTENTION_PILL_CLASSES: Record<string, { text: string; dot: string }> = {
   question: { text: 'text-amber-600 dark:text-amber-300/90', dot: 'bg-amber-500 dark:bg-amber-300/90' },
@@ -629,6 +630,21 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
   </>;
 }
 
+const MORE = [
+  { to: '/projects', label: 'Projects', Icon: FolderIcon },
+  { to: '/active-tasks', label: 'Tasks', Icon: ListChecksIcon },
+  { to: '/memory', label: 'Memory', Icon: BrainIcon },
+  { to: '/connected-apps', label: 'Connections', Icon: PlugIcon },
+  { to: '/usage', label: 'Usage', Icon: UsageIcon },
+  { to: '/learning', label: 'Learning', Icon: GradCapIcon },
+] as const;
+
+/**
+ * The app sidebar, after t3code: where to go at the top, the list for the
+ * surface you are on in the middle (threads by project in Work, chats and
+ * spaces in Chat, agents and flows in Agents), the other destinations and
+ * Settings at the bottom. ⌘B hides it.
+ */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React.JSX.Element {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -639,9 +655,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const draft = useUiStore((s) => s.draft);
   const setAddProjectOpen = useUiStore((s) => s.setAddProjectOpen);
   const setPanelCollapsed = useUiStore((s) => s.setPanelCollapsed);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const setSidebarSlot = useUiStore((s) => s.setSidebarSlot);
   const { newThread } = useThreadNavigation();
   const location = useLocation();
-  const onHome = location.pathname === '/home';
+  const navigate = useNavigate();
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const path = location.pathname;
+  const onHome = path === '/home';
+  const onAgents = path === '/agents';
+  const onWork = path === '/work' || path.startsWith('/pr/');
 
   const byProject = useMemo(() => {
     const groups = new Map<string, Task[]>();
@@ -653,93 +676,81 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
     for (const list of groups.values()) list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
     return groups;
   }, [tasks]);
+  const running = useMemo(() => Object.values(tasks).filter((task) => !isTerminalTask(task)).length, [tasks]);
 
   const pendingTaskIds = useMemo(() => new Set(pending.map((request) => request.taskId)), [pending]);
   const pendingQuestionTaskIds = useMemo(() => new Set(pendingQuestions.map((request) => request.taskId)), [pendingQuestions]);
+  const attention = pending.length + pendingQuestions.length;
   // The focused thread is only highlighted while it is what the chat shows.
   const focusedTask = pickFocusedTask(tasks, focusedTaskId, activeWorkspaceId);
-  const focusedKey = location.pathname === '/work' && !draft && focusedTask !== null ? threadKey(focusedTask) : null;
-  const selectedChat = useChatStore((state) => state.selectedId);
-  const [query, setQuery] = useState('');
+  const focusedKey = path === '/work' && !draft && focusedTask !== null ? threadKey(focusedTask) : null;
 
-  const isNew = onHome ? selectedChat === null : location.pathname === '/work' && draft;
+  const openChat = (): void => { useChatStore.getState().select(null); navigate('/home'); onNavigate?.(); };
+  const openWork = (): void => { void newThread(); onNavigate?.(); };
 
   return (
-    <nav aria-label="Primary" className="animate-slide-in-left flex h-full w-[260px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="flex h-(--topbar-height) shrink-0 items-center gap-1 pr-2 pl-4">
-        <h2 className="flex-1 text-[13px] font-semibold text-sidebar-foreground">{onHome ? 'Chats' : 'Threads'}</h2>
-        {!onHome ? (
-          <button
-            type="button"
-            onClick={() => { setAddProjectOpen(true); }}
-            aria-label="Add project"
-            title="Add project"
-            className="flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            <FolderPlusIcon size={15} />
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => { setPanelCollapsed(true); }}
-          aria-label="Hide thread list"
-          title="Hide thread list (⌘B)"
-          className="flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <PanelLeftIcon size={15} />
+    <nav aria-label="Primary" className="flex h-full w-[248px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      <div className="app-drag flex h-(--header-height) shrink-0 items-center justify-end gap-0.5 pr-2 pl-[84px]">
+        <button type="button" onClick={() => { setPaletteOpen(true); }} aria-label="Search" title="Search (⌘K)" className="side-icon"><SearchIcon size={14} /></button>
+        <button type="button" onClick={() => { setPanelCollapsed(true); }} aria-label="Hide sidebar" title="Hide sidebar (⌘B)" className="side-icon"><PanelLeftIcon size={14} /></button>
+      </div>
+
+      <div className="flex shrink-0 flex-col gap-px px-2 pb-2">
+        <button type="button" onClick={openChat} aria-current={onHome ? 'page' : undefined} className="nav-row"><MessageIcon size={15} /><span className="flex-1">Chat</span></button>
+        <button type="button" onClick={openWork} aria-current={onWork ? 'page' : undefined} className="nav-row">
+          <TerminalIcon size={15} /><span className="flex-1">Work</span>
+          {attention > 0 ? <span title={`${attention} waiting on you`} className="rounded-full bg-amber-500/15 px-1.5 text-3xs font-medium text-amber-600 tabular-nums dark:text-amber-300">{attention}</span> : null}
         </button>
+        <button type="button" onClick={() => { navigate('/agents'); onNavigate?.(); }} aria-current={onAgents ? 'page' : undefined} className="nav-row"><SparklesIcon size={15} /><span className="flex-1">Agents</span></button>
+        <div className="my-1 h-px bg-sidebar-border" />
+        {MORE.map(({ to, label, Icon }) => (
+          <NavLink key={to} to={to} onClick={onNavigate} aria-current={path === to ? 'page' : undefined} className="nav-row h-7">
+            <Icon size={15} /><span className="flex-1">{label}</span>
+            {to === '/active-tasks' && running > 0 ? <span title={`${running} running`} className="rounded-full bg-primary/15 px-1.5 text-3xs font-medium text-primary tabular-nums">{running}</span> : null}
+          </NavLink>
+        ))}
       </div>
 
-      <div className="flex flex-col gap-2 px-3 pb-3">
-        <button
-          type="button"
-          onClick={() => { if (onHome) useChatStore.getState().select(null); else void newThread(); onNavigate?.(); }}
-          aria-current={isNew ? 'page' : undefined}
-          className={cn(
-            'flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border px-2.5 text-[13px] font-medium transition-[background-color,border-color,transform] duration-150 active:scale-[0.98]',
-            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-            isNew ? 'border-primary/45 bg-primary/10 text-sidebar-foreground' : 'border-sidebar-border bg-sidebar-row-active text-sidebar-foreground shadow-lift hover:border-border-strong',
-          )}
-        >
-          <SquarePenIcon size={14} className="text-primary" />
-          <span className="flex-1 text-left">{onHome ? 'New chat' : 'New thread'}</span>
-          <span className="text-2xs text-sidebar-muted-foreground">⌘N</span>
-        </button>
-        <label className="flex h-8 items-center gap-2 rounded-lg bg-sidebar-row-hover px-2.5 text-sidebar-muted-foreground ring-1 ring-transparent transition-shadow focus-within:text-sidebar-foreground focus-within:ring-ring/60">
-          <SearchIcon size={13} />
-          <span className="sr-only">{onHome ? 'Filter chats' : 'Filter threads'}</span>
-          <input value={query} onChange={(event) => { setQuery(event.target.value.toLowerCase()); }} placeholder={onHome ? 'Filter chats' : 'Filter threads'} className="min-w-0 flex-1 bg-transparent text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground" />
-          {query !== '' ? <button type="button" onClick={() => { setQuery(''); }} aria-label="Clear filter" className="flex size-5 cursor-pointer items-center justify-center rounded hover:text-sidebar-foreground"><XIcon size={12} /></button> : null}
-        </label>
-      </div>
+      {onAgents ? (
+        <div ref={setSidebarSlot} className="flex min-h-0 flex-1 flex-col border-t border-sidebar-border" />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col border-t border-sidebar-border">
+          <div className="side-label mt-1.5 px-2">
+            <span className="flex-1 pl-2">{onHome ? 'Chats' : 'Threads'}</span>
+            {!onHome ? <button type="button" onClick={() => { setAddProjectOpen(true); }} aria-label="Add project" title="Add project" className="side-icon"><FolderPlusIcon size={14} /></button> : null}
+            <button type="button" onClick={onHome ? openChat : openWork} aria-label={onHome ? 'New chat' : 'New thread'} title={`${onHome ? 'New chat' : 'New thread'} (⌘N)`} className="side-icon mr-1"><SquarePenIcon size={14} /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {onHome ? <ChatHistory onNavigate={onNavigate} /> : workspaces.length === 0 ? (
+              <button type="button" onClick={() => { setAddProjectOpen(true); }} className="nav-row">
+                <FolderPlusIcon size={14} /><span>Add your first project</span>
+              </button>
+            ) : (
+              <ul className="flex flex-col gap-0.5">
+                {workspaces.map((project) => (
+                  <ProjectGroup
+                    key={project.id}
+                    project={project}
+                    active={project.id === activeWorkspaceId}
+                    tasks={byProject.get(project.id) ?? []}
+                    focusedKey={focusedKey}
+                    pendingTaskIds={pendingTaskIds}
+                    pendingQuestionTaskIds={pendingQuestionTaskIds}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {onHome ? <ChatHistory query={query} onNavigate={onNavigate} /> : <>
-        {workspaces.length === 0 ? (
-          <button type="button" onClick={() => { setAddProjectOpen(true); }} className="flex w-full cursor-pointer flex-col items-start gap-1 rounded-xl border border-dashed border-border-strong px-3 py-3 text-left hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring">
-            <span className="text-xs font-medium text-sidebar-foreground">Add your first project</span>
-            <span className="text-2xs text-sidebar-muted-foreground">Pick a folder for agents to work in.</span>
-          </button>
-        ) : (
-          <ul className="flex flex-col gap-0.5">
-            {workspaces.map((project) => (
-              <ProjectGroup
-                key={project.id}
-                project={project}
-                active={project.id === activeWorkspaceId}
-                tasks={byProject.get(project.id) ?? []}
-                focusedKey={focusedKey}
-                pendingTaskIds={pendingTaskIds}
-                pendingQuestionTaskIds={pendingQuestionTaskIds}
-                query={query}
-                onNavigate={onNavigate}
-              />
-            ))}
-          </ul>
-        )}
-        </>}
+      <div className="flex shrink-0 items-center gap-0.5 border-t border-sidebar-border px-2 py-2">
+        <NavLink to="/settings" onClick={onNavigate} aria-current={path === '/settings' ? 'page' : undefined} className="nav-row flex-1"><SettingsIcon size={15} /><span>Settings</span></NavLink>
+        <SuggestionsInbox variant="footer" />
+        <button type="button" aria-label="Control on phone" title="Control on phone" onClick={() => { setPhoneOpen(true); }} className="side-icon size-7"><PhoneIcon size={14} /></button>
       </div>
-
+      {phoneOpen ? <PhoneControlDialog onClose={() => { setPhoneOpen(false); }} /> : null}
     </nav>
   );
 }

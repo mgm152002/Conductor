@@ -9,6 +9,7 @@ import type { ToolApprovalDecision } from '../adapters/tool-gate';
 import { SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint } from './sandbox-manager';
 import shippedTools from './aio-tools.json';
 import { SharedLocks, refusal, type LockOwner } from './shared-locks';
+import { CLOUD_BROWSER_TOOLS, CLOUD_BROWSER_TOOL_NAMES, callCloudBrowser, type WebDriverSession } from './cloud-browser';
 
 // The MCP server an agent CLI connects to for its sandbox tools.
 //
@@ -198,6 +199,15 @@ export interface GatewaySessionConfig {
   memory?: { save(text: string, scope?: string): Promise<string>; search(query: string, scope?: string): Promise<string>; forget(id: string): Promise<string> };
   /** The agents' email inbox (AgentMail). When set, the run gets the email tools. */
   mail?: { send(subject: string, body: string): Promise<string>; inbox(limit: number): Promise<string>; read(id: string): Promise<string> };
+  /**
+   * A remote WebDriver browser (Selenium hub) for this run. When set, the run
+   * gets the cloud_browser_* tools; the session is closed when the run ends.
+   */
+  cloudBrowser?: WebDriverSession;
+  /** Files the cloud browser may upload (the task's attachments, on this Mac). */
+  cloudUploads?: () => Array<{ path: string; name: string }>;
+  /** Run without a sandbox (cloud browser only): the sandbox is never started or asked for its tools. */
+  noSandbox?: boolean;
   /** Called after each forwarded call, for the thread's activity. */
   onCall?: (call: { tool: string; ok: boolean }) => void;
 }
@@ -274,7 +284,7 @@ function describeCall(name: string, args: Json): { summary: string; detail?: str
   if (group === 'browser') {
     const index = typeof args['index'] === 'number' ? `element #${args['index']}` : undefined;
     const target = [pick('url', 'selector', 'text', 'element', 'ref', 'key', 'script'), index, pick('value')].filter((part) => part !== undefined).join(', ') || undefined;
-    return { kind: 'permissions', summary: `Browser action: ${name.replace(/^browser_?/i, '').replace(/_/g, ' ')}`, ...(target !== undefined ? { detail: target } : {}) };
+    return { kind: 'permissions', summary: `${/^cloud_browser/i.test(name) ? 'Cloud browser' : 'Browser action'}: ${name.replace(/^(cloud_)?browser_?/i, '').replace(/_/g, ' ')}`, ...(target !== undefined ? { detail: target } : {}) };
   }
   return { kind: 'permissions', summary: `Sandbox tool: ${name}`, detail: JSON.stringify(args).slice(0, 500) };
 }
@@ -316,6 +326,7 @@ export class SandboxGateway {
         const owner = config.lockOwner;
         if (owner !== undefined && ![...this.sessions.values()].some((other) => other.config.lockOwner?.id === owner.id)) this.locks.releaseAll(owner.id);
         void session.client?.then((client) => client.close()).catch(() => undefined);
+        void config.cloudBrowser?.close();
       },
     };
   }
@@ -324,6 +335,7 @@ export class SandboxGateway {
     for (const session of this.sessions.values()) {
       if (session.config.lockOwner !== undefined) this.locks.releaseAll(session.config.lockOwner.id);
       void session.client?.then((client) => client.close()).catch(() => undefined);
+      void session.config.cloudBrowser?.close();
     }
     this.sessions.clear();
     this.server?.close();
@@ -377,15 +389,19 @@ export class SandboxGateway {
   private visible(session: Session, upstream: readonly GatewayTool[]): GatewayTool[] {
     const allowed = new Set(session.config.tools);
     const out = upstream.filter((tool) => allowedTool(tool.name, allowed));
-    if (session.config.returnFile !== undefined) out.push(RETURN_FILE);
-    if (session.config.exportFile !== undefined) out.push(EXPORT_FILE);
-    if (session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
+    // Handing files back and locking the shared folder need a sandbox.
+    const sandbox = session.config.noSandbox !== true;
+    if (sandbox && session.config.returnFile !== undefined) out.push(RETURN_FILE);
+    if (sandbox && session.config.exportFile !== undefined) out.push(EXPORT_FILE);
+    if (sandbox && session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
     if (session.config.memory !== undefined) out.push(...MEMORY_TOOLS);
     if (session.config.mail !== undefined) out.push(...EMAIL_TOOLS);
+    if (session.config.cloudBrowser !== undefined) out.push(...(CLOUD_BROWSER_TOOLS as unknown as GatewayTool[]));
     return out;
   }
 
   private tools(session: Session): Promise<GatewayTool[]> {
+    if (session.config.noSandbox === true) return Promise.resolve(this.visible(session, []));
     session.tools ??= (async () => {
       const client = await this.client(session);
       const all: GatewayTool[] = [];
@@ -413,12 +429,15 @@ export class SandboxGateway {
    * image) — a tool call itself waits for the sandbox to be ready.
    */
   private async listTools(session: Session): Promise<GatewayTool[]> {
+    if (session.config.noSandbox === true) return this.visible(session, []);
     const real = this.tools(session);
     if (this.upstream !== undefined) {
       real.catch(() => undefined);
       return this.visible(session, this.upstream);
     }
-    const waited = await Promise.race([real, new Promise<undefined>((resolve) => setTimeout(resolve, LIST_WAIT_MS, undefined))]);
+    // A run with a cloud browser can still work when the sandbox can't start (Docker off).
+    const guarded = session.config.cloudBrowser !== undefined ? real.catch(() => this.visible(session, [])) : real;
+    const waited = await Promise.race([guarded, new Promise<undefined>((resolve) => setTimeout(resolve, LIST_WAIT_MS, undefined))]);
     if (waited !== undefined) return waited;
     real.catch(() => undefined);
     return this.visible(session, shippedTools as GatewayTool[]);
@@ -428,7 +447,8 @@ export class SandboxGateway {
   async call(session: Session, name: string, args: Json, signal: AbortSignal): Promise<Json> {
     // Memory and email live outside the sandbox: they work even when it can't start.
     const outside = (session.config.memory !== undefined && (name === MEMORY_SAVE_TOOL || name === MEMORY_SEARCH_TOOL || name === MEMORY_FORGET_TOOL))
-      || (session.config.mail !== undefined && (name === EMAIL_SEND_TOOL || name === EMAIL_INBOX_TOOL || name === EMAIL_READ_TOOL));
+      || (session.config.mail !== undefined && (name === EMAIL_SEND_TOOL || name === EMAIL_INBOX_TOOL || name === EMAIL_READ_TOOL))
+      || (session.config.cloudBrowser !== undefined && CLOUD_BROWSER_TOOL_NAMES.has(name));
     const tools = outside ? [] : await this.tools(session);
     if (!outside && !tools.some((tool) => tool.name === name)) {
       return { content: [{ type: 'text', text: `The tool ${name} is not available to this agent.` }], isError: true };
@@ -480,6 +500,25 @@ export class SandboxGateway {
       } catch (error) {
         return { content: [{ type: 'text', text: `Email is unavailable right now: ${error instanceof Error ? error.message : 'unknown error'}` }], isError: true };
       }
+    }
+    // The cloud browser runs on a remote hub, not in the sandbox: same approval policy, its own transport.
+    const cloud = session.config.cloudBrowser;
+    if (cloud !== undefined && CLOUD_BROWSER_TOOL_NAMES.has(name)) {
+      const { approval } = session.config;
+      if (approval === 'all' || (approval === 'risky' && !isLookOnly(name, args))) {
+        const described = describeCall(name, args);
+        const decision = await session.config.decide({
+          kind: described.kind,
+          summary: `${session.config.agentName}: ${described.summary}`,
+          ...(described.detail !== undefined ? { detail: described.detail } : {}),
+          rememberKey: `sandbox:${name}:`,
+        }, signal);
+        if (decision === 'cancel') return { content: [{ type: 'text', text: 'The run was stopped before this action was approved.' }], isError: true };
+        if (decision === 'decline') return { content: [{ type: 'text', text: 'The user declined this action. Do not retry it; continue another way or explain what you need.' }], isError: true };
+      }
+      const result = await callCloudBrowser(cloud, name, args, signal, session.config.cloudUploads);
+      session.config.onCall?.({ tool: name, ok: result['isError'] !== true });
+      return result;
     }
     const owner = session.config.lockOwner;
     if (owner !== undefined && (name === LOCK_TOOL || name === UNLOCK_TOOL)) {

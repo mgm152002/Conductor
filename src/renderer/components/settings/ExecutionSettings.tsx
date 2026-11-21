@@ -29,7 +29,6 @@ export function ExecutionSettings():React.JSX.Element {
   const field='inset-field px-3 py-2 text-sm ';
   return <section className="flex flex-col gap-5" aria-label="Execution and data settings">
     <h2 className="text-sm font-semibold">Execution permissions</h2>
-    <p className="text-sm text-muted-foreground">Changing the profile revokes current grants.</p>
     <label className="flex flex-col gap-2 text-sm">Permission profile
       <MenuSelect variant="box" label="Permission profile" value={profile} disabled={busy} onChange={(next)=>{void perform(()=>window.conductor.permissions.setProfile(next as PermissionProfile),'Permission profile saved.');}} options={[
         { value: 'read_only', label: 'Read-only' },
@@ -40,12 +39,10 @@ export function ExecutionSettings():React.JSX.Element {
     <div className="flex items-start gap-3 rounded-xl bg-muted/50 p-3">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">Auto-approve everything</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">Runs commands and file changes without asking.</p>
       </div>
       <Switch label="Auto-approve everything" checked={autoApprove} disabled={busy} onChange={(next)=>{void perform(()=>window.conductor.settings.set({key:'execution.autoApprove',value:next,scope:'global'}),next?'Auto-approve enabled.':'Auto-approve disabled.');}} />
     </div>
     <h2 className="text-sm font-semibold">External provider consent</h2>
-    <p className="text-sm text-muted-foreground">Allow a provider before starting tasks.</p>
     <div className="flex flex-col gap-3">{providers.map((provider)=>{
       const allowed=consents.some((c)=>c.provider===provider.id);
       return <label key={provider.id} className="flex items-center gap-3 text-sm"><input type="checkbox" checked={allowed} disabled={busy} onChange={()=>{void perform(()=>allowed?window.conductor.dataControl.revokeConsent(provider.id):window.conductor.dataControl.grantConsent(provider.id),allowed?'Provider consent revoked.':'Provider consent granted.');}}/>{provider.label} — {allowed?'Allowed':'Blocked'}</label>;

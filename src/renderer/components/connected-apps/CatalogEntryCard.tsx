@@ -132,23 +132,23 @@ export function CatalogEntryCard({
   }
 
   return (
-    <div className="flex h-full flex-col gap-3 rounded-lg border border-border p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium text-foreground">
-            {entry.displayName}
-          </span>
-          {entry.status === 'installed' &&
-          entry.discoveredBinary !== undefined ? (
-            <span className="truncate text-xs text-muted-foreground">
-              Binary: {entry.discoveredBinary}
-            </span>
-          ) : null}
-        </div>
+    <div className="flex flex-col gap-2 px-3.5 py-2.5">
+      <div className="flex items-center gap-3" title={entry.setupNote}>
+        <span className="w-36 shrink-0 truncate text-[13px] text-foreground">
+          {entry.displayName}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
+          {entry.status === 'installed' ? entry.discoveredBinary ?? '' : ''}
+        </span>
+        {entry.status === 'available' && entry.installRunnable !== false && pending === null ? (
+          <button type="button" disabled={busy} onClick={() => { void requestInstall(); }} className="h-6 shrink-0 cursor-pointer rounded-md border border-border px-2 text-2xs font-medium text-foreground hover:bg-accent disabled:opacity-40">
+            {busy ? 'Loading…' : 'Install'}
+          </button>
+        ) : null}
         <span
-          className={`shrink-0 text-xs font-semibold ${STATUS_STYLE[entry.status]}`}
+          className={`shrink-0 text-2xs font-medium ${STATUS_STYLE[entry.status]}`}
         >
-          {STATUS_LABEL[entry.status]}
+          {entry.status === 'installed' && entry.canRunTasks === false ? 'Installed · can’t route' : STATUS_LABEL[entry.status]}
         </span>
       </div>
 
@@ -199,28 +199,9 @@ export function CatalogEntryCard({
               </button>
             </div>
           </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                void requestInstall();
-              }}
-              className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {busy ? 'Loading…' : 'Install'}
-            </button>
-          </div>
-        )
+        ) : null
       ) : null}
 
-      {entry.setupNote !== undefined && entry.status !== 'unconfigured' ? (
-        <p className="text-2xs text-muted-foreground">{entry.setupNote}</p>
-      ) : null}
-      {entry.status === 'installed' && entry.canRunTasks === true && entry.registrationError === undefined ? (
-        <p className="text-2xs text-success">Conductor can route tasks to {entry.displayName}.</p>
-      ) : null}
 
       {entry.status === 'installed' &&
       entry.registrationError !== undefined ? (

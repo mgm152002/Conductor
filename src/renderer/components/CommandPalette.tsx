@@ -56,7 +56,7 @@ function PaletteBody({ onClose }: { onClose: () => void }): React.JSX.Element {
       { id: 'new-thread', group: 'Actions', label: 'New thread', hint: '⌘N', keywords: 'work task start', icon: <SquarePenIcon size={15} />, run: () => { void newThread(); } },
       { id: 'new-chat', group: 'Actions', label: 'New chat', keywords: 'conversation ask', icon: <MessageIcon size={15} />, run: () => { useChatStore.getState().select(null); navigate('/home'); } },
       { id: 'add-project', group: 'Actions', label: 'Add project', keywords: 'folder workspace', icon: <FolderPlusIcon size={15} />, run: () => { ui.setAddProjectOpen(true); } },
-      { id: 'toggle-panel', group: 'Actions', label: ui.panelCollapsed ? 'Show thread list' : 'Hide thread list', hint: '⌘B', keywords: 'sidebar panel', icon: <PanelLeftIcon size={15} />, run: () => { ui.setPanelCollapsed(!ui.panelCollapsed); } },
+      { id: 'toggle-panel', group: 'Actions', label: ui.panelCollapsed ? 'Show sidebar' : 'Hide sidebar', hint: '⌘B', keywords: 'sidebar panel', icon: <PanelLeftIcon size={15} />, run: () => { ui.setPanelCollapsed(!ui.panelCollapsed); } },
       ...workspaces.map((workspace): Command => ({
         id: `new-in:${workspace.id}`, group: 'Actions', label: `New thread in ${workspace.name}`, keywords: `project ${workspace.rootPath}`,
         icon: <FolderIcon size={15} />, run: () => { void newThread(workspace.id); },

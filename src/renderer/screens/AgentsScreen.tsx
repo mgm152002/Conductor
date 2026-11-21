@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SANDBOX_AGENT_COLORS, type AgentGroup, type SandboxAgent, type SandboxAgentInput, type SandboxStatus } from '@shared/sandbox-agents';
 import { useAgents } from '../hooks/useAgents';
 import { useAgentActivity } from '../hooks/useAgentActivity';
-import { useTaskStore } from '../stores';
+import { useTaskStore, useUiStore } from '../stores';
 import { useSandboxAgentStore } from '../stores/sandbox-agent-store';
 import { threadKey } from '../lib/threads';
 import { relativeTime } from '../lib/time';
@@ -17,32 +18,23 @@ import { FlowHistory } from '../components/agents/FlowHistory';
 import { describeCron } from '../lib/flow-schedule';
 import type { AgentFlow } from '@shared/agent-flows';
 
-// Agents, as a messenger: your agents and group chats on the left, the open
-// conversation on the right. Talk to one agent, or to a group of them at once.
+// Agents: your agents, groups and flows listed in the app sidebar, the open
+// conversation (or flow) filling the screen.
 
-const rowClass = (selected: boolean): string => cn(
-  'flex w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-  selected ? 'bg-sidebar-row-active shadow-lift' : 'hover:bg-sidebar-row-hover',
-);
+const rowClass = (selected: boolean): string => cn('nav-row h-8 gap-2 px-2', selected && 'text-sidebar-foreground');
 
-function AgentRow({ agent, selected, onSelect, lastAt, lastText }: {
-  agent: SandboxAgent; selected: boolean; onSelect: () => void; lastAt?: string | undefined; lastText?: string | undefined;
+function AgentRow({ agent, selected, onSelect, lastAt }: {
+  agent: SandboxAgent; selected: boolean; onSelect: () => void; lastAt?: string | undefined;
 }): React.JSX.Element {
   const activity = useAgentActivity(agent.id);
-  const status = activity.mood === 'working' ? 'Working…' : activity.mood === 'waiting' ? 'Needs your approval' : undefined;
   return (
     <li>
       <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} className={rowClass(selected)}>
-        <AgentAvatar agent={agent} size={38} mood={activity.mood} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">{agent.name}</span>
-            {lastAt !== undefined ? <span className="shrink-0 text-3xs text-sidebar-muted-foreground">{relativeTime(lastAt)}</span> : null}
-          </span>
-          <span className={cn('block truncate text-2xs', status !== undefined ? (activity.mood === 'waiting' ? 'font-medium text-amber-600 dark:text-amber-300' : 'text-info') : 'text-sidebar-muted-foreground')}>
-            {status ?? lastText ?? agent.description}
-          </span>
-        </span>
+        <AgentAvatar agent={agent} size={20} mood={activity.mood} />
+        <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+        {activity.mood === 'working' ? <span title="Working" className="size-1.5 shrink-0 animate-status-pulse rounded-full bg-info" />
+          : activity.mood === 'waiting' ? <span title="Needs your approval" className="size-1.5 shrink-0 rounded-full bg-amber-500" />
+            : lastAt !== undefined ? <span className="shrink-0 text-3xs text-sidebar-muted-foreground tabular-nums">{relativeTime(lastAt)}</span> : null}
       </button>
     </li>
   );
@@ -52,31 +44,23 @@ function GroupRow({ group, agents, selected, onSelect }: { group: AgentGroup; ag
   const members = group.agentIds.map((id) => agents.find((agent) => agent.id === id)).filter((agent): agent is SandboxAgent => agent !== undefined);
   return (
     <li>
-      <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} className={rowClass(selected)}>
-        <GroupAvatar members={members} size={38} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-sidebar-foreground">{group.name}</span>
-            <span className="shrink-0 text-3xs text-sidebar-muted-foreground">{relativeTime(group.updatedAt)}</span>
-          </span>
-          <span className="block truncate text-2xs text-sidebar-muted-foreground">{members.map((member) => member.name).join(', ')}</span>
-        </span>
+      <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} title={members.map((member) => member.name).join(', ')} className={rowClass(selected)}>
+        <GroupAvatar members={members} size={20} />
+        <span className="min-w-0 flex-1 truncate">{group.name}</span>
+        <span className="shrink-0 text-3xs text-sidebar-muted-foreground tabular-nums">{relativeTime(group.updatedAt)}</span>
       </button>
     </li>
   );
 }
 
 function FlowRow({ flow, selected, onSelect }: { flow: AgentFlow; selected: boolean; onSelect: () => void }): React.JSX.Element {
+  const scheduled = flow.schedule?.enabled === true;
   return (
     <li>
-      <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} className={rowClass(selected)}>
-        <span className="flex size-[38px] shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><WorkflowIcon size={18} /></span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold text-sidebar-foreground">{flow.name}</span>
-          <span className="block truncate text-2xs text-sidebar-muted-foreground">
-            {flow.nodes.length} step{flow.nodes.length === 1 ? '' : 's'}{flow.schedule?.enabled === true ? ` · ${describeCron(flow.schedule.cron)}` : ''}
-          </span>
-        </span>
+      <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} title={scheduled ? describeCron(flow.schedule!.cron) : undefined} className={rowClass(selected)}>
+        <WorkflowIcon size={15} />
+        <span className="min-w-0 flex-1 truncate">{flow.name}</span>
+        {scheduled ? <ClockIcon size={12} className="shrink-0 text-sidebar-muted-foreground" /> : null}
       </button>
     </li>
   );
@@ -88,16 +72,15 @@ function SandboxBar({ status, onPull, onStop, onClearLogins }: { status: Sandbox
   if (status === null) return null;
   const gib = (bytes: number): string => (bytes / 1024 ** 3).toFixed(1);
   if (status.docker !== 'ready') {
-    return <p className="rounded-xl bg-warning/10 px-3 py-2 text-2xs text-warning">{status.docker === 'not-installed' ? 'Install Docker to give agents a sandbox.' : 'Start Docker to give agents a sandbox.'}</p>;
+    return <p className="px-1 text-2xs text-warning">{status.docker === 'not-installed' ? 'Docker is not installed' : 'Docker is not running'}</p>;
   }
   if (status.image !== 'present') {
     return (
-      <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
-        <p className="text-2xs text-muted-foreground">Agents need the sandbox (about 12 GB).</p>
+      <div className="flex flex-col gap-1.5">
         {status.pullError !== undefined ? <p className="text-2xs text-destructive-foreground">{status.pullError}</p> : null}
         {status.image === 'pulling' ? (
           <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(3, (status.pullProgress ?? 0) * 100)}%` }} /></div>
-        ) : <Button size="sm" variant="primary" onClick={onPull}><DownloadIcon size={13} />Download sandbox</Button>}
+        ) : <Button size="sm" variant="outline" onClick={onPull} title="About 12 GB"><DownloadIcon size={13} />Download sandbox</Button>}
       </div>
     );
   }
@@ -105,7 +88,7 @@ function SandboxBar({ status, onPull, onStop, onClearLogins }: { status: Sandbox
     <div className="flex flex-col gap-1 px-1 text-2xs text-sidebar-muted-foreground">
       <p className="flex items-center gap-1.5">
         <span className={cn('size-1.5 rounded-full', status.running.length > 0 ? 'bg-success' : 'bg-sidebar-muted-foreground/50')} />
-        {status.running.length === 0 ? 'No sandboxes running' : `${status.running.length} sandbox${status.running.length === 1 ? '' : 'es'} running`}
+        {status.running.length === 0 ? 'No sandboxes running' : `${status.running.length} running`}
         {status.memory !== undefined ? <span className="ml-auto tabular-nums" title="Docker memory in use">{gib(status.memory.used)} / {gib(status.memory.total)} GB</span> : null}
       </p>
       {status.running.map((run) => (
@@ -174,6 +157,7 @@ export function AgentsScreen(): React.JSX.Element {
   const tasks = useTaskStore((s) => s.tasks);
   const clis = useAgents();
   const selection = useSandboxAgentStore((s) => s.selection);
+  const slot = useUiStore((s) => s.sidebarSlot);
   const select = useSandboxAgentStore((s) => s.select);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<SandboxStatus | null>(null);
@@ -186,7 +170,10 @@ export function AgentsScreen(): React.JSX.Element {
   const [deleting, setDeleting] = useState<{ kind: 'agent' | 'group' | 'flow'; id: string; name: string } | null>(null);
 
   const loadStatus = useCallback(async () => {
-    try { setStatus(await window.conductor.sandbox.status()); } catch { /* shown as unknown */ }
+    try {
+      const next = await window.conductor.sandbox.status();
+      setStatus((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+    } catch { /* shown as unknown */ }
   }, []);
   useEffect(() => { void refresh(); void loadStatus(); }, [refresh, loadStatus]);
   // Chats without a project live in the hidden agent workspace, which the
@@ -238,81 +225,84 @@ export function AgentsScreen(): React.JSX.Element {
     select({ kind: 'agent', id: firstAgentId });
   }, [loaded, selectedAgent, selectedGroup, selectedFlowId, selection?.kind, firstAgentId, select]);
 
-  return (
-    <div data-screen="agents" className="flex h-full min-h-0">
-      <aside aria-label="Conversations" className="flex w-[300px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
-        <div className="flex h-14 shrink-0 items-center gap-1 px-4">
-          <h1 className="flex-1 font-display text-[17px] font-semibold text-sidebar-foreground">Agents</h1>
-          <Button size="icon" variant="ghost" aria-label="New flow" title="New flow" onClick={() => { select({ kind: 'flow', id: 'new' }); }}><WorkflowIcon size={16} /></Button>
-          <Button size="icon" variant="ghost" aria-label="New group" title={agents.length < 2 ? 'Create two agents to start a group' : 'New group'} disabled={agents.length < 2} onClick={() => { setCreatingGroup(true); }}><UsersIcon size={16} /></Button>
-          <Button size="icon" variant="ghost" aria-label="New agent" title="New agent" onClick={() => { setEditing({ id: null, input: blank() }); }}><PlusIcon size={16} /></Button>
-        </div>
-        <div className="px-3 pb-2">
-          <label className="flex h-8 items-center gap-2 rounded-lg bg-sidebar-row-hover px-2.5 text-sidebar-muted-foreground focus-within:text-sidebar-foreground">
-            <SearchIcon size={13} />
+  const list = (
+    <div aria-label="Conversations" className="flex min-h-0 flex-1 flex-col">
+      <div className="side-label mt-1.5 px-2">
+        <span className="flex-1 pl-2">Agents</span>
+        <button type="button" className="side-icon" aria-label="New flow" title="New flow" onClick={() => { select({ kind: 'flow', id: 'new' }); }}><WorkflowIcon size={14} /></button>
+        <button type="button" className="side-icon disabled:opacity-40" aria-label="New group" title={agents.length < 2 ? 'Create two agents to start a group' : 'New group'} disabled={agents.length < 2} onClick={() => { setCreatingGroup(true); }}><UsersIcon size={14} /></button>
+        <button type="button" className="side-icon mr-1" aria-label="New agent" title="New agent" onClick={() => { setEditing({ id: null, input: blank() }); }}><PlusIcon size={14} /></button>
+      </div>
+      {agents.length + groups.length + flows.length > 8 ? (
+        <div className="px-2 pb-1">
+          <label className="flex h-7 items-center gap-2 rounded-md bg-sidebar-row-hover px-2 text-sidebar-muted-foreground focus-within:text-sidebar-foreground">
+            <SearchIcon size={12} />
             <span className="sr-only">Search</span>
-            <input value={query} onChange={(event) => { setQuery(event.target.value); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent text-[13px] text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground" />
+            <input value={query} onChange={(event) => { setQuery(event.target.value); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent text-xs text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground" />
           </label>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            <button type="button" onClick={() => { select({ kind: 'history', id: 'all' }); }} aria-current={selection?.kind === 'history' ? 'page' : undefined}
-              className={cn('mb-1 flex w-full cursor-pointer items-center gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] font-medium text-sidebar-foreground hover:bg-sidebar-row-hover', selection?.kind === 'history' && 'bg-sidebar-row-active')}>
-              <ClockIcon size={15} className="text-sidebar-muted-foreground" />Workflow history
-            </button>
-
-          {shownFlows.length > 0 ? (
-            <>
-              <h2 className="px-2.5 pt-2 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Flows</h2>
-              <ul className="flex flex-col gap-0.5">
-                {shownFlows.map((flow) => <FlowRow key={flow.id} flow={flow} selected={selectedFlowId === flow.id} onSelect={() => { select({ kind: 'flow', id: flow.id }); }} />)}
-              </ul>
-            </>
-          ) : null}
-          {shownGroups.length > 0 ? (
-            <>
-              <h2 className="px-2.5 pt-2 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Groups</h2>
-              <ul className="flex flex-col gap-0.5">
-                {shownGroups.map((group) => <GroupRow key={group.id} group={group} agents={agents} selected={selectedGroup?.id === group.id} onSelect={() => { select({ kind: 'group', id: group.id }); }} />)}
-              </ul>
-            </>
-          ) : null}
-          {shownAgents.length > 0 ? (
-            <>
-              {shownGroups.length > 0 ? <h2 className="px-2.5 pt-3 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Agents</h2> : null}
-              <ul className="flex flex-col gap-0.5">
-                {shownAgents.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} selected={selectedAgent?.id === agent.id} onSelect={() => { select({ kind: 'agent', id: agent.id }); }}
-                    lastAt={lastByAgent.get(agent.id)?.at} lastText={lastByAgent.get(agent.id)?.text} />
-                ))}
-              </ul>
-            </>
-          ) : null}
-          {loaded && agents.length === 0 ? (
-            <ul className="flex flex-col gap-1 pt-1" aria-label="Templates">
-              <li className="px-2.5 pb-1 text-2xs font-semibold text-sidebar-muted-foreground">Start from</li>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <button type="button" onClick={() => { select({ kind: 'history', id: 'all' }); }} aria-current={selection?.kind === 'history' ? 'page' : undefined} className={rowClass(selection?.kind === 'history')}>
+          <ClockIcon size={15} /><span className="flex-1">Run history</span>
+        </button>
+        {shownFlows.length > 0 ? (
+          <>
+            <h2 className="side-label">Flows</h2>
+            <ul className="flex flex-col gap-px">
+              {shownFlows.map((flow) => <FlowRow key={flow.id} flow={flow} selected={selectedFlowId === flow.id} onSelect={() => { select({ kind: 'flow', id: flow.id }); }} />)}
+            </ul>
+          </>
+        ) : null}
+        {shownGroups.length > 0 ? (
+          <>
+            <h2 className="side-label">Groups</h2>
+            <ul className="flex flex-col gap-px">
+              {shownGroups.map((group) => <GroupRow key={group.id} group={group} agents={agents} selected={selectedGroup?.id === group.id} onSelect={() => { select({ kind: 'group', id: group.id }); }} />)}
+            </ul>
+          </>
+        ) : null}
+        {shownAgents.length > 0 ? (
+          <>
+            <h2 className="side-label">Agents</h2>
+            <ul className="flex flex-col gap-px">
+              {shownAgents.map((agent) => (
+                <AgentRow key={agent.id} agent={agent} selected={selectedAgent?.id === agent.id} onSelect={() => { select({ kind: 'agent', id: agent.id }); }} lastAt={lastByAgent.get(agent.id)?.at} />
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {loaded && agents.length === 0 ? (
+          <>
+            <h2 className="side-label">Start from</h2>
+            <ul className="flex flex-col gap-px" aria-label="Templates">
               {TEMPLATES.map((template) => (
                 <li key={template.name}>
-                  <button type="button" onClick={() => { setEditing({ id: null, input: { ...template, clis: defaultClis } }); }} className={rowClass(false)}>
-                    <AgentAvatar agent={template} size={34} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-semibold text-sidebar-foreground">{template.name}</span>
-                      <span className="block truncate text-2xs text-sidebar-muted-foreground">{template.description}</span>
-                    </span>
+                  <button type="button" onClick={() => { setEditing({ id: null, input: { ...template, clis: defaultClis } }); }} title={template.description} className={rowClass(false)}>
+                    <AgentAvatar agent={template} size={20} />
+                    <span className="min-w-0 flex-1 truncate">{template.name}</span>
                   </button>
                 </li>
               ))}
             </ul>
-          ) : null}
-        </div>
-        <div className="shrink-0 border-t border-sidebar-border p-3">
-          <SandboxBar
-            status={status}
-            onPull={() => { void window.conductor.sandbox.pull().then(setStatus).catch((err: unknown) => { setError(message(err)); }); }}
-            onStop={(agentId) => { void window.conductor.sandbox.stop(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
-            onClearLogins={(agentId) => { void window.conductor.sandbox.clearBrowser(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
-          />
-        </div>
-      </aside>
+          </>
+        ) : null}
+      </div>
+      <div className="shrink-0 border-t border-sidebar-border px-3 py-2">
+        <SandboxBar
+          status={status}
+          onPull={() => { void window.conductor.sandbox.pull().then(setStatus).catch((err: unknown) => { setError(message(err)); }); }}
+          onStop={(agentId) => { void window.conductor.sandbox.stop(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
+          onClearLogins={(agentId) => { void window.conductor.sandbox.clearBrowser(agentId).then(loadStatus).catch((err: unknown) => { setError(message(err)); }); }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div data-screen="agents" className="flex h-full min-h-0">
+      {/* The list lives in the app sidebar; when the sidebar is hidden it is hidden too (never drawn inline). */}
+      {slot !== null ? createPortal(list, slot) : null}
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {error !== null ? <div className="px-4 pt-3"><Alert action={<Button size="xs" variant="ghost" onClick={() => { setError(null); }}>Dismiss</Button>}>{error}</Alert></div> : null}
@@ -321,6 +311,7 @@ export function AgentsScreen(): React.JSX.Element {
             onBack={() => { const target = flows.find((flow) => flow.id === lastFlow.current)?.id ?? flows[0]?.id; select(target !== undefined ? { kind: 'flow', id: target } : shownAgents[0] !== undefined ? { kind: 'agent', id: shownAgents[0].id } : null); }} />
         ) : selectedFlowId !== undefined && (selectedFlow !== undefined || selectedFlowId === 'new') ? (
           <FlowEditor key={selectedFlow?.id ?? 'new'} flow={selectedFlow ?? null} agents={agents}
+            sandboxRunning={selectedFlow !== undefined && status?.running.some((run) => run.state === 'ready' && run.agentId === `group-flow-${selectedFlow.id}`) === true}
             onSaved={(flow) => { void loadFlows(); if (selectedFlowId === 'new') select({ kind: 'flow', id: flow.id }); }}
             onDeleted={() => { if (selectedFlow !== undefined) setDeleting({ kind: 'flow', id: selectedFlow.id, name: selectedFlow.name }); }}
             onOpenHistory={() => { select({ kind: 'history', id: 'all' }); }} />

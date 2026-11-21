@@ -7,12 +7,12 @@ import type { Appearance } from '@shared/ipc-contract';
 // appearance so the whole UI can react from one place; `useSystemAppearance`
 // keeps it in sync with the bridge and applies the `dark` class to <html>.
 
-/** Accent colour themes (Settings > Appearance). `orchid` is the default. */
+/** Accent colour themes (Settings > Appearance). `cobalt` is the default. */
 export type AccentId = 'orchid' | 'cobalt' | 'pine' | 'marigold' | 'ember';
 
 export const ACCENTS: Array<{ id: AccentId; label: string; swatch: string }> = [
+  { id: 'cobalt', label: 'Cobalt', swatch: '#3d5cf5' },
   { id: 'orchid', label: 'Orchid', swatch: '#c9379a' },
-  { id: 'cobalt', label: 'Cobalt', swatch: '#4a6fe8' },
   { id: 'pine', label: 'Pine', swatch: '#2a9763' },
   { id: 'marigold', label: 'Marigold', swatch: '#c58c1c' },
   { id: 'ember', label: 'Ember', swatch: '#e0602c' },
@@ -25,9 +25,9 @@ const ACCENT_KEY = 'conductor.accent.v2';
 function loadAccent(): AccentId {
   try {
     const raw = window.localStorage.getItem(ACCENT_KEY);
-    return ACCENTS.some((accent) => accent.id === raw) ? (raw as AccentId) : 'orchid';
+    return ACCENTS.some((accent) => accent.id === raw) ? (raw as AccentId) : 'cobalt';
   } catch {
-    return 'orchid';
+    return 'cobalt';
   }
 }
 

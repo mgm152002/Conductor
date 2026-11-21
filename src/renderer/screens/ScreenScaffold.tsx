@@ -1,14 +1,12 @@
-// Page shell for the non-thread screens. The top bar already says where you
-// are, so a screen has no title bar of its own: it opens with a large title
-// in the display face (and its controls beside it) at the head of a centred
-// scrolling column, and the content follows in grouped cards.
+// Page shell for the non-thread screens: a thin header with the title and the
+// screen's controls, and a scrolling content column below it.
 interface ScreenScaffoldProps {
   title: string;
-  /** One short line under the title. Omit it — most screens don't need it. */
+  /** Kept for call sites; not shown. Screens say what they are through their content. */
   description?: string;
-  /** Optional controls rendered at the right of the header. */
+  /** Optional controls at the right of the header. */
   actions?: React.ReactNode;
-  /** Glyph beside the title; identifies the screen at a glance. */
+  /** Kept for call sites; not shown. */
   icon?: React.ReactNode;
   /** Content width: narrative screens stay narrow, boards and desks open up. */
   layout?: 'ledger' | 'wide' | 'dashboard' | 'workbench';
@@ -19,30 +17,22 @@ interface ScreenScaffoldProps {
 
 const LAYOUTS = {
   ledger: 'max-w-3xl',
-  wide: 'max-w-6xl',
-  dashboard: 'max-w-7xl',
-  workbench: 'max-w-[88rem]',
+  wide: 'max-w-5xl',
+  dashboard: 'max-w-6xl',
+  workbench: 'max-w-[84rem]',
 } as const;
 
-export function ScreenScaffold({ title, description, actions, icon, layout = 'ledger', screen, children }: ScreenScaffoldProps): React.JSX.Element {
+export function ScreenScaffold({ title, actions, layout = 'ledger', screen, children }: ScreenScaffoldProps): React.JSX.Element {
   return (
-    <section data-screen={screen} className="h-full min-h-0 overflow-y-auto bg-background" aria-labelledby="screen-title">
-      <div className={`mx-auto flex w-full ${LAYOUTS[layout]} flex-col gap-6 px-8 pt-9 pb-14`}>
-        <header className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <div className="min-w-0 flex-1">
-            <h1 id="screen-title" className="flex items-center gap-2.5 font-display text-[26px] leading-tight font-semibold text-foreground">
-              {icon !== undefined ? <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/14 text-primary">{icon}</span> : null}
-              {title}
-            </h1>
-            {description !== undefined ? <p className="mt-2 max-w-[70ch] text-[13px] leading-relaxed text-muted-foreground">{description}</p> : null}
-          </div>
-          {actions !== undefined ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
-        </header>
-        {children !== undefined ? children : (
-          <div className="group-card px-6 py-10 text-center text-sm text-muted-foreground">
-            <p>Not built yet.</p>
-          </div>
-        )}
+    <section data-screen={screen} className="flex h-full min-h-0 flex-col bg-background" aria-labelledby="screen-title">
+      <header className="window-header flex shrink-0 items-center gap-3 border-b border-border px-5">
+        <h1 id="screen-title" className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{title}</h1>
+        {actions !== undefined ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className={`mx-auto flex w-full ${LAYOUTS[layout]} flex-col gap-6 px-6 pt-6 pb-12`}>
+          {children !== undefined ? children : <p className="py-10 text-center text-sm text-muted-foreground">Not built yet.</p>}
+        </div>
       </div>
     </section>
   );

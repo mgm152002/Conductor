@@ -177,7 +177,7 @@ function chatActivity(event: AdapterStreamEvent, source: string): ActivityUpdate
   if (itemType === 'mcp_tool_call') {
     const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
     const output = str(item['output']);
-    return { ...base, label: `Called ${name || 'tool'}`, kind: 'tool', ...(output !== undefined && output !== '' ? { detail: output } : {}), status: completed ? (str(item['status']) === 'failed' ? 'failed' : 'completed') : 'running' };
+    return { ...base, label: /^cloud_browser_/.test(str(item['tool']) ?? '') ? `Cloud browser: ${(str(item['tool']) ?? '').slice('cloud_browser_'.length).replace(/_/g, ' ')}` : `Called ${name || 'tool'}`, kind: 'tool', ...(output !== undefined && output !== '' ? { detail: output } : {}), status: completed ? (str(item['status']) === 'failed' ? 'failed' : 'completed') : 'running' };
   }
   if (itemType === 'image_view') {
     const path = str(item['path']) ?? '';

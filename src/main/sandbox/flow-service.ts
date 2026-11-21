@@ -13,6 +13,8 @@ const MAX_OUTPUT = 20_000;
 const TICK_MS = 30_000;
 /** Sandbox keys starting with `group-` use the shared workspace volume. */
 const FLOW_SANDBOX_PREFIX = 'group-flow-';
+/** The sandbox every step of a flow shares. */
+export const flowSandboxKey = (flowId: string): string => `${FLOW_SANDBOX_PREFIX}${flowId}`;
 
 interface FlowRow { id: string; name: string; input: string; nodes: string; edges: string; schedule: string | null; next_run_at: string | null; last_run_at: string | null; created_at: string; updated_at: string }
 interface RunRow { id: string; flow_id: string; trigger: 'manual' | 'schedule'; status: FlowRun['status']; input: string; definition: string; started_at: string; finished_at: string | null }
@@ -152,7 +154,7 @@ export class AgentFlowService {
   sandboxScopeFor(taskId: string): { key: string; name: string; label: string } | undefined {
     const row = this.db.prepare(`SELECT r.flow_id AS id, r.definition FROM agent_flow_run_nodes n JOIN agent_flow_runs r ON r.id = n.run_id WHERE n.task_id = ?`).get(taskId) as { id: string; definition: string } | undefined;
     if (row === undefined) return undefined;
-    return { key: `${FLOW_SANDBOX_PREFIX}${row.id}`, name: parse<Definition>(row.definition, { name: 'Workflow', nodes: [], edges: [] }).name, label: 'workflow' };
+    return { key: flowSandboxKey(row.id), name: parse<Definition>(row.definition, { name: 'Workflow', nodes: [], edges: [] }).name, label: 'workflow' };
   }
 
   /** The agent a flow step's task runs as (steps are not part of the agent's own chats). */

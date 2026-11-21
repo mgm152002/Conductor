@@ -527,6 +527,44 @@ describe('SandboxAgentService', () => {
     expect(await subject.prepareStep({ id: 'plain' } as never, 'step-1', 'assisted_execution')).toBeUndefined();
     subject.release({ id: 'thread-1', threadId: 'thread-1' });
   });
+
+  it('runs cloud-only (no sandbox) or alongside the sandbox, as the browser preference says', async () => {
+    const tools = async (preference: 'cloud' | 'both' | 'sandbox') => {
+      const subject = new SandboxAgentService({
+        store, manager: manager(), gateway: new SandboxGateway(),
+        approver: async () => 'accept', autoApprove: () => false, deliverFile: () => undefined,
+        cliAvailable: () => true, log: () => {}, agentWorkspace: () => 'agent-space',
+        cloudBrowser: async () => ({ url: 'https://u:k@hub.example/wd/hub' }),
+        browserPreference: () => preference,
+      });
+      const agent = subject.create({ ...input, tools: ['browser', 'shell'] });
+      subject.bindThread(`t-${preference}`, agent.id);
+      const run = await subject.prepareStep({ id: `t-${preference}`, threadId: `t-${preference}` } as never, 'step-1', 'assisted_execution');
+      // With no sandbox in this test, only a run with a cloud browser can list tools.
+      let names: string[] = [];
+      if (preference !== 'sandbox') {
+        const client = new (await import('@modelcontextprotocol/sdk/client/index.js')).Client({ name: 't', version: '1' });
+        await client.connect(new (await import('@modelcontextprotocol/sdk/client/streamableHttp.js')).StreamableHTTPClientTransport(new URL(run!.server.url!)));
+        names = (await client.listTools()).tools.map((tool) => tool.name);
+        await client.close();
+      }
+      subject.release({ id: `t-${preference}`, threadId: `t-${preference}` });
+      return { names, guidance: run!.guidance };
+    };
+    const cloud = await tools('cloud');
+    expect(cloud.names.some((name) => name.startsWith('cloud_browser_'))).toBe(true);
+    expect(cloud.names.some((name) => name.startsWith('browser'))).toBe(false);
+    expect(cloud.names).toContain('cloud_browser_upload_file');
+    // Cloud-only: nothing that needs a sandbox is offered, so it never starts.
+    expect(cloud.names).not.toContain('return_file');
+    expect(cloud.names).not.toContain('lock_shared');
+    expect(cloud.guidance).toContain('You have no sandbox computer');
+    const both = await tools('both');
+    expect(both.guidance).toContain('You have two browsers');
+    expect(both.names.some((name) => name.startsWith('cloud_browser_'))).toBe(true);
+    const sandbox = await tools('sandbox');
+    expect(sandbox.guidance).not.toContain('cloud_browser');
+  });
 });
 
 describe('hidden agent workspace', () => {

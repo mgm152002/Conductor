@@ -34,6 +34,8 @@ import { ContextEngine } from './domain/context-engine';
 import { MemoryEngine } from './domain/memory-engine';
 import { Mem0Client } from './domain/mem0-client';
 import { AgentMail } from './sandbox/agentmail';
+import { CloudBrowserSettings } from './sandbox/cloud-browser';
+import { BROWSER_PREFERENCE_KEY, isBrowserPreference } from '@shared/sandbox-agents';
 import { AgentFlowService } from './sandbox/flow-service';
 import { SharedKnowledgeSync } from './sandbox/shared-knowledge';
 import { agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from './sandbox/agent-memory';
@@ -283,8 +285,11 @@ export async function bootstrap(): Promise<AppServices> {
   // Late-bound: the approval broker is created after the orchestrator.
   // eslint-disable-next-line prefer-const
   let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
+  const cloudBrowsers = new CloudBrowserSettings(secretStore, (id) => keychainResolver.resolve(id));
   const sandboxAgents = new SandboxAgentService({
     store, manager: sandboxes, gateway: sandboxGateway,
+    cloudBrowser: (agentId, flowId) => cloudBrowsers.forRun(agentId, flowId),
+    browserPreference: () => { const value = settings.resolve(BROWSER_PREFERENCE_KEY); return isBrowserPreference(value) ? value : 'cloud'; },
     approver: (request, signal) => (sandboxApprover !== undefined ? sandboxApprover(request, signal) : Promise.resolve('decline' as const)),
     autoApprove,
     cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
@@ -793,7 +798,7 @@ export async function bootstrap(): Promise<AppServices> {
     sandboxEndpoint: (agentId) => sandboxes.endpoint(agentId),
   });
   app.once('before-quit', () => { void phone.stop(); });
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,mail:agentMail,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,mail:agentMail,cloudBrowsers,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);

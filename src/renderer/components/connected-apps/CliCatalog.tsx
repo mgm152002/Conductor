@@ -16,16 +16,8 @@ export function CliCatalog(): React.JSX.Element {
   const { entries, loading, error, installCommand, install, rescan } = useCliCatalog();
 
   return (
-    <section className="flex flex-col gap-4" aria-label="Agent CLI catalog">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-semibold text-foreground">
-          Agent CLIs
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Supported agent command-line tools. Install an available CLI after
-          reviewing the exact command, or see which are already on your PATH.
-        </p>
-      </div>
+    <section className="flex flex-col gap-2" aria-label="Agent CLI catalog">
+      <h2 className="group-label mb-0">Agent CLIs</h2>
 
       {error !== null ? (
         <p className="text-xs text-destructive-foreground" role="alert">
@@ -42,9 +34,9 @@ export function CliCatalog(): React.JSX.Element {
           No agent CLIs are available yet.
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="group-card">
           {entries.map((entry) => (
-            <li key={entry.id} className="h-full">
+            <li key={entry.id} className="border-b border-border last:border-b-0">
               <CatalogEntryCard
                 entry={entry}
                 installCommand={installCommand}

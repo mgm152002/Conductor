@@ -232,7 +232,6 @@ export function FolderConnectors(): React.JSX.Element {
       <header className="flex items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><DatabaseIcon size={15} className="text-muted-foreground" />Sources</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Indexed locally for task context.</p>
         </div>
         <div className="flex gap-1.5">
           <Button size="sm" variant="primary" onClick={() => { setAdding(true); }}><PlusIcon size={13} />Folder</Button>
@@ -241,7 +240,6 @@ export function FolderConnectors(): React.JSX.Element {
       <div className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
         <div>
           <p className="text-xs font-medium text-foreground">Keep sources in sync</p>
-          <p className="text-2xs text-muted-foreground">Off: only “Sync now” updates the index.</p>
         </div>
         <Switch label="Keep sources in sync" checked={settings?.syncEnabled === true} disabled={settings === null} onChange={(value) => { void setAutoSync(value); }} />
       </div>

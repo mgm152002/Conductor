@@ -3,137 +3,98 @@
 /* Dark mode follows the `dark` class set by useSystemAppearance (macOS). */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens — "Score".
-   Conductor directs several agents at once, so the interface is laid out
-   like a concert hall rather than a ledger: one dark bar across the top
-   for every destination, and the whole window below it as the stage —
-   a board of threads, or the one thread you opened. Surfaces are cool graphite and
-   porcelain with a faint aubergine cast; one orchid accent marks the single
-   primary action, the current selection and anything that is live.
-   Depth comes from stacked surfaces and hairlines, never offset shadows.
-   Components reference these through the semantic utilities declared in
-   @theme inline (bg-background, text-muted-foreground, border-border, …). */
+/* Design tokens.
+   Neutral greys with one blue accent, modelled on t3code: a quiet sidebar,
+   a near-white (or black) canvas, hairline borders, and colour kept for the
+   one primary action, the selection and live state. Components use the
+   semantic utilities declared in @theme inline (bg-background, border-border…). */
 :root {
-  --background: #f5f4f8;
-  --foreground: #1a1822;
+  --background: #fcfcfd;
+  --foreground: #18181b;
   --card: #ffffff;
   --surface-raised: #ffffff;
-  --muted: #eceaf2;
-  --muted-foreground: #656175;
-  --accent: #ebe9f1;
-  --border: rgb(26 24 34 / 10%);
-  --border-strong: rgb(26 24 34 / 19%);
-  --input: rgb(26 24 34 / 17%);
-  --primary: #ae1f7b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --input: #d4d4d8;
+  --primary: oklch(0.488 0.217 264);
   --primary-foreground: #ffffff;
-  --ring: #ae1f7b;
-  --message: #e8e5f0;
-  --message-foreground: #1a1822;
+  --ring: oklch(0.488 0.217 264);
+  --message: #f4f4f5;
+  --message-foreground: #18181b;
   --destructive: var(--color-red-600);
   --destructive-foreground: var(--color-red-700);
-  --success: #1c7a4d;
-  --warning: #96640a;
-  --info: #3050c8;
-  --rail: #e4e1ec;
-  --sidebar: #eeecf4;
-  --sidebar-foreground: #1a1822;
-  --sidebar-muted-foreground: #656175;
-  --sidebar-border: rgb(26 24 34 / 9%);
-  --sidebar-row-hover: rgb(26 24 34 / 5%);
-  --sidebar-row-active: #ffffff;
-  --code: #efedf5;
-  --scrollbar-thumb: rgb(26 24 34 / 20%);
-  --scrollbar-thumb-hover: rgb(26 24 34 / 34%);
-  --shadow-composer-color: rgb(26 24 34 / 22%);
-  /* Kept for older call sites; nothing draws a hard offset shadow now. */
+  --success: var(--color-emerald-600);
+  --warning: var(--color-amber-600);
+  --info: var(--color-blue-600);
+  --rail: #fafafa;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #18181b;
+  --sidebar-muted-foreground: #71717a;
+  --sidebar-border: #e4e4e7;
+  --sidebar-row-hover: #f0f0f2;
+  --sidebar-row-active: #e9e9ec;
+  --code: #f4f4f5;
+  --scrollbar-thumb: rgb(0 0 0 / 14%);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 26%);
+  --shadow-composer-color: rgb(0 0 0 / 10%);
   --shadow-hard-color: transparent;
-  --shadow-pop: 0 1px 2px rgb(26 24 34 / 6%), 0 12px 32px -8px rgb(26 24 34 / 22%);
-  --shadow-lift: 0 1px 2px rgb(26 24 34 / 7%);
-  --chat-max: 48rem;
-  --topbar-height: 48px;
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 5%), 0 10px 30px -10px rgb(0 0 0 / 18%);
+  --shadow-lift: none;
+  --chat-max: 46rem;
+  --topbar-height: 44px;
   --bar-height: 44px;
+  --header-height: 44px;
 }
 
 .dark {
-  --background: #121117;
-  --foreground: #edebf3;
-  --card: #1a1920;
-  --surface-raised: #23212b;
-  --muted: oklch(1 0 0 / 5%);
-  --muted-foreground: #9d99ac;
-  --accent: oklch(1 0 0 / 7%);
-  --border: oklch(1 0 0 / 9%);
-  --border-strong: oklch(1 0 0 / 18%);
-  --input: oklch(1 0 0 / 14%);
-  --primary: #f27ccf;
-  --primary-foreground: #2b0a22;
-  --ring: #f27ccf;
-  --message: #2a2834;
-  --message-foreground: #edebf3;
-  --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
+  --background: #000000;
+  --foreground: #f1f3f7;
+  --card: #0b0b0c;
+  --surface-raised: #141416;
+  --muted: rgb(255 255 255 / 4%);
+  --muted-foreground: #a1a1aa;
+  --accent: rgb(255 255 255 / 6%);
+  --border: rgb(255 255 255 / 8%);
+  --border-strong: rgb(255 255 255 / 14%);
+  --input: rgb(255 255 255 / 13%);
+  --primary: oklch(0.6 0.2 264);
+  --primary-foreground: #ffffff;
+  --ring: oklch(0.6 0.2 264);
+  --message: #18181b;
+  --message-foreground: #f1f3f7;
+  --destructive: var(--color-red-500);
   --destructive-foreground: var(--color-red-400);
   --success: var(--color-emerald-400);
-  --warning: var(--color-amber-300);
-  --info: #9db2ff;
-  --rail: #0c0b10;
-  --sidebar: #16151c;
-  --sidebar-foreground: #edebf3;
-  --sidebar-muted-foreground: #918da1;
-  --sidebar-border: oklch(1 0 0 / 7%);
-  --sidebar-row-hover: oklch(1 0 0 / 5%);
-  --sidebar-row-active: oklch(1 0 0 / 9%);
-  --code: oklch(1 0 0 / 4%);
-  --scrollbar-thumb: rgb(255 255 255 / 12%);
-  --scrollbar-thumb-hover: rgb(255 255 255 / 22%);
+  --warning: var(--color-amber-400);
+  --info: var(--color-blue-400);
+  --rail: #0a0a0a;
+  --sidebar: #0a0a0a;
+  --sidebar-foreground: #f1f3f7;
+  --sidebar-muted-foreground: #8e8e96;
+  --sidebar-border: rgb(255 255 255 / 7%);
+  --sidebar-row-hover: rgb(255 255 255 / 5%);
+  --sidebar-row-active: rgb(255 255 255 / 9%);
+  --code: rgb(255 255 255 / 4%);
+  --scrollbar-thumb: rgb(255 255 255 / 14%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 26%);
   --shadow-composer-color: rgb(0 0 0 / 70%);
-  --shadow-pop: 0 0 0 1px oklch(1 0 0 / 6%), 0 16px 40px -8px rgb(0 0 0 / 70%);
-  --shadow-lift: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-pop: 0 0 0 1px rgb(255 255 255 / 7%), 0 16px 40px -12px rgb(0 0 0 / 80%);
+  --shadow-lift: none;
 }
 
-/* Accent themes, chosen in Settings > Appearance and persisted on this
-   machine. Only the accent (primary action, selection, focus ring, live
-   marks) changes; surfaces and ink stay put so every theme keeps the same
-   contrast relationships. `orchid` is the default and needs no overrides. */
-:root[data-accent='cobalt'] {
-  --primary: #2f55d4;
-  --ring: #2f55d4;
-  --primary-foreground: #ffffff;
-}
-:root.dark[data-accent='cobalt'] {
-  --primary: #8eaaff;
-  --ring: #8eaaff;
-  --primary-foreground: #0d1638;
-}
-:root[data-accent='pine'] {
-  --primary: #17754a;
-  --ring: #17754a;
-  --primary-foreground: #ffffff;
-}
-:root.dark[data-accent='pine'] {
-  --primary: #5fcf95;
-  --ring: #5fcf95;
-  --primary-foreground: #08241a;
-}
-:root[data-accent='marigold'] {
-  --primary: #96650a;
-  --ring: #96650a;
-  --primary-foreground: #ffffff;
-}
-:root.dark[data-accent='marigold'] {
-  --primary: #e6b450;
-  --ring: #e6b450;
-  --primary-foreground: #261b04;
-}
-:root[data-accent='ember'] {
-  --primary: #c2410c;
-  --ring: #c2410c;
-  --primary-foreground: #ffffff;
-}
-:root.dark[data-accent='ember'] {
-  --primary: #ff9466;
-  --ring: #ff9466;
-  --primary-foreground: #2c1004;
-}
+/* Accent themes (Settings > Appearance). Only the accent changes. The
+   default (cobalt) is the base above. */
+:root[data-accent='orchid'] { --primary: #ae1f7b; --ring: #ae1f7b; --primary-foreground: #ffffff; }
+:root.dark[data-accent='orchid'] { --primary: #e46cc0; --ring: #e46cc0; --primary-foreground: #2b0a22; }
+:root[data-accent='pine'] { --primary: #17754a; --ring: #17754a; --primary-foreground: #ffffff; }
+:root.dark[data-accent='pine'] { --primary: #4fbf86; --ring: #4fbf86; --primary-foreground: #04170e; }
+:root[data-accent='marigold'] { --primary: #96650a; --ring: #96650a; --primary-foreground: #ffffff; }
+:root.dark[data-accent='marigold'] { --primary: #e0ad48; --ring: #e0ad48; --primary-foreground: #261b04; }
+:root[data-accent='ember'] { --primary: #c2410c; --ring: #c2410c; --primary-foreground: #ffffff; }
+:root.dark[data-accent='ember'] { --primary: #f5865a; --ring: #f5865a; --primary-foreground: #2c1004; }
 
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
@@ -148,13 +109,10 @@
   --radius-4xl: 1.5rem;
 }
 
-/* Display voice: the system face on its expanded width axis (SF Pro
-   Expanded on macOS). Wide, tight and heavy, like the title line of a
-   score — and still a system font, so it renders identically offline. */
+/* Titles use the system face; kept as a utility so call sites stay put. */
 @utility font-display {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-stretch: 122%;
-  letter-spacing: -0.015em;
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
 }
 
 @theme inline {
@@ -226,14 +184,14 @@ body {
 @layer components {
   .group-label {
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--muted-foreground);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.375rem;
   }
   .group-card {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 0.875rem;
+    border-radius: 0.625rem;
     overflow: hidden;
   }
   /* Conversation bars (thread environment, pinned plan, diagnostics): one
@@ -241,15 +199,14 @@ body {
   .bar-card {
     background: var(--surface-raised);
     border: 1px solid var(--border);
-    border-radius: 0.875rem;
-    box-shadow: var(--shadow-lift);
+    border-radius: 0.625rem;
     overflow: hidden;
   }
   .group-row {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.8rem 1rem;
+    padding: 0.625rem 0.875rem;
   }
   .group-row + .group-row {
     border-top: 1px solid var(--border);
@@ -280,10 +237,10 @@ body {
   .seg-item[data-active='true'] {
     background: var(--surface-raised);
     color: var(--foreground);
-    box-shadow: var(--shadow-lift), 0 0 0 1px var(--border);
+    box-shadow: 0 0 0 1px var(--border);
   }
   .inset-field {
-    background: var(--card);
+    background: transparent;
     border: 1px solid var(--input);
     border-radius: 0.5rem;
     color: var(--foreground);
@@ -293,7 +250,7 @@ body {
   .inset-field:hover { border-color: var(--border-strong); }
   .inset-field:focus-visible {
     border-color: var(--ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 20%, transparent);
   }
   .limit-track {
     position: relative;
@@ -309,6 +266,52 @@ body {
     background: color-mix(in srgb, var(--primary) 30%, transparent);
     border-right: 2px solid var(--primary);
   }
+
+  /* Sidebar navigation rows (t3code style): icon, label, optional count. */
+  .nav-row {
+    display: flex;
+    height: 1.875rem;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.5rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--sidebar-muted-foreground);
+    cursor: pointer;
+    outline: none;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .nav-row:hover { color: var(--sidebar-foreground); background: var(--sidebar-row-hover); }
+  .nav-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .nav-row[data-active='true'], .nav-row[aria-current='page'] { color: var(--sidebar-foreground); background: var(--sidebar-row-active); }
+  .nav-row > svg { flex-shrink: 0; opacity: 0.85; }
+  .side-label {
+    display: flex;
+    height: 1.75rem;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.25rem 0 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--sidebar-muted-foreground);
+  }
+  .side-icon {
+    display: inline-flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    color: var(--sidebar-muted-foreground);
+    cursor: pointer;
+    outline: none;
+  }
+  .side-icon:hover { color: var(--sidebar-foreground); background: var(--sidebar-row-hover); }
+  .side-icon:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+  .side-icon[data-active='true'] { color: var(--sidebar-foreground); background: var(--sidebar-row-active); }
 
   /* Top-bar tabs. Primary tabs (the two working surfaces) carry an icon
      and a filled active state; the rest are plain text tabs. */
@@ -439,6 +442,30 @@ body {
 }
 
 /* macOS hidden-inset title bar: top bars drag the window, controls do not. */
+/* A screen's top bar. When the sidebar is hidden it sits under the macOS
+   traffic lights, so it makes room for them. */
+.window-header {
+  min-height: var(--header-height);
+  -webkit-app-region: drag;
+}
+.window-header :is(button, a, input, select, textarea, [role='button'], [data-no-drag]) {
+  -webkit-app-region: no-drag;
+}
+[data-sidebar='hidden'] .window-header {
+  padding-left: 112px !important;
+}
+/* With the sidebar hidden, keep the top-left corner (traffic lights and the
+   show-sidebar button) out of every header's drag area. */
+[data-sidebar='hidden'] .window-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 112px;
+  height: var(--header-height);
+  -webkit-app-region: no-drag;
+}
+
 .app-drag {
   -webkit-app-region: drag;
   user-select: none;
@@ -504,9 +531,7 @@ body {
     transform: translateY(0);
   }
 }
-.animate-page-in {
-  animation: conductor-page-in 180ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
-}
+.animate-page-in { animation: none; }
 
 @keyframes conductor-pop-in {
   from {
@@ -518,9 +543,7 @@ body {
     transform: scale(1) translateY(0);
   }
 }
-.animate-pop-in {
-  animation: conductor-pop-in 160ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
-}
+.animate-pop-in { animation: conductor-fade 100ms ease-out both; }
 
 @keyframes conductor-slide-in {
   from {
@@ -532,9 +555,7 @@ body {
     transform: translateX(0);
   }
 }
-.animate-slide-in {
-  animation: conductor-slide-in 200ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
-}
+.animate-slide-in { animation: conductor-fade 120ms ease-out both; }
 @keyframes conductor-slide-in-left {
   from {
     opacity: 0;
@@ -545,9 +566,7 @@ body {
     transform: translateX(0);
   }
 }
-.animate-slide-in-left {
-  animation: conductor-slide-in-left 180ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
-}
+.animate-slide-in-left { animation: none; }
 
 /* Cards in a list arrive in a short cascade. The delay is capped by the
    nth-child rules below so a 100-row list never keeps the user waiting. */
@@ -561,14 +580,7 @@ body {
     transform: translateY(0);
   }
 }
-.row-in {
-  animation: conductor-row-in 160ms ease-out both;
-}
-.row-in:nth-child(2) { animation-delay: 25ms; }
-.row-in:nth-child(3) { animation-delay: 50ms; }
-.row-in:nth-child(4) { animation-delay: 75ms; }
-.row-in:nth-child(5) { animation-delay: 100ms; }
-.row-in:nth-child(n + 6) { animation-delay: 125ms; }
+.row-in { animation: none; }
 
 /* ---- Per-screen layouts ---------------------------------------------------
    Each destination has its own job, so each gets its own desk. These rules
@@ -576,29 +588,6 @@ body {
    several of the same components and must not inherit these shapes. */
 
 /* Projects: a pinboard of project cards, not a settings list. */
-[data-screen='projects'] ul:has(> li > button[aria-pressed]) {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
-  gap: 0.75rem;
-  border: none;
-  overflow: visible;
-}
-[data-screen='projects'] ul:has(> li > button[aria-pressed]) > li {
-  border: 1px solid var(--border);
-  border-radius: 0.875rem;
-  background: var(--card);
-  overflow: hidden;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-[data-screen='projects'] ul:has(> li > button[aria-pressed]) > li:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-lift);
-}
-
-[data-screen='projects'] form[aria-label='Create workspace'] {
-  max-width: 38rem;
-}
-
 /* Learning: a control room — configuration on the left, outcomes on the right. */
 @media (min-width: 1024px) {
   [data-screen='learning'] section[aria-label='Learning'] {
@@ -634,7 +623,9 @@ body {
     color: var(--muted-foreground);
     background: none;
   }
-  [data-screen='projects'] ul:has(> li > button[aria-pressed]) > li {
-    transition: none;
-  }
+}
+
+@keyframes conductor-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

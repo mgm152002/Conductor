@@ -63,7 +63,7 @@ export function WorkspaceManager(): React.JSX.Element {
             No workspaces yet. Create one below to start.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border">
+          <ul className="group-card flex flex-col divide-y divide-border">
             {workspaces.map((workspace) => {
               const isActive = workspace.id === activeWorkspaceId;
               return (
@@ -78,14 +78,14 @@ export function WorkspaceManager(): React.JSX.Element {
                     aria-pressed={isActive}
                     title={isActive ? 'Active project' : 'Make this the active project'}
                     className={cn(
-                      'flex w-full min-w-0 cursor-pointer items-center gap-3 px-3.5 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
-                      isActive ? 'bg-primary/7' : 'hover:bg-accent',
+                      'flex w-full min-w-0 cursor-pointer items-center gap-3 px-3.5 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                      isActive ? 'bg-accent' : 'hover:bg-accent',
                     )}
                   >
-                    <EntityIcon icon={workspace.icon ?? null} name={workspace.name} kind="project" size={28} active={isActive} />
+                    <EntityIcon icon={workspace.icon ?? null} name={workspace.name} kind="project" size={22} active={isActive} />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-[13px] font-semibold text-foreground">{workspace.name}</span>
+                        <span className="truncate text-[13px] font-medium text-foreground">{workspace.name}</span>
                         {isActive ? (
                           <span className="shrink-0 rounded-full bg-success/12 px-1.5 py-px text-3xs font-medium text-success">
                             Active
@@ -97,7 +97,7 @@ export function WorkspaceManager(): React.JSX.Element {
                       </span>
                     </span>
                   </button>
-                  <span className="absolute top-2 right-2 flex items-center gap-0.5 opacity-60 transition-opacity group-focus-within/project:opacity-100 group-hover/project:opacity-100">
+                  <span className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/project:opacity-100 group-hover/project:opacity-100">
                     <Button variant="ghost" size="icon-sm" title="Change icon" aria-label={`Icon for ${workspace.name}`} onClick={() => { setIconProject(workspace); }}>
                       <ImageIcon size={13} />
                     </Button>
@@ -113,13 +113,13 @@ export function WorkspaceManager(): React.JSX.Element {
       </div>
 
       <form
-        className="flex flex-col gap-3 rounded-xl border border-dashed border-border-strong p-3.5"
+        className="flex flex-col gap-2"
         onSubmit={(event) => {
           void handleCreate(event);
         }}
         aria-label="Create workspace"
       >
-        <p className="text-[13px] font-semibold text-foreground">Add a project</p>
+        <p className="group-label mb-0">Add a project</p>
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
           <div className="flex min-w-0 flex-col gap-1">
             <label

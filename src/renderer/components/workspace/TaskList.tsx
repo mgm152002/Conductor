@@ -138,7 +138,6 @@ export function TaskList({ history = false }: { history?: boolean }): React.JSX.
           );
         })}
       </ul>
-      {history && tasks.length >= 500 ? <p className="text-xs text-muted-foreground">Showing up to 500 recent tasks in this workspace.</p> : null}
     </section>
   );
 }

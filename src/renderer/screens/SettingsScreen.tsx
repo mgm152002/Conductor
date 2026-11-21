@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ExecutionSettings } from '../components/settings/ExecutionSettings';
 import { IntegrationSettings } from '../components/settings/IntegrationSettings';
 import { AgentModels } from '../components/settings/AgentModels';
+import { BrowserSettings } from '../components/settings/BrowserSettings';
 import { GitHubSettings } from '../components/settings/GitHubSettings';
 import { ScreenScaffold } from './ScreenScaffold';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
@@ -19,6 +20,7 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'execution', label: 'Execution & data' },
   { id: 'agent-models', label: 'Agent models' },
+  { id: 'browser', label: 'Browser' },
   { id: 'projects', label: 'Projects' },
   { id: 'github', label: 'GitHub' },
   { id: 'integrations', label: 'Integrations' },
@@ -95,7 +97,6 @@ export function SettingsScreen(): React.JSX.Element {
             <div className="group-row">
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-foreground">System appearance</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Follows macOS automatically.</p>
               </div>
               <span className="seg-control">
                 <span className="seg-item" data-active="true">{appearance === 'dark' ? 'Dark' : 'Light'}</span>
@@ -104,7 +105,6 @@ export function SettingsScreen(): React.JSX.Element {
             <div className="group-row">
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-foreground">Accent colour</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Buttons, selection, and focus. Saved on this Mac.</p>
               </div>
               <div className="flex shrink-0 items-center gap-2" role="radiogroup" aria-label="Accent colour">
                 {ACCENTS.map((option) => (
@@ -131,6 +131,9 @@ export function SettingsScreen(): React.JSX.Element {
           </SettingGroup>
           <SettingGroup id="agent-models">
             <AgentModels />
+          </SettingGroup>
+          <SettingGroup id="browser" padded={false}>
+            <BrowserSettings />
           </SettingGroup>
           <SettingGroup id="projects">
             <WorkspaceManager />

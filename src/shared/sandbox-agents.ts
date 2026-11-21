@@ -148,3 +148,13 @@ export const SANDBOX_ONLY_NOTICE = 'This agent works only inside its sandbox. Yo
   + `use the "${SANDBOX_MCP_KEY}" MCP tools (browser, terminal, files) instead, and do not retry the local tool.`;
 
 export const SANDBOX_AGENT_COLORS = ['#c9379a', '#4a6fe8', '#2a9763', '#c58c1c', '#e0602c', '#7c5ce0', '#1f9bb0'] as const;
+
+/**
+ * Which browser a run uses when its agent or flow has a cloud browser:
+ *  - cloud: cloud browser only, and no sandbox is started at all.
+ *  - both: the sandbox (terminal, files, its browser) plus the cloud browser, used first.
+ *  - sandbox: only the sandbox; the cloud browser is ignored.
+ */
+export type BrowserPreference = 'cloud' | 'both' | 'sandbox';
+export const BROWSER_PREFERENCE_KEY = 'sandbox.browserPreference';
+export const isBrowserPreference = (value: unknown): value is BrowserPreference => value === 'cloud' || value === 'both' || value === 'sandbox';

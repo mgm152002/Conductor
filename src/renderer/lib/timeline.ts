@@ -611,7 +611,7 @@ function workEntryFor(itemType: string | undefined, item: Json, completed: boole
     case 'mcp_tool_call': {
       const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
       const output = str(item['output']);
-      return { ...base, icon: 'tool', label: `Called ${name || 'tool'}`, ...(output !== undefined && output !== '' ? { detail: output } : {}), tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
+      return { ...base, icon: 'tool', label: /^cloud_browser_/.test(str(item['tool']) ?? '') ? `Cloud browser: ${(str(item['tool']) ?? '').slice('cloud_browser_'.length).replace(/_/g, ' ')}` : `Called ${name || 'tool'}`, ...(output !== undefined && output !== '' ? { detail: output } : {}), tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
     }
     case 'image_view': {
       const path = str(item['path']) ?? '';
