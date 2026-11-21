@@ -3,28 +3,37 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../lib/cn';
 import { XIcon } from './icons';
 
-// Shared UI primitives in the Score idiom: soft-cornered controls, hairline
-// borders, the accent reserved for the one primary action, and visible focus
-// rings. Nothing floats on an offset shadow; depth is surface on surface.
+// Shared UI primitives, components/ui:
+// the same button recipes, sizes and states, so every screen gets the same
+// controls without importing its UI kit.
 
-type Variant = 'default' | 'primary' | 'outline' | 'ghost' | 'destructive' | 'destructive-outline';
-type Size = 'xs' | 'sm' | 'md' | 'icon' | 'icon-sm';
+type Variant = 'default' | 'primary' | 'secondary' | 'outline' | 'ghost' | 'ghost-foreground' | 'destructive' | 'destructive-outline';
+type Size = 'xs' | 'sm' | 'md' | 'icon' | 'icon-sm' | 'icon-micro';
+
+const BASE = "[--control-icon-color:currentColor] [&_svg]:-mx-0.5 relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--control-radius)] border font-medium text-sm outline-none transition-[box-shadow,scale,background-color,color] [&:active:not([aria-haspopup])]:scale-[0.97] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--control-radius)-1px)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 aria-disabled:cursor-not-allowed aria-disabled:opacity-64 [&_svg:not([class*='text-'])]:text-[var(--control-icon-color)] [&_svg]:pointer-events-none [&_svg]:shrink-0";
+
+const PRIMARY = 'not-disabled:inset-shadow-[0_1px_--theme(--color-white/16%)] border-primary bg-primary text-primary-foreground shadow-primary/24 shadow-xs active:inset-shadow-[0_1px_--theme(--color-black/8%)] disabled:shadow-none active:shadow-none hover:bg-primary/90';
 
 const VARIANTS: Record<Variant, string> = {
-  default: 'bg-foreground text-background hover:opacity-90',
-  primary: 'bg-primary text-primary-foreground hover:brightness-110',
-  outline: 'border border-border bg-transparent text-foreground hover:bg-accent',
-  ghost: 'bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
-  destructive: 'bg-destructive text-white hover:opacity-90',
-  'destructive-outline': 'border border-destructive/30 text-destructive-foreground hover:bg-destructive/10',
+  // "default" and "primary" share the one solid action colour.
+  default: PRIMARY,
+  primary: PRIMARY,
+  secondary: 'border-transparent bg-secondary text-foreground hover:bg-secondary/90 active:bg-secondary/80',
+  outline: "[--control-icon-color:var(--muted-foreground)] border-input bg-popover not-dark:bg-clip-padding text-foreground shadow-xs/5 not-disabled:not-active:before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-input/32 dark:not-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-disabled:not-active:before:shadow-[0_-1px_--theme(--color-white/6%)] disabled:shadow-none active:shadow-none hover:bg-accent/50 dark:hover:bg-input/64",
+  // ghost: quiet until hovered.
+  ghost: 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+  'ghost-foreground': '[--control-icon-color:var(--muted-foreground)] border-transparent text-foreground hover:bg-accent',
+  destructive: 'not-disabled:inset-shadow-[0_1px_--theme(--color-white/16%)] border-destructive bg-destructive text-white shadow-destructive/24 shadow-xs disabled:shadow-none active:shadow-none hover:bg-destructive/90',
+  'destructive-outline': 'border-input bg-popover not-dark:bg-clip-padding text-destructive-foreground shadow-xs/5 dark:bg-input/32 disabled:shadow-none active:shadow-none hover:border-destructive/32 hover:bg-destructive/4',
 };
 
 const SIZES: Record<Size, string> = {
-  xs: 'h-6 gap-1 rounded-md px-2 text-2xs',
-  sm: 'h-7 gap-1.5 rounded-lg px-2.5 text-xs',
-  md: 'h-8 gap-2 rounded-lg px-3 text-[13px]',
-  icon: 'size-8 rounded-lg',
-  'icon-sm': 'size-6 rounded-md',
+  xs: "h-6 gap-1 px-[calc(--spacing(2)-1px)] text-xs [&_svg:not([class*='size-'])]:size-3.5",
+  sm: "h-7 gap-1.5 px-[calc(--spacing(2.5)-1px)] [&_svg:not([class*='size-'])]:size-4",
+  md: "h-8 px-[calc(--spacing(3)-1px)] [&_svg:not([class*='size-'])]:size-4",
+  icon: "size-8 [&_svg:not([class*='size-'])]:size-4",
+  'icon-sm': "size-6 [&_svg:not([class*='size-'])]:size-3.5",
+  'icon-micro': "size-5 rounded-sm p-0 before:rounded-[calc(var(--radius-sm)-1px)] [&_svg:not([class*='size-'])]:size-3",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -36,37 +45,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   { variant = 'outline', size = 'sm', className, type = 'button', ...props },
   ref,
 ) {
-  return (
-    <button
-      ref={ref}
-      type={type}
-      className={cn(
-        'inline-flex shrink-0 cursor-pointer items-center justify-center font-medium whitespace-nowrap transition-[color,background-color,border-color,filter] duration-100',
-        'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
-        'disabled:pointer-events-none disabled:opacity-45',
-        VARIANTS[variant],
-        SIZES[size],
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <button ref={ref} type={type} data-slot="button" className={cn(BASE, VARIANTS[variant], SIZES[size], className)} {...props} />;
 });
 
 export function Badge({ children, className, tone = 'neutral' }: { children: ReactNode; className?: string; tone?: 'neutral' | 'success' | 'warning' | 'destructive' | 'info' | 'primary' }): React.JSX.Element {
   const tones = {
-    neutral: 'border-border text-muted-foreground',
-    success: 'border-success/25 bg-success/8 text-success',
-    warning: 'border-warning/25 bg-warning/8 text-warning',
-    destructive: 'border-destructive/25 bg-destructive/8 text-destructive-foreground',
-    info: 'border-info/25 bg-info/8 text-info',
-    primary: 'border-primary/25 bg-primary/10 text-primary',
+    neutral: 'border-input bg-background text-foreground dark:bg-input/32',
+    success: 'bg-success/8 text-success dark:bg-success/16',
+    warning: 'bg-warning/8 text-warning dark:bg-warning/16',
+    destructive: 'bg-destructive/8 text-destructive-foreground dark:bg-destructive/16',
+    info: 'bg-info/8 text-info dark:bg-info/16',
+    primary: 'bg-primary/10 text-primary dark:bg-primary/16',
   } as const;
-  return <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-3xs font-medium whitespace-nowrap', tones[tone], className)}>{children}</span>;
+  return <span data-slot="badge" className={cn("relative inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-sm border border-transparent px-[calc(--spacing(1)-1px)] text-xs font-medium [&_svg:not([class*='size-'])]:size-3 [&_svg]:shrink-0", tones[tone], className)}>{children}</span>;
 }
 
 export function Kbd({ children }: { children: ReactNode }): React.JSX.Element {
-  return <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-border px-1 font-sans text-3xs text-muted-foreground">{children}</kbd>;
+  return <kbd data-slot="kbd" className="pointer-events-none inline-flex h-5 min-w-5 select-none items-center justify-center gap-1 rounded bg-foreground/[0.07] px-1 font-sans text-xs font-medium text-muted-foreground">{children}</kbd>;
 }
 
 export function Alert({ children, tone = 'destructive', action }: { children: ReactNode; tone?: 'destructive' | 'warning' | 'info'; action?: ReactNode }): React.JSX.Element {
@@ -161,10 +156,11 @@ export function Dialog({ open, onClose, title, description, children, footer, wi
   return typeof document === 'undefined' ? dialog : createPortal(dialog, document.body);
 }
 
-export const inputClassName = 'inset-field h-8 w-full px-2.5 text-sm placeholder:text-muted-foreground/70 disabled:opacity-50';
-export const textareaClassName = 'inset-field w-full px-2.5 py-2 text-sm placeholder:text-muted-foreground/70 disabled:opacity-50';
+export const inputClassName = 'inset-field h-8 w-full px-[calc(--spacing(3)-1px)] text-sm disabled:opacity-64';
+export const textareaClassName = 'inset-field w-full px-[calc(--spacing(3)-1px)] py-2 text-sm disabled:opacity-64';
 
 export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }): React.JSX.Element {
+  // Switch: a 16px thumb on a pill that takes the action colour when on.
   return (
     <button
       type="button"
@@ -172,14 +168,18 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
+      data-slot="switch"
       onClick={() => { onChange(!checked); }}
       className={cn(
-        'relative inline-flex h-[22px] w-[38px] shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-45',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        'inline-flex h-[calc(var(--thumb-size)+2px)] w-[calc(var(--thumb-size)*2-2px)] shrink-0 cursor-pointer items-center rounded-full p-[2px] outline-none transition-[background-color,box-shadow] duration-200 [--thumb-size:--spacing(4)]',
+        'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-64',
         checked ? 'bg-primary' : 'bg-input',
       )}
     >
-      <span className={cn('inline-block size-[18px] rounded-full bg-white shadow transition-transform duration-200 ease-drawer', checked ? 'translate-x-[18px]' : 'translate-x-0.5')} />
+      <span className={cn(
+        'pointer-events-none block size-[calc(var(--thumb-size)-2px)] shrink-0 rounded-(--thumb-size) bg-background shadow-sm/5 [transition:translate_.15s]',
+        checked ? 'translate-x-[calc(var(--thumb-size)-4px)]' : 'dark:bg-muted-foreground',
+      )} />
     </button>
   );
 }

@@ -66,7 +66,7 @@ describe('pinned plan dock', () => {
     expect(html).toContain('Pinned plan tasks');
     expect(html).toContain('Notes experience');
     expect(html).toContain('1/2 done');
-    expect(html).toContain('Click to view tasks and status');
+    expect(html).not.toContain('Click to view');
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('Use Mem0 for semantic memory.');
   });

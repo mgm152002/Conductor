@@ -46,7 +46,7 @@ export function ChatHeader({ project, task, title }: { project: Workspace | unde
   const [confirmResume, setConfirmResume] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = task !== null ? threadStatus(task, pending.some((request) => request.taskId === task.id)) : null;
-  // The thread's T3-style tier, so a finished thread can be marked settled (or
+  // The thread's tier, so a finished thread can be marked settled (or
   // snoozed / woken) from the thread itself, not only from the sidebar.
   const tierInfo = ((): ReturnType<typeof classifyThreadTier> | null => {
     if (task === null) return null;

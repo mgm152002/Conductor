@@ -62,13 +62,13 @@ export function UsageBarGroup({
       <header className="flex items-baseline gap-2">
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
         {description !== undefined ? (
-          <span className="truncate text-3xs text-muted-foreground/80">{description}</span>
+          <span className="truncate text-2xs text-muted-foreground/80">{description}</span>
         ) : null}
       </header>
 
       <div>
         {rows.length === 0 || total <= 0 ? (
-          <p className="py-3 text-2xs text-muted-foreground">{emptyLabel}</p>
+          <p className="py-3 text-xs text-muted-foreground">{emptyLabel}</p>
         ) : (
           rows.map((row, index) => {
             const percent = shareOf(row.value, total);
@@ -82,9 +82,9 @@ export function UsageBarGroup({
                   <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{row.label}</span>
                   <span className="text-xs font-semibold text-foreground tabular-nums">{row.display}</span>
                   {row.cost !== undefined ? (
-                    <span className="text-3xs text-muted-foreground tabular-nums">{row.cost}</span>
+                    <span className="text-2xs text-muted-foreground tabular-nums">{row.cost}</span>
                   ) : null}
-                  <span className="w-8 shrink-0 text-right text-3xs text-muted-foreground tabular-nums">{percent}%</span>
+                  <span className="w-8 shrink-0 text-right text-2xs text-muted-foreground tabular-nums">{percent}%</span>
                 </div>
                 <div
                   role="progressbar"
@@ -102,7 +102,7 @@ export function UsageBarGroup({
                   />
                 </div>
                 {row.detail !== undefined ? (
-                  <p className="truncate text-3xs text-muted-foreground">{row.detail}</p>
+                  <p className="truncate text-2xs text-muted-foreground">{row.detail}</p>
                 ) : null}
               </div>
             );
@@ -127,8 +127,8 @@ export function UsageTokenMix({ totals }: { totals: UsageRow }): React.JSX.Eleme
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
-        <h3 className="text-2xs font-medium text-muted-foreground">Token mix</h3>
-        <span className="ml-auto text-3xs text-muted-foreground tabular-nums">
+        <h3 className="text-xs font-medium text-muted-foreground">Token mix</h3>
+        <span className="ml-auto text-2xs text-muted-foreground tabular-nums">
           {compactNumber(totals.inputTokens)} in · {compactNumber(totals.outputTokens)} out
         </span>
       </div>
@@ -136,7 +136,7 @@ export function UsageTokenMix({ totals }: { totals: UsageRow }): React.JSX.Eleme
         <div className="h-full bg-primary/80" style={{ width: `${inputPercent}%` }} />
         <div className="h-full bg-info/70" style={{ width: `${outputPercent}%` }} />
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-3xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
         <span className="flex items-center gap-1">
           <span className="size-1.5 rounded-full bg-primary/80" aria-hidden="true" />
           Input {compactNumber(totals.inputTokens)}

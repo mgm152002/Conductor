@@ -36,7 +36,7 @@ function Field({ title, hint, children }: { title: string; hint?: string; childr
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className={label}>{title}</span>
       {children}
-      {hint !== undefined ? <span className="text-2xs text-muted-foreground/80">{hint}</span> : null}
+      {hint !== undefined ? <span className="text-xs text-muted-foreground/80">{hint}</span> : null}
     </label>
   );
 }
@@ -105,7 +105,7 @@ function CreateDialog({ view, open, busy, onClose, onCreate }: {
           <div className="flex items-center gap-2">
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><PlusIcon size={15} /></span>
             <div>
-              <h2 className="text-sm font-semibold">New {view === 'memory' ? 'memory' : 'context item'}</h2>
+              <h2 className="text-base font-semibold">New {view === 'memory' ? 'memory' : 'context item'}</h2>
             </div>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><XIcon size={14} /></Button>
@@ -122,7 +122,7 @@ function CreateDialog({ view, open, busy, onClose, onCreate }: {
             <Field title="Classification"><Select title="Classification" value={veracity} onChange={(v) => setVeracity(v as Veracity)}>{trust.map((v) => <option key={v} value={v}>{v.replaceAll('_', ' ')}</option>)}</Select></Field>
             <Field title="Confidence" hint="0 to 1"><input className={inputClassName} type="number" min="0" max="1" step="0.05" required value={confidence} onChange={(e) => setConfidence(e.target.value)} /></Field>
           </div>
-          <p className="rounded-lg bg-muted/40 px-3 py-2 text-2xs text-muted-foreground">Selecting <strong className="font-medium text-foreground">observed fact</strong> explicitly records your statement; other classifications keep their uncertainty.</p>
+          <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Selecting <strong className="font-medium text-foreground">observed fact</strong> explicitly records your statement; other classifications keep their uncertainty.</p>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -151,7 +151,7 @@ function Inspector({ entry, inspection, busy, onCorrect, onDelete, onClose }: {
     ...('supersededBy' in entry && entry.supersededBy ? [{ label: 'Replaced by', value: <span className="break-all">{entry.supersededBy}</span> }] : []),
   ];
   return (
-    <section className="flex max-h-[calc(100vh-13rem)] flex-col overflow-hidden rounded-xl border border-border bg-card xl:sticky xl:top-0" aria-label="Knowledge details">
+    <section className="flex max-h-[calc(100vh-13rem)] flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40 shadow-xs/5 xl:sticky xl:top-0" aria-label="Knowledge details">
       <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold"><EyeIcon size={15} className="text-muted-foreground" />Inspect &amp; correct</div>
         <Button variant="ghost" size="icon-sm" onClick={onClose} disabled={busy} aria-label="Close details"><XIcon size={14} /></Button>
@@ -160,7 +160,7 @@ function Inspector({ entry, inspection, busy, onCorrect, onDelete, onClose }: {
         <div className="flex flex-wrap items-center gap-1.5"><TrustBadge veracity={entry.veracity} />{'layer' in entry ? <Badge tone="primary"><LayersIcon size={10} />{entry.layer}</Badge> : null}</div>
         <dl className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-2.5 text-xs sm:grid-cols-2 [&_dd]:break-words [&_dd]:[overflow-wrap:anywhere]">
           {facts.map((f) => <div key={f.label}><dt className="text-muted-foreground">{f.label}</dt><dd className="mt-0.5 text-foreground">{f.value}</dd></div>)}
-          <div className="sm:col-span-2"><dt className="text-muted-foreground">ID</dt><dd className="mt-0.5 break-all font-mono text-2xs text-foreground/80">{entry.id}</dd></div>
+          <div className="sm:col-span-2"><dt className="text-muted-foreground">ID</dt><dd className="mt-0.5 break-all font-mono text-xs text-foreground/80">{entry.id}</dd></div>
         </dl>
         <div>
           <h3 className="mb-1.5 text-xs font-semibold">Provenance</h3>
@@ -218,7 +218,7 @@ function ResultCard({ entry, active, disabled, onClick }: { entry: Entry; active
         {'layer' in entry ? <Badge tone="primary"><LayersIcon size={10} />{entry.layer}</Badge> : null}
         <Badge>{entry.scope.level}{entry.scope.refId ? `: ${entry.scope.refId.slice(0, 16)}` : ''}</Badge>
         <TrustBadge veracity={entry.veracity} />
-        <span className="ml-auto text-2xs text-muted-foreground tabular-nums">{Math.round(entry.confidence * 100)}%</span>
+        <span className="ml-auto text-xs text-muted-foreground tabular-nums">{Math.round(entry.confidence * 100)}%</span>
       </div>
     </button>
   );
@@ -334,27 +334,15 @@ export function MemoryScreen(): React.JSX.Element {
   );
 
   return (
-    <ScreenScaffold title="Memory" actions={headerActions} screen="memory" layout="dashboard" icon={<BrainIcon size={16} />}>
+    <ScreenScaffold title="Memory" actions={<><div className="seg-control" role="tablist" aria-label="Knowledge category">
+      {(['memory', 'context'] as const).map((value) => (
+        <button key={value} type="button" role="tab" aria-selected={view === value} data-active={view === value} disabled={busy}
+          onClick={() => switchView(value)} className="seg-item focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50">
+          {value === 'memory' ? 'Memories' : 'Context'}
+        </button>
+      ))}
+    </div>{headerActions}</>} screen="memory" layout="dashboard" icon={<BrainIcon size={16} />}>
       <div className="min-w-0 max-w-full space-y-4 text-foreground">
-        {/* Segmented view toggle */}
-        <div className="inline-flex rounded-lg bg-muted/50 p-0.5" role="tablist" aria-label="Knowledge category">
-          {(['memory', 'context'] as const).map((value) => (
-            <button
-              key={value}
-              role="tab"
-              aria-selected={view === value}
-              disabled={busy}
-              onClick={() => switchView(value)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
-                view === value ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {value === 'memory' ? <BrainIcon size={13} /> : <DatabaseIcon size={13} />}
-              {value === 'memory' ? 'Memories' : 'Context'}
-            </button>
-          ))}
-        </div>
 
         {/* Search bar + filter toggle */}
         <form onSubmit={(e) => { e.preventDefault(); setFilters({ ...draft }); setSelected(null); }} className="space-y-3">

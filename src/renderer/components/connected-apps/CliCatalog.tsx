@@ -1,5 +1,6 @@
 import { useCliCatalog } from '../../hooks/useCliCatalog';
 import { CatalogEntryCard } from './CatalogEntryCard';
+import { SettingsSection } from '../settings/SettingsLayout';
 
 // The Connected apps catalog surface (Requirement 4.1, 4.5). On mount the
 // `useCliCatalog` hook loads the last-scanned views then re-derives every entry
@@ -16,8 +17,8 @@ export function CliCatalog(): React.JSX.Element {
   const { entries, loading, error, installCommand, install, rescan } = useCliCatalog();
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Agent CLI catalog">
-      <h2 className="group-label mb-0">Agent CLIs</h2>
+    <SettingsSection title="Agent CLIs" className="[&>div:first-child]:px-3" >
+      <section className="flex flex-col gap-2" aria-label="Agent CLI catalog">
 
       {error !== null ? (
         <p className="text-xs text-destructive-foreground" role="alert">
@@ -34,9 +35,9 @@ export function CliCatalog(): React.JSX.Element {
           No agent CLIs are available yet.
         </p>
       ) : (
-        <ul className="group-card">
+        <ul className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 *:not-first:border-t *:not-first:border-border/50">
           {entries.map((entry) => (
-            <li key={entry.id} className="border-b border-border last:border-b-0">
+            <li key={entry.id}>
               <CatalogEntryCard
                 entry={entry}
                 installCommand={installCommand}
@@ -47,6 +48,7 @@ export function CliCatalog(): React.JSX.Element {
           ))}
         </ul>
       )}
-    </section>
+      </section>
+    </SettingsSection>
   );
 }

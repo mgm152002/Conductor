@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="200" height="200" alt="Neon Infinity Loop Tech Icon" src="https://github.com/user-attachments/assets/ca74df29-6595-4743-a067-ea2af1b2ccf5" />
+<img width="160" height="160" alt="Conductor" src="assets/brand/icon-256.png" />
 
 # Conductor
 
@@ -11,7 +11,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=flat-square)](#requirements)
 [![Version](https://img.shields.io/badge/version-0.5.0-blue?style=flat-square)](package.json)
 
-[Features](#features) • [Getting started](#getting-started) • [Agents and flows](#agents-and-flows) • [How it works](#how-it-works) • [Development](#development) • [Security](#security-model)
+[Website](https://mgm152002.github.io/Conductor/) • [Features](#features) • [Getting started](#getting-started) • [Agents and flows](#agents-and-flows) • [How it works](#how-it-works) • [Development](#development) • [Security](#security-model)
 
 </div>
 

@@ -1,12 +1,11 @@
 import type {
   UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageSummary,
 } from '@shared/usage';
-import { clientLabel, compactNumber, formatCost } from '../../lib/usage-format';
+import { clientLabel, compactNumber } from '../../lib/usage-format';
 import { relativeTime } from '../../lib/time';
 import { TerminalIcon } from '../ui/icons';
 import { BrandMark, agentBrand } from '../ui/BrandMarks';
 import { Alert, EmptyState } from '../ui/primitives';
-import { UsageBarGroup } from './UsageBars';
 import { UsageLimitCard } from './UsageLimitCard';
 
 // The Limits view (Requirements 2.3, 2.4, 4.4). Only windows a CLI actually
@@ -22,7 +21,7 @@ import { UsageLimitCard } from './UsageLimitCard';
 
 function CliIcon({ id }: { id: string }): React.JSX.Element {
   const brand = agentBrand(id);
-  if (brand !== null) return <BrandMark brand={brand} size={14} className="shrink-0 text-foreground/85" />;
+  if (brand !== null) return <BrandMark brand={brand} size={18} className="shrink-0 text-foreground/85" />;
   return <TerminalIcon size={13} className="text-muted-foreground" aria-hidden="true" />;
 }
 
@@ -62,24 +61,9 @@ export function UsageLimitsView({
   // CLIs whose latest probe gave a concrete reason for having no windows.
   const explained = summary.clients.filter((client) => client.limits.length === 0 && client.limitStatus !== undefined);
   const reporting = reportingClients.length;
-  const bars = summary.clients.map((client) => ({
-    key: client.key,
-    label: clientLabel(client),
-    value: client.totalTokens,
-    display: `${compactNumber(client.totalTokens)} tokens`,
-    ...(client.costUsd !== undefined ? { cost: formatCost(client.costUsd) } : {}),
-    detail: `${sessionLabel(client.sessions)} in this range`,
-  }));
 
   return (
-    <section className="flex max-w-3xl flex-col gap-5" aria-label="CLI usage limits">
-      <UsageBarGroup
-        title="Usage by CLI"
-        description="Share of tokens recorded in this range"
-        rows={bars}
-        emptyLabel="No token usage recorded for the selected range."
-      />
-
+    <section className="flex flex-col gap-8" aria-label="CLI usage limits">
       {reporting === 0 ? (
         <Alert tone="info">
           No CLI has reported a quota window yet. Codex reports limits after a Codex session starts;
@@ -90,30 +74,15 @@ export function UsageLimitsView({
       ) : null}
 
       <div className="flex flex-col gap-2">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-sm font-semibold text-foreground">Quota windows</h2>
-          <span className="text-3xs text-muted-foreground">
-            {reporting === 0
-              ? 'Nothing reported yet'
-              : `${reporting} of ${summary.clients.length} CLIs reporting`}
-          </span>
-        </div>
-        <p className="text-3xs text-muted-foreground">
-          Fetched from each CLI when this screen opens and every 5 minutes while it stays open.
-          OpenCode reports Session/Weekly only with an active Go subscription (otherwise just the
-          free-model Daily window, whose percentage OpenCode does not publish); Antigravity
-          reports Weekly only.
-        </p>
-
         {explained.length > 0 ? (
           <ul aria-label="CLIs without limit data" className="group-card flex flex-col">
             {explained.map((client) => (
               <li key={client.key} className="group-row items-start">
                 <span className="mt-0.5"><CliIcon id={client.key} /></span>
                 <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-foreground">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
                     {clientLabel(client)}
-                    <span className={client.limitStatus!.state === 'signed-out' ? 'rounded-full bg-warning/12 px-1.5 py-px text-3xs font-medium text-warning' : 'rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-muted-foreground'}>
+                    <span className={client.limitStatus!.state === 'signed-out' ? 'rounded-full bg-warning/12 px-1.5 py-px text-2xs font-medium text-warning' : 'rounded-full bg-accent px-1.5 py-px text-2xs font-medium text-muted-foreground'}>
                       {client.limitStatus!.state === 'signed-out' ? 'Signed out' : client.limitStatus!.state === 'no-subscription' ? 'No quota plan' : 'No answer'}
                     </span>
                   </p>
@@ -124,7 +93,7 @@ export function UsageLimitsView({
           </ul>
         ) : null}
 
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-8">
           {reportingClients.map((client) => {
             const label = clientLabel(client);
             const daily = findLimits(client.limits, 'daily');
@@ -138,18 +107,18 @@ export function UsageLimitsView({
               <article
                 key={client.key}
                 aria-label={`${label} limits`}
-                className="flex flex-col gap-2"
+                className="flex flex-col gap-3"
               >
                 <header className="flex items-center gap-2">
                   <CliIcon id={client.key} />
-                  <h3 className="truncate text-sm font-medium text-foreground">{label}</h3>
-                  <span className="ml-auto text-3xs text-muted-foreground tabular-nums">
+                  <h3 className="truncate text-base text-foreground">{label}</h3>
+                  <span className="ml-auto text-xs text-muted-foreground tabular-nums">
                     {sessionLabel(client.sessions)} · {compactNumber(client.totalTokens)} tokens
                     {reportedAt !== undefined ? <> · limits {relativeTime(reportedAt, typeof now === 'number' ? now : now.getTime())}</> : null}
                   </span>
                 </header>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-4">
                   {daily.map((limit) => (
                     <UsageLimitCard
                       key={`daily-${limit.label ?? ''}`}

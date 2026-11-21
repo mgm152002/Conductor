@@ -6,13 +6,12 @@ import { CliMcpServers } from '../components/connected-apps/CliMcpServers';
 import { RemoteHosts } from '../components/connected-apps/RemoteHosts';
 import { ScreenScaffold } from './ScreenScaffold';
 import { LayersIcon, PlugIcon } from '../components/ui/icons';
-import { cn } from '../lib/cn';
 
 type ConnectionsTab = 'connections' | 'mcp';
 
 const TABS: { id: ConnectionsTab; label: string; Icon: typeof PlugIcon }[] = [
-  { id: 'connections', label: 'Agents & Sources', Icon: PlugIcon },
-  { id: 'mcp', label: 'MCP Servers', Icon: LayersIcon },
+  { id: 'connections', label: 'Agents & sources', Icon: PlugIcon },
+  { id: 'mcp', label: 'MCP servers', Icon: LayersIcon },
 ];
 
 export function ConnectedAppsScreen(): React.JSX.Element {
@@ -23,10 +22,8 @@ export function ConnectedAppsScreen(): React.JSX.Element {
       screen="connected-apps"
       layout="wide"
       icon={<PlugIcon size={16} />}
-    >
-      <div className="mb-6 flex">
-        <div className="seg-control" role="tablist" aria-label="Connections sections">
-          {TABS.map(({ id, label, Icon }) => (
+      actions={<div className="seg-control" role="tablist" aria-label="Connections sections">
+          {TABS.map(({ id, label }) => (
             <button
               key={id}
               type="button"
@@ -34,13 +31,13 @@ export function ConnectedAppsScreen(): React.JSX.Element {
               aria-selected={tab === id}
               data-active={tab === id}
               onClick={() => { setTab(id); }}
-              className={cn('seg-item h-8 cursor-pointer px-3 text-xs focus-visible:outline-2 focus-visible:outline-ring')}
+              className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
             >
-              <Icon size={14} />{label}
+              {label}
             </button>
           ))}
-        </div>
-      </div>
+        </div>}
+    >
       {tab === 'connections' ? (
         // Single stacked column: panels have very different heights, so a
         // two-column grid leaves a dead empty half under the shorter one.

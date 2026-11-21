@@ -84,7 +84,7 @@ export function TaskList({ history = false }: { history?: boolean }): React.JSX.
   return (
     <section className="flex flex-col gap-3" aria-label={history ? 'Task history' : 'Running tasks'}>
       <header className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">{history ? 'Task history' : 'In progress'} <span className="ml-1 font-normal text-muted-foreground tabular-nums">{tasks.length}</span></h2>
+        <h2 className="text-base font-semibold text-foreground">{history ? 'Task history' : 'In progress'} <span className="ml-1 font-normal text-muted-foreground tabular-nums">{tasks.length}</span></h2>
         <Button size="sm" variant="ghost" onClick={refresh} disabled={loading || workspaceId === null}><RotateIcon size={12} />{loading ? 'Loading…' : 'Refresh'}</Button>
       </header>
       {error !== null ? <Alert>{error}</Alert> : null}

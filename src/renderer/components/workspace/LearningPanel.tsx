@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { SettingsGroup, SettingsRow, SettingsSection } from '../settings/SettingsLayout';
 import { MenuSelect } from '../ui/MenuSelect';
-import { ProviderAvatar, agentBrand, modelBrand } from '../ui/BrandMarks';
+import { BrandMark, ProviderAvatar, agentBrand, modelBrand } from '../ui/BrandMarks';
+import { agentLabel } from '../../lib/usage-format';
 import type { AutoExecuteRule, ImprovementProposal } from '@shared/domain';
 import type { AgentStat } from '@shared/integrations-contract';
 import type { LearningConfig, LearningStatus } from '@shared/learning-contract';
@@ -74,86 +76,93 @@ export function LearningPanel(): React.JSX.Element {
   }
 
   return (
-    <section aria-label="Learning" className="flex flex-col gap-6">
-      {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
-      {notice !== null ? <p role="status" className="text-xs text-muted-foreground">{notice}</p> : null}
+    // Settings shape: titled sections, each a rounded group of rows
+    // with the control on the right.
+    <section aria-label="Learning" className="flex flex-col gap-8">
+      {error !== null ? <p role="alert" className="px-3 text-xs text-destructive-foreground sm:px-4">{error}</p> : null}
+      {notice !== null ? <p role="status" className="px-3 text-xs text-muted-foreground sm:px-4">{notice}</p> : null}
 
-      <div className="flex flex-col gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><BrainIcon size={14} className="text-muted-foreground" />Learning LLM</h2>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-foreground">Approved LLM (agent)</span>
-          <MenuSelect variant="box" label="Approved learning LLM" value={agentId} onChange={(next) => { setAgentId(next); setModel(''); }} options={[
-            { value: '', label: 'Select an agent…' },
-            ...agents.map((a) => ({ value: a.id, label: `${a.name} (${a.id})`, disabled: !a.available, ...(a.available ? {} : { hint: 'Unavailable' }), mark: <ProviderAvatar brand={agentBrand(a.id)} label={a.name} size={13} /> })),
-          ]} />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-foreground">Model</span>
-          <MenuSelect variant="box" searchable label="Learning LLM model" value={model} disabled={agentId === '' || catalog === null} onChange={setModel} options={[
-            { value: '', label: 'Default / Auto', mark: <SparklesIcon size={13} /> },
-            ...(savedModelMissing ? [{ value: model, label: model, hint: 'Saved — not in catalog' }] : []),
-            ...(catalog?.models ?? []).map((m) => ({ value: m.id, label: `${m.label} (${m.id})`, hint: `${m.isDefault ? 'Default · ' : ''}${m.tier}`, mark: <ProviderAvatar brand={modelBrand(m.id)} label={m.label} size={13} /> })),
-          ]} />
-          {agentId !== '' && catalog !== null && catalog.models.length === 0 ? <span className="text-2xs text-muted-foreground">This agent reported no model list; Default / Auto will be used.</span> : null}
-          {agentId !== '' && catalog === null ? <span className="text-2xs text-muted-foreground">Loading models…</span> : null}
-        </label>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="xs" variant="primary" disabled={busy || agentId === ''} onClick={() => { void save({ analyzerAgentId: agentId, analyzerModel: model }); }}>
-            {approvedAgent === agentId && agentId !== '' ? 'Approved' : 'Approve this LLM'}
-          </Button>
-          {approvedAgent !== undefined ? <Badge tone="success">Approved: {approvedAgent}{config?.analyzerModel ? ` · ${config.analyzerModel}` : ''}</Badge> : <Badge tone="warning">No LLM approved — cron will skip</Badge>}
-        </div>
-      </div>
+      <SettingsSection title={<><BrainIcon size={14} className="text-muted-foreground" />Learning LLM</>}
+        action={approvedAgent !== undefined ? <Badge tone="success">Approved: {approvedAgent}{config?.analyzerModel ? ` · ${config.analyzerModel}` : ''}</Badge> : <Badge tone="warning">No LLM approved — cron will skip</Badge>}>
+        <SettingsGroup>
+          <SettingsRow title="Approved LLM" description="The agent that reviews finished tasks and proposes routing changes."
+            control={(
+              <MenuSelect variant="box" label="Approved learning LLM" className="w-full sm:w-64" value={agentId} onChange={(next) => { setAgentId(next); setModel(''); }} options={[
+                { value: '', label: 'Select an agent…' },
+                ...agents.map((a) => ({ value: a.id, label: `${a.name} (${a.id})`, disabled: !a.available, ...(a.available ? {} : { hint: 'Unavailable' }), mark: <ProviderAvatar brand={agentBrand(a.id)} label={a.name} size={13} /> })),
+              ]} />
+            )} />
+          <SettingsRow title="Model"
+            description={agentId !== '' && catalog !== null && catalog.models.length === 0 ? 'This agent reported no model list; Default / Auto will be used.' : agentId !== '' && catalog === null ? 'Loading models…' : 'Default / Auto lets the agent pick.'}
+            control={(
+              <MenuSelect variant="box" searchable label="Learning LLM model" className="w-full sm:w-64" value={model} disabled={agentId === '' || catalog === null} onChange={setModel} options={[
+                { value: '', label: 'Default / Auto', mark: <SparklesIcon size={13} /> },
+                ...(savedModelMissing ? [{ value: model, label: model, hint: 'Saved — not in catalog' }] : []),
+                ...(catalog?.models ?? []).map((m) => ({ value: m.id, label: `${m.label} (${m.id})`, hint: `${m.isDefault ? 'Default · ' : ''}${m.tier}`, mark: <ProviderAvatar brand={modelBrand(m.id)} label={m.label} size={13} /> })),
+              ]} />
+            )} />
+          <SettingsRow title="Approve" description="Only an approved LLM runs; changing the agent or model needs approval again."
+            control={(
+              <Button size="sm" variant="primary" disabled={busy || agentId === ''} onClick={() => { void save({ analyzerAgentId: agentId, analyzerModel: model }); }}>
+                {approvedAgent === agentId && agentId !== '' ? 'Approved' : 'Approve this LLM'}
+              </Button>
+            )} />
+        </SettingsGroup>
+      </SettingsSection>
 
-      <div className="flex flex-col gap-3">
-        <h3 className="text-xs font-semibold text-foreground">Routing approval</h3>
-        <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Routing approval mode">
-          {([['manual', 'Manual approval', 'Each suggested routing waits below for your Approve / Reject.'], ['auto', 'Auto mode', 'Demonstrated routing is approved and applied automatically, then rolled back if results regress.']] as const).map(([mode, label, hint]) => (
-            <label key={mode} className="flex cursor-pointer items-start gap-2 text-xs">
-              <input type="radio" name="learning-mode" checked={(config?.mode ?? 'manual') === mode} onChange={() => { void save({ mode }); }} className="mt-0.5" />
-              <span><span className="font-medium text-foreground">{label}</span><span className="block text-muted-foreground">{hint}</span></span>
-            </label>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          <span className="flex items-center gap-2">
-            <Switch label="Run learning every 5 minutes" checked={config?.enabled ?? true} onChange={(v) => { void save({ enabled: v }); }} />
-            <span className="text-foreground">Run every {Math.round(LEARNING_INTERVAL_MS / 60_000)} minutes</span>
-          </span>
-          <Button size="xs" disabled={busy || status?.running === true} onClick={() => { void act(() => window.conductor.learning.runNow()); }}>{status?.running ? 'Analyzing…' : 'Run now'}</Button>
-        </div>
-        <p className="text-2xs text-muted-foreground">
-          {status?.lastRun ? <>Last run {relativeTime(status.lastRun.finishedAt ?? status.lastRun.startedAt)} · {status.lastRun.status}{status.lastRun.detail ? ` · ${status.lastRun.detail}` : ''}</> : 'No learning run yet.'}
-          {status?.nextRunAt && config?.enabled ? <> · Next run {relativeTime(status.nextRunAt)}</> : null}
-        </p>
-      </div>
+      <SettingsSection title="Routing approval">
+        <SettingsGroup>
+          <div role="radiogroup" aria-label="Routing approval mode" className="flex flex-col *:not-first:border-t *:not-first:border-border/50">
+            {([['manual', 'Manual approval', 'Each suggested routing waits below for your Approve / Reject.'], ['auto', 'Auto mode', 'Demonstrated routing is approved and applied automatically, then rolled back if results regress.']] as const).map(([mode, label, hint]) => (
+              <label key={mode} className="flex cursor-pointer items-start gap-3 px-3 py-3 sm:px-4">
+                <span className="min-w-0 flex-1 space-y-1">
+                  <span className="block text-sm font-medium text-foreground">{label}</span>
+                  <span className="block text-xs text-muted-foreground">{hint}</span>
+                </span>
+                <input type="radio" name="learning-mode" checked={(config?.mode ?? 'manual') === mode} onChange={() => { void save({ mode }); }} className="mt-1 accent-primary" />
+              </label>
+            ))}
+          </div>
+          <SettingsRow title={`Run every ${Math.round(LEARNING_INTERVAL_MS / 60_000)} minutes`}
+            description={<>
+              {status?.lastRun ? <>Last run {relativeTime(status.lastRun.finishedAt ?? status.lastRun.startedAt)} · {status.lastRun.status}{status.lastRun.detail ? ` · ${status.lastRun.detail}` : ''}</> : 'No learning run yet.'}
+              {status?.nextRunAt && config?.enabled ? <> · Next run {relativeTime(status.nextRunAt)}</> : null}
+            </>}
+            control={(
+              <>
+                <Button size="sm" variant="outline" disabled={busy || status?.running === true} onClick={() => { void act(() => window.conductor.learning.runNow()); }}>{status?.running ? 'Analyzing…' : 'Run now'}</Button>
+                <Switch label="Run learning every 5 minutes" checked={config?.enabled ?? true} onChange={(v) => { void save({ enabled: v }); }} />
+              </>
+            )} />
+        </SettingsGroup>
+      </SettingsSection>
 
-      <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold text-foreground">Agent success rate</h3>
-        {stats.length > 0 ? (
-          <table className="w-full text-left text-xs">
-            <thead className="text-3xs tracking-wide text-muted-foreground uppercase"><tr><th className="py-1 font-medium">Agent</th><th className="py-1 font-medium">Tasks</th><th className="py-1 font-medium">Success</th><th className="py-1 font-medium">Avg time</th></tr></thead>
-            <tbody>
-              {stats.map((row) => (
-                <tr key={row.adapterId} className="border-t border-border">
-                  <td className="py-1.5 font-mono">{row.adapterId}</td>
-                  <td className="py-1.5 tabular-nums">{row.stats.sampleSize}</td>
-                  <td className="py-1.5 tabular-nums">{Math.round((1 - row.stats.failureRate) * 100)}%</td>
-                  <td className="py-1.5 tabular-nums">{formatDuration(row.stats.meanDurationMs)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : <p className="text-xs text-muted-foreground">No finished tasks recorded yet.</p>}
-      </div>
+      <SettingsSection title="Agent success rate">
+        <SettingsGroup>
+          {stats.length > 0 ? (
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground"><tr className="border-b border-border/50"><th className="px-3 py-2.5 font-normal sm:px-4">Agent</th><th className="px-3 py-2.5 text-end font-normal">Tasks</th><th className="px-3 py-2.5 text-end font-normal">Success</th><th className="px-3 py-2.5 text-end font-normal sm:px-4">Avg time</th></tr></thead>
+              <tbody>
+                {stats.map((row) => (
+                  <tr key={row.adapterId} className="border-b border-border/50 last:border-0">
+                    <td className="px-3 py-2.5 sm:px-4"><span className="flex items-center gap-2"><BrandMark brand={agentBrand(row.adapterId)} size={16} />{agentLabel(row.adapterId)}</span></td>
+                    <td className="px-3 py-2.5 text-end tabular-nums">{row.stats.sampleSize}</td>
+                    <td className="px-3 py-2.5 text-end tabular-nums">{Math.round((1 - row.stats.failureRate) * 100)}%</td>
+                    <td className="px-3 py-2.5 text-end tabular-nums sm:px-4">{formatDuration(row.stats.meanDurationMs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="px-3 py-3 text-xs text-muted-foreground sm:px-4">No finished tasks recorded yet.</p>}
+        </SettingsGroup>
+      </SettingsSection>
 
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold text-foreground">Routing proposals</h3>
+      <SettingsSection title="Routing proposals"
+        action={(
           <Button size="xs" variant="destructive-outline" disabled={busy || purgeable.length === 0} onClick={() => { setPurging(true); }}>
             Purge old routing approvals{purgeable.length > 0 ? ` (${purgeable.length})` : ''}
           </Button>
-        </div>
+        )}>
         <Dialog
           open={purging}
           onClose={() => { if (!busy) setPurging(false); }}
@@ -167,42 +176,35 @@ export function LearningPanel(): React.JSX.Element {
           )}
         />
         {proposals.length === 0 ? <EmptyState title="No proposals yet" description="A proposal appears when the learning LLM finds a demonstrated improvement (at least 5 comparable prior tasks and a measured winner)." /> : (
-          <ul className="flex flex-col gap-2">
+          <SettingsGroup>
             {proposals.map((proposal) => (
-              <li key={proposal.id} className="rounded-xl border border-border p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[13px] font-medium text-foreground">{proposal.summary}</p>
-                  <Badge tone={STATUS_TONE[proposal.status]}>{proposal.status.replace('_', ' ')}</Badge>
-                </div>
-                <p className="mt-1 text-2xs text-muted-foreground">
+              <SettingsRow key={proposal.id}
+                title={<span className="flex flex-wrap items-center gap-2">{proposal.summary}<Badge tone={STATUS_TONE[proposal.status]}>{proposal.status.replace('_', ' ')}</Badge></span>}
+                description={<>
                   Baseline {Math.round((1 - proposal.baseline.failureRate) * 100)}% success, {formatDuration(proposal.baseline.meanDurationMs)} over {proposal.baseline.sampleSize} tasks →
                   projected {Math.round((1 - proposal.projected.failureRate) * 100)}%, {formatDuration(proposal.projected.meanDurationMs)} · {relativeTime(proposal.createdAt)}
-                </p>
-                {proposal.status === 'proposed' ? (
-                  <div className="mt-2 flex gap-1.5">
-                    <Button size="xs" variant="primary" disabled={busy} onClick={() => { void act(() => window.conductor.learning.approve(proposal.id)); }}>Approve</Button>
-                    <Button size="xs" variant="ghost" disabled={busy} onClick={() => { void act(() => window.conductor.learning.reject(proposal.id)); }}>Reject</Button>
-                  </div>
-                ) : null}
-              </li>
+                </>}
+                {...(proposal.status === 'proposed' ? {
+                  control: (
+                    <>
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void act(() => window.conductor.learning.reject(proposal.id)); }}>Reject</Button>
+                      <Button size="sm" variant="primary" disabled={busy} onClick={() => { void act(() => window.conductor.learning.approve(proposal.id)); }}>Approve</Button>
+                    </>
+                  ),
+                } : {})} />
             ))}
-          </ul>
+          </SettingsGroup>
         )}
-      </div>
+      </SettingsSection>
 
-      <div>
-        <h3 className="text-xs font-semibold text-foreground">Auto-run suggestions</h3>
-        {rules.length === 0 ? <p className="mt-1 text-2xs text-muted-foreground">None.</p> : (
-          <ul className="mt-1.5 flex flex-col gap-1">
-            {rules.map((rule) => (
-              <li key={rule.id} className="flex items-center gap-2 text-xs">
-                <span className="min-w-0 flex-1 font-mono">{rule.actionKind}</span>
-                <Button size="xs" variant="ghost" onClick={() => { void act(() => window.conductor.suggestions.removeRule(rule.actionKind)); }}>Stop auto-running</Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <SettingsSection title="Auto-run suggestions">
+        <SettingsGroup>
+          {rules.length === 0 ? <p className="px-3 py-3 text-xs text-muted-foreground sm:px-4">None. Suggestions you mark “always run” appear here.</p> : rules.map((rule) => (
+            <SettingsRow key={rule.id} title={<span className="font-mono text-xs">{rule.actionKind}</span>}
+              control={<Button size="sm" variant="ghost" onClick={() => { void act(() => window.conductor.suggestions.removeRule(rule.actionKind)); }}>Stop auto-running</Button>} />
+          ))}
+        </SettingsGroup>
+      </SettingsSection>
     </section>
   );
 }

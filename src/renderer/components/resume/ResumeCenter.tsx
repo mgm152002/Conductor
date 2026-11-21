@@ -23,7 +23,7 @@ export function ResumeCenter(): React.JSX.Element {
   return (
     <section className="flex flex-col gap-4" aria-label="Resume Center">
       <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-semibold text-foreground">
+        <h2 className="text-base font-semibold text-foreground">
           Resume Center
         </h2>
         <p className="text-xs leading-relaxed text-muted-foreground">
@@ -43,7 +43,7 @@ export function ResumeCenter(): React.JSX.Element {
           Reconciling tasks…
         </p>
       ) : items.length === 0 ? (
-        <p className="group-card flex items-center gap-2 px-4 py-3 text-[13px] text-muted-foreground">
+        <p className="group-card flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">
           <CheckIcon size={14} className="shrink-0 text-success" />
           Nothing to resume. Every task finished cleanly.
         </p>

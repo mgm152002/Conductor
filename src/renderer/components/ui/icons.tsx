@@ -1,105 +1,167 @@
-import type { SVGProps } from 'react';
+// The app's icon set: lucide, (MIT, bundled — nothing
+// loads from a CDN). Components keep these names so call sites never import
+// lucide directly. Icons are decorative by default; pass aria-label + role="img"
+// when one carries meaning.
+import type { LucideIcon, LucideProps } from 'lucide-react';
+import {
+  ActivityIcon as LucideActivity,
+  ArrowLeftIcon as LucideArrowLeft,
+  ArrowRightIcon as LucideArrowRight,
+  ArrowUpIcon as LucideArrowUp,
+  BrainIcon as LucideBrain,
+  BugIcon as LucideBug,
+  CalendarIcon as LucideCalendar,
+  ChartLineIcon as LucideChartLine,
+  ChartNoAxesColumnIcon as LucideChartNoAxesColumn,
+  CheckIcon as LucideCheck,
+  ChevronDownIcon as LucideChevronDown,
+  ChevronRightIcon as LucideChevronRight,
+  CircleAlertIcon as LucideCircleAlert,
+  ClockIcon as LucideClock,
+  BotIcon as LucideBot,
+  HistoryIcon as LucideHistory,
+  CloudIcon as LucideCloud,
+  CommandIcon as LucideCommand,
+  CornerDownLeftIcon as LucideCornerDownLeft,
+  DatabaseIcon as LucideDatabase,
+  DownloadIcon as LucideDownload,
+  EllipsisIcon as LucideEllipsis,
+  ExternalLinkIcon as LucideExternalLink,
+  EyeIcon as LucideEye,
+  FileIcon as LucideFile,
+  FileTextIcon as LucideFileText,
+  FolderIcon as LucideFolder,
+  FolderOpenIcon as LucideFolderOpen,
+  FolderPlusIcon as LucideFolderPlus,
+  GitBranchIcon as LucideGitBranch,
+  GitPullRequestIcon as LucideGitPullRequest,
+  GlobeIcon as LucideGlobe,
+  GraduationCapIcon as LucideGraduationCap,
+  HouseIcon as LucideHouse,
+  ImageIcon as LucideImage,
+  InboxIcon as LucideInbox,
+  KeyRoundIcon as LucideKeyRound,
+  LayersIcon as LucideLayers,
+  ListChecksIcon as LucideListChecks,
+  ListIcon as LucideList,
+  MailIcon as LucideMail,
+  MessageSquareIcon as LucideMessageSquare,
+  MonitorIcon as LucideMonitor,
+  NotebookTextIcon as LucideNotebookText,
+  PanelLeftIcon as LucidePanelLeft,
+  PanelRightIcon as LucidePanelRight,
+  PaperclipIcon as LucidePaperclip,
+  PencilIcon as LucidePencil,
+  PlayIcon as LucidePlay,
+  PlugIcon as LucidePlug,
+  PlusIcon as LucidePlus,
+  RefreshCwIcon as LucideRefreshCw,
+  SearchIcon as LucideSearch,
+  ServerIcon as LucideServer,
+  SettingsIcon as LucideSettings,
+  ShapesIcon as LucideShapes,
+  ShieldCheckIcon as LucideShieldCheck,
+  ShieldIcon as LucideShield,
+  SmartphoneIcon as LucideSmartphone,
+  SparklesIcon as LucideSparkles,
+  SquarePenIcon as LucideSquarePen,
+  TerminalIcon as LucideTerminal,
+  TicketIcon as LucideTicket,
+  Trash2Icon as LucideTrash2,
+  TriangleAlertIcon as LucideTriangleAlert,
+  UnlinkIcon as LucideUnlink,
+  UsersIcon as LucideUsers,
+  VideoIcon as LucideVideo,
+  WorkflowIcon as LucideWorkflow,
+  XIcon as LucideX,
+  LoaderCircleIcon,
+  SquareIcon,
+} from 'lucide-react';
 
-// A small inline stroke-icon set (24px grid, 1.75 stroke) so the renderer needs
-// no icon dependency and nothing loads from a CDN (CSP is self-only). Icons are
-// decorative by default; pass aria-label + role="img" when one carries meaning.
+type IconProps = LucideProps & { size?: number };
 
-type IconProps = SVGProps<SVGSVGElement> & { size?: number };
-
-function Icon({ size = 16, children, ...props }: IconProps & { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden={props['aria-label'] === undefined ? true : undefined}
-      focusable="false"
-      {...props}
-    >
-      {children}
-    </svg>
+const make = (Glyph: LucideIcon) => {
+  const Wrapped = ({ size = 16, ...props }: IconProps): React.JSX.Element => (
+    <Glyph size={size} aria-hidden={props['aria-label'] === undefined ? true : undefined} focusable="false" {...props} />
   );
-}
+  return Wrapped;
+};
 
-export const PlusIcon = (p: IconProps) => <Icon {...p}><path d="M12 5v14M5 12h14" /></Icon>;
-export const VideoIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="6" width="13" height="12" rx="2" /><path d="m16 10.5 5-3v9l-5-3" /></Icon>;
-export const GlobeIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></Icon>;
-export const PhoneIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></Icon>;
-export const BugIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="8" width="10" height="12" rx="5" /><path d="M12 8V4M7 12H3M7 17l-3 2M17 12h4M17 17l3 2M5 5l3 3M19 5l-3 3" /></Icon>;
-export const NoteIcon = (p: IconProps) => <Icon {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5M9 12h7M9 16h7" /></Icon>;
-export const ShapesIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="8" height="8" rx="1" /><circle cx="16.5" cy="7.5" r="4" /><path d="m8 14 4 7H4z" /><rect x="14" y="14" width="7" height="7" rx="1" /></Icon>;
-export const ArrowLeftIcon = (p: IconProps) => <Icon {...p}><path d="M19 12H5M11 6l-6 6 6 6" /></Icon>;
-export const ArrowUpIcon = (p: IconProps) => <Icon {...p}><path d="M12 19V5M6 11l6-6 6 6" /></Icon>;
-export const StopIcon = (p: IconProps) => <Icon {...p}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></Icon>;
-export const ChevronRightIcon = (p: IconProps) => <Icon {...p}><path d="m9 6 6 6-6 6" /></Icon>;
-export const ChevronDownIcon = (p: IconProps) => <Icon {...p}><path d="m6 9 6 6 6-6" /></Icon>;
-export const XIcon = (p: IconProps) => <Icon {...p}><path d="M18 6 6 18M6 6l12 12" /></Icon>;
-export const CheckIcon = (p: IconProps) => <Icon {...p}><path d="m5 12 5 5 9-10" /></Icon>;
-export const FolderIcon = (p: IconProps) => <Icon {...p}><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /></Icon>;
-export const FolderOpenIcon = (p: IconProps) => <Icon {...p}><path d="M3 17V7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h7A1.5 1.5 0 0 1 19 9.5V11" /><path d="M3 17.5 5.2 12a1.5 1.5 0 0 1 1.4-1h13.2a1 1 0 0 1 .9 1.4L18.6 18a1.5 1.5 0 0 1-1.4 1H4.5A1.5 1.5 0 0 1 3 17.5z" /></Icon>;
-export const SquarePenIcon = (p: IconProps) => <Icon {...p}><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" /><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8l-3.6.8.8-3.6z" /></Icon>;
-export const SettingsIcon = (p: IconProps) => <Icon {...p}><path d="M10.3 3.6a1.7 1.7 0 0 1 3.4 0l.1.7a1.7 1.7 0 0 0 2.5 1.1l.6-.4a1.7 1.7 0 0 1 2.4 2.4l-.4.6a1.7 1.7 0 0 0 1.1 2.5l.7.1a1.7 1.7 0 0 1 0 3.4l-.7.1a1.7 1.7 0 0 0-1.1 2.5l.4.6a1.7 1.7 0 0 1-2.4 2.4l-.6-.4a1.7 1.7 0 0 0-2.5 1.1l-.1.7a1.7 1.7 0 0 1-3.4 0l-.1-.7a1.7 1.7 0 0 0-2.5-1.1l-.6.4a1.7 1.7 0 0 1-2.4-2.4l.4-.6a1.7 1.7 0 0 0-1.1-2.5l-.7-.1a1.7 1.7 0 0 1 0-3.4l.7-.1A1.7 1.7 0 0 0 5.6 7.5l-.4-.6a1.7 1.7 0 0 1 2.4-2.4l.6.4a1.7 1.7 0 0 0 2.5-1.1z" /><circle cx="12" cy="12" r="3" /></Icon>;
-export const WorkflowIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><path d="M6.5 10v4a3 3 0 0 0 3 3H14" /></Icon>;
-export const SparklesIcon = (p: IconProps) => <Icon {...p}><path d="M12 3.5 13.8 9a1.5 1.5 0 0 0 1 1l5.5 1.8-5.5 1.8a1.5 1.5 0 0 0-1 1L12 20.1l-1.8-5.5a1.5 1.5 0 0 0-1-1L3.7 11.8 9.2 10a1.5 1.5 0 0 0 1-1z" /><path d="M19 3v4M21 5h-4" /></Icon>;
-export const BrainIcon = (p: IconProps) => <Icon {...p}><path d="M9.5 4A2.5 2.5 0 0 0 7 6.5v.1A3 3 0 0 0 5 12a3 3 0 0 0 2 5.4A2.6 2.6 0 0 0 12 18V5.5A1.5 1.5 0 0 0 10.5 4z" /><path d="M14.5 4A2.5 2.5 0 0 1 17 6.5v.1a3 3 0 0 1 2 5.4 3 3 0 0 1-2 5.4A2.6 2.6 0 0 1 12 18" /></Icon>;
-export const PlugIcon = (p: IconProps) => <Icon {...p}><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5" /></Icon>;
-export const ActivityIcon = (p: IconProps) => <Icon {...p}><path d="M3 12h4l3-8 4 16 3-8h4" /></Icon>;
-export const ListChecksIcon = (p: IconProps) => <Icon {...p}><path d="m3 7 2 2 3-3M3 16l2 2 3-3M12 7h9M12 17h9" /></Icon>;
-export const PanelRightIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></Icon>;
-export const PanelLeftIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></Icon>;
-export const AlertTriangleIcon = (p: IconProps) => <Icon {...p}><path d="M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4M12 17h.01" /></Icon>;
-export const AlertCircleIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></Icon>;
-export const RotateIcon = (p: IconProps) => <Icon {...p}><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" /><path d="M3 21v-5h5" /></Icon>;
-export const PlayIcon = (p: IconProps) => <Icon {...p}><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5z" /></Icon>;
-export const FileTextIcon = (p: IconProps) => <Icon {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></Icon>;
-export const DocumentIcon = FileTextIcon;
-export const PaperclipIcon = (p: IconProps) => <Icon {...p}><path d="m21 11-9 9a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8l8.5-8.5" /></Icon>;
-export const ImageIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8" cy="8" r="1.5" /><path d="m21 15-5-5L5 21" /></Icon>;
-export const TerminalIcon = (p: IconProps) => <Icon {...p}><path d="m5 8 4 4-4 4M12 17h7" /></Icon>;
-export const SearchIcon = (p: IconProps) => <Icon {...p}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Icon>;
-export const ClockIcon = (p: IconProps) => <Icon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>;
-export const DatabaseIcon = (p: IconProps) => <Icon {...p}><ellipse cx="12" cy="5.5" rx="8" ry="2.5" /><path d="M4 5.5v13c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5v-13M4 12c0 1.4 3.6 2.5 8 2.5s8-1.1 8-2.5" /></Icon>;
-export const ShieldIcon = (p: IconProps) => <Icon {...p}><path d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6z" /></Icon>;
-export const ShieldCheckIcon = (p: IconProps) => <Icon {...p}><path d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6z" /><path d="m9 12 2 2 4-4" /></Icon>;
-export const EyeIcon = (p: IconProps) => <Icon {...p}><path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z" /><circle cx="12" cy="12" r="2.5" /></Icon>;
-export const PencilIcon = (p: IconProps) => <Icon {...p}><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" /></Icon>;
-export const ListIcon = (p: IconProps) => <Icon {...p}><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></Icon>;
-export const UsageIcon = (p: IconProps) => <Icon {...p}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></Icon>;
-export const LayersIcon = (p: IconProps) => <Icon {...p}><path d="m12 3 9 5-9 5-9-5z" /><path d="m3 13 9 5 9-5" /></Icon>;
-export const MoreIcon = (p: IconProps) => <Icon {...p}><circle cx="5" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="19" cy="12" r="1" fill="currentColor" /></Icon>;
-export const TrashIcon = (p: IconProps) => <Icon {...p}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></Icon>;
-export const LinkOffIcon = (p: IconProps) => <Icon {...p}><path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 0 1 4 8M3 3l18 18" /></Icon>;
-export const PullRequestIcon = (p: IconProps) => <Icon {...p}><circle cx="5" cy="6" r="2.5" /><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="8" r="2.5" /><path d="M5 8.5v7M19 10.5c0 4.5-4.5 3.8-8 5.5" /></Icon>;
-export const ExternalLinkIcon = (p: IconProps) => <Icon {...p}><path d="M14 4h6v6M20 4l-9 9M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" /></Icon>;
+export const PlusIcon = make(LucidePlus);
+export const VideoIcon = make(LucideVideo);
+export const GlobeIcon = make(LucideGlobe);
+export const PhoneIcon = make(LucideSmartphone);
+export const BugIcon = make(LucideBug);
+export const NoteIcon = make(LucideNotebookText);
+export const ShapesIcon = make(LucideShapes);
+export const ArrowLeftIcon = make(LucideArrowLeft);
+export const ArrowRightIcon = make(LucideArrowRight);
+export const ArrowUpIcon = make(LucideArrowUp);
+export const ChevronRightIcon = make(LucideChevronRight);
+export const ChevronDownIcon = make(LucideChevronDown);
+export const XIcon = make(LucideX);
+export const CheckIcon = make(LucideCheck);
+export const FolderIcon = make(LucideFolder);
+export const FolderOpenIcon = make(LucideFolderOpen);
+export const SquarePenIcon = make(LucideSquarePen);
+export const SettingsIcon = make(LucideSettings);
+export const WorkflowIcon = make(LucideWorkflow);
+export const SparklesIcon = make(LucideSparkles);
+export const BrainIcon = make(LucideBrain);
+export const PlugIcon = make(LucidePlug);
+export const ActivityIcon = make(LucideActivity);
+export const ListChecksIcon = make(LucideListChecks);
+export const PanelRightIcon = make(LucidePanelRight);
+export const PanelLeftIcon = make(LucidePanelLeft);
+export const AlertTriangleIcon = make(LucideTriangleAlert);
+export const AlertCircleIcon = make(LucideCircleAlert);
+export const RotateIcon = make(LucideRefreshCw);
+export const PlayIcon = make(LucidePlay);
+export const FileTextIcon = make(LucideFileText);
+export const DocumentIcon = make(LucideFile);
+export const PaperclipIcon = make(LucidePaperclip);
+export const ImageIcon = make(LucideImage);
+export const TerminalIcon = make(LucideTerminal);
+export const SearchIcon = make(LucideSearch);
+export const ClockIcon = make(LucideClock);
+export const BotIcon = make(LucideBot);
+export const HistoryIcon = make(LucideHistory);
+export const DatabaseIcon = make(LucideDatabase);
+export const ShieldIcon = make(LucideShield);
+export const ShieldCheckIcon = make(LucideShieldCheck);
+export const EyeIcon = make(LucideEye);
+export const PencilIcon = make(LucidePencil);
+export const ListIcon = make(LucideList);
+export const UsageIcon = make(LucideChartNoAxesColumn);
+export const LayersIcon = make(LucideLayers);
+export const MoreIcon = make(LucideEllipsis);
+export const TrashIcon = make(LucideTrash2);
+export const LinkOffIcon = make(LucideUnlink);
+export const PullRequestIcon = make(LucideGitPullRequest);
+export const ExternalLinkIcon = make(LucideExternalLink);
+export const ChartIcon = make(LucideChartLine);
+export const DownloadIcon = make(LucideDownload);
+export const MonitorIcon = make(LucideMonitor);
+export const GitBranchIcon = make(LucideGitBranch);
+export const HomeIcon = make(LucideHouse);
+export const GradCapIcon = make(LucideGraduationCap);
+export const TicketIcon = make(LucideTicket);
+export const MailIcon = make(LucideMail);
+export const CalendarIcon = make(LucideCalendar);
+export const MessageIcon = make(LucideMessageSquare);
+export const ServerIcon = make(LucideServer);
+export const KeyIcon = make(LucideKeyRound);
+export const InboxIcon = make(LucideInbox);
+export const CommandIcon = make(LucideCommand);
+export const ReturnIcon = make(LucideCornerDownLeft);
+export const FolderPlusIcon = make(LucideFolderPlus);
+export const UsersIcon = make(LucideUsers);
+export const CloudIcon = make(LucideCloud);
 
+/** A filled square: the composer's stop button. */
+export const StopIcon = ({ size = 16, ...props }: IconProps): React.JSX.Element => <SquareIcon size={size} fill="currentColor" strokeWidth={0} aria-hidden focusable="false" {...props} />;
+
+/** Spinner: lucide's loader circle, spinning. */
 export function Spinner({ size = 14, className }: { size?: number; className?: string }): React.JSX.Element {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={`animate-spin ${className ?? ''}`} aria-hidden="true" focusable="false">
-      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.5" />
-      <path d="M21 12a9 9 0 0 0-9-9" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-    </svg>
-  );
+  return <LoaderCircleIcon size={size} className={`animate-spin ${className ?? ''}`} aria-hidden="true" focusable="false" />;
 }
-export const ChartIcon = (p: IconProps) => <Icon {...p}><path d="M4 4v15a1 1 0 0 0 1 1h15" /><path d="M8 16v-5M12 16V8M16 16v-8M20 16V5" /></Icon>;
-export const DownloadIcon = (p: IconProps) => <Icon {...p}><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></Icon>;
-export const MonitorIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16v4" /></Icon>;
-export const GitBranchIcon = (p: IconProps) => <Icon {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 3.5-4 3.6-7 5" /></Icon>;
-export const HomeIcon = (p: IconProps) => <Icon {...p}><path d="m3 11 9-8 9 8" /><path d="M5.5 9.5V20a1 1 0 0 0 1 1h4v-6h3v6h4a1 1 0 0 0 1-1V9.5" /></Icon>;
-export const GradCapIcon = (p: IconProps) => <Icon {...p}><path d="m12 4 10 5-10 5L2 9z" /><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5" /><path d="M22 9v5" /></Icon>;
-export const TicketIcon = (p: IconProps) => <Icon {...p}><path d="M4 8a2 2 0 0 1 0-4h16v4a2.5 2.5 0 0 0 0 5v4H4v-4a2.5 2.5 0 0 0 0-5z" /><path d="M14 5v2M14 11v2M14 17v2" /></Icon>;
-export const MailIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3.5 6.5 8.5 6 8.5-6" /></Icon>;
-export const CalendarIcon = (p: IconProps) => <Icon {...p}><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M8 3v4M16 3v4M3.5 10h17" /></Icon>;
-export const MessageIcon = (p: IconProps) => <Icon {...p}><path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" /></Icon>;
-export const ServerIcon = (p: IconProps) => <Icon {...p}><rect x="3" y="4" width="18" height="7" rx="1.5" /><rect x="3" y="13" width="18" height="7" rx="1.5" /><path d="M7 7.5h.01M7 16.5h.01" /></Icon>;
-export const KeyIcon = (p: IconProps) => <Icon {...p}><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M15 8l2 2" /></Icon>;
-export const InboxIcon = (p: IconProps) => <Icon {...p}><path d="M4 13.5 6.4 5.6A2 2 0 0 1 8.3 4h7.4a2 2 0 0 1 1.9 1.6L20 13.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><path d="M4 13.5h4.5l1 2.5h5l1-2.5H20" /></Icon>;
-export const CommandIcon = (p: IconProps) => <Icon {...p}><path d="M9 9h6v6H9zM9 9V6.5A2.5 2.5 0 1 0 6.5 9zM15 9V6.5A2.5 2.5 0 1 1 17.5 9zM9 15v2.5A2.5 2.5 0 1 1 6.5 15zM15 15v2.5a2.5 2.5 0 1 0 2.5-2.5z" /></Icon>;
-export const ReturnIcon = (p: IconProps) => <Icon {...p}><path d="M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4" /></Icon>;
-export const FolderPlusIcon = (p: IconProps) => <Icon {...p}><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M12 11v5M9.5 13.5h5" /></Icon>;
-export const UsersIcon = (p: IconProps) => <Icon {...p}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6" /><circle cx="17" cy="9" r="2.6" /><path d="M16.5 14.2c2.6.2 4.4 2.2 5 5" /></Icon>;
-export const CloudIcon = (p: IconProps) => <Icon {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4.25 4.25 0 0 1-.25 8.5z" /></Icon>;

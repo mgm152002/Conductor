@@ -6,7 +6,7 @@ import { SandboxManager, SANDBOX_IMAGE, agentVolume, browserVolume, parseMemUsag
 import { SandboxAgentService, groupSandboxKey } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
-import type { BrowserDriver } from '@main/sandbox/cloud-browser';
+import type { BrowserDriver } from '@main/sandbox/browser-tools';
 import type { BrowserPreference, SandboxToolGroup } from '@shared/sandbox-agents';
 
 // The container lifecycle with a fake Docker CLI, and the agent service that
@@ -542,7 +542,6 @@ describe('SandboxAgentService', () => {
         store, manager: manager(), gateway: new SandboxGateway(),
         approver: async () => 'accept', autoApprove: () => false, deliverFile: () => undefined,
         cliAvailable: () => true, log: () => {}, agentWorkspace: () => 'agent-space',
-        cloudBrowser: async () => ({ url: 'https://u:k@hub.example/wd/hub' }),
         deviceBrowser: fakeDriver,
         browserPreference: () => preference,
       });
@@ -573,10 +572,8 @@ describe('SandboxAgentService', () => {
     expect(device.guidance).toContain('Chrome on the user\'s Mac');
     expect(device.guidance).toContain('starts only when you first call');
 
-    const cloud = await tools('cloud');
-    expect(cloud.names).toContain('cloud_browser_upload_file');
-    expect(cloud.names.some((name) => name.startsWith('browser_'))).toBe(false);
-    expect(cloud.names).toContain('return_file');
+    // An agent with a terminal can still hand files back, and listing never starts the sandbox.
+    expect(device.names).toContain('return_file');
     expect(started()).toBe(false);
 
     // An agent that only browses never gets a sandbox at all.
@@ -585,7 +582,7 @@ describe('SandboxAgentService', () => {
     expect(browseOnly.guidance).toContain('You have no sandbox computer');
 
     const sandbox = await tools('sandbox');
-    expect(sandbox.guidance).not.toMatch(/cloud_browser|chrome_browser/);
+    expect(sandbox.guidance).not.toMatch(/chrome_browser/);
     expect(closed.length).toBeGreaterThan(0); // released runs close their Chrome tab
   });
 });

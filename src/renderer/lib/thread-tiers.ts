@@ -1,7 +1,7 @@
 import type { ThreadView } from './threads';
 import { isWorkingState } from './thread-status';
 
-// T3 Code-style thread management for a project: every thread sits in exactly
+// Thread management for a project: every thread sits in exactly
 // one of four tiers. "Needs attention" is always first; every tier is a
 // collapsible section in the sidebar, and a section auto-collapses whenever
 // a thread lands in it (see `tiersWithNewArrivals`).

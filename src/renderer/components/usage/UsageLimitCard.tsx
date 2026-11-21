@@ -1,7 +1,6 @@
 import type { UsageLimitWindow } from '@shared/usage';
 import { cn } from '../../lib/cn';
 import { percentLeft, resetCountdown } from '../../lib/usage-format';
-import { Badge } from '../ui/primitives';
 import { RotateIcon } from '../ui/icons';
 
 // One reported Session, Daily, or Weekly quota window for an attached CLI
@@ -27,12 +26,6 @@ export interface UsageLimitCardProps {
   className?: string;
 }
 
-/** Badge tone that mirrors the bar colour. */
-function badgeTone(percent: number): 'success' | 'warning' | 'destructive' {
-  if (percent >= 50) return 'success';
-  if (percent >= 20) return 'warning';
-  return 'destructive';
-}
 
 export function UsageLimitCard({
   title,
@@ -48,20 +41,27 @@ export function UsageLimitCard({
   const label = limit.label;
   const ariaLabel = `${clientLabel} ${label !== undefined ? `${label} ` : ''}${title.toLowerCase()} limit`;
 
+  // How far through the window we are, as a tick on the bar (a pace marker).
+  const resetsAt = limit.resetsAt !== undefined ? Date.parse(limit.resetsAt) : NaN;
+  const windowMs = (limit.windowMinutes ?? 0) * 60_000;
+  const timeLeft = Number.isFinite(resetsAt) && windowMs > 0 ? Math.min(1, Math.max(0, (resetsAt - (typeof now === 'number' ? now : now.getTime())) / windowMs)) : undefined;
+
+  // Limit row: the window and a large "% left" at the left, a tall
+  // bar at the right, solid for what is left and hatched for what is used.
   return (
-    <div className={cn('group-card flex items-center gap-4 px-4 py-3', className)}>
-      <div className="w-36 shrink-0">
-        <p className="text-[13px] text-foreground">
+    <div className={cn('flex items-center gap-6 rounded-xl border border-border/60 bg-card/40 px-6 py-5 shadow-xs/5', className)}>
+      <div className="w-56 shrink-0">
+        <p className="text-sm text-foreground">
           {title}
-          {label !== undefined ? <span className="block truncate text-3xs text-muted-foreground">{label}</span> : null}
+          {label !== undefined ? <span className="ms-1.5 text-muted-foreground">{label}</span> : null}
         </p>
         {percent !== undefined ? (
-          <p className="mt-0.5 flex items-baseline gap-1">
-            <span className="text-[22px] leading-none font-medium text-foreground tabular-nums">{percent}%</span>
-            <span className="text-2xs text-muted-foreground">left</span>
+          <p className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-4xl font-medium tracking-tight text-foreground tabular-nums">{percent}%</span>
+            <span className="text-sm text-muted-foreground">left</span>
           </p>
         ) : (
-          <p className="mt-0.5 text-2xs font-medium text-muted-foreground">Remaining percentage not reported</p>
+          <p className="mt-1 text-sm text-muted-foreground">Remaining percentage not reported</p>
         )}
       </div>
 
@@ -74,23 +74,23 @@ export function UsageLimitCard({
             aria-valuemax={100}
             aria-valuenow={percent}
             aria-valuetext={`${percent}% left`}
-            className="limit-track"
+            className="limit-track relative h-11 overflow-hidden rounded-lg border-0"
+            style={{ background: 'repeating-linear-gradient(135deg, color-mix(in oklab, var(--primary) 22%, var(--background)) 0 2px, color-mix(in oklab, var(--primary) 32%, var(--background)) 2px 6px)' }}
           >
-            <div className="limit-fill" style={{ width: `${percent}%` }} aria-hidden="true" />
-            <span className="absolute inset-y-0 left-2 flex items-center text-3xs font-medium text-foreground/80 tabular-nums">{percent}%</span>
+            <div className="absolute inset-y-0 left-0 rounded-lg" style={{ width: `${percent}%`, background: 'color-mix(in oklab, var(--primary) 48%, var(--background))' }} aria-hidden="true" />
+            {timeLeft !== undefined ? <span aria-hidden className="absolute inset-y-0 w-[3px] -translate-x-1/2 bg-foreground ring-2 ring-background" style={{ left: `${timeLeft * 100}%` }} /> : null}
             {reset !== undefined ? (
-              <span className="absolute inset-y-0 right-1.5 flex items-center gap-1 rounded bg-black/25 px-1.5 text-3xs text-foreground/85 tabular-nums">
-                <RotateIcon size={9} aria-hidden="true" />{reset}
+              <span className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 rounded-md bg-background/85 px-1.5 py-0.5 text-xs text-foreground tabular-nums">
+                <RotateIcon size={11} aria-hidden="true" />{reset}
               </span>
             ) : null}
           </div>
         ) : reset !== undefined ? (
-          <p className="flex items-center gap-1 text-3xs text-muted-foreground tabular-nums">
-            <RotateIcon size={9} aria-hidden="true" />Resets in {reset}
+          <p className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
+            <RotateIcon size={11} aria-hidden="true" />Resets in {reset}
           </p>
         ) : null}
       </div>
-      {percent !== undefined ? <Badge tone={badgeTone(percent)} className="hidden shrink-0 sm:inline-flex">{percent}% left</Badge> : null}
     </div>
   );
 }

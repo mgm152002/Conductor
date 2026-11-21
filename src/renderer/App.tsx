@@ -1,5 +1,5 @@
-import { Suspense, lazy } from 'react';
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Suspense, lazy, useRef } from 'react';
+import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate, type Location } from 'react-router-dom';
 import { AppLayout } from './components/AppLayout';
 import { DEFAULT_PATH, NAV_ENTRIES } from './navigation';
 import type { NavEntryId } from './navigation';
@@ -48,16 +48,25 @@ const SCREENS: Record<NavEntryId, React.ElementType> = {
   settings: SettingsScreen,
 };
 
-// A HashRouter is used because the packaged renderer loads from a `file://`
-// origin where path-based history has no server to resolve deep links.
-export function App(): React.JSX.Element {
+/** Settings and Usage open as Route modal, over the page they were opened from. */
+const isModalPath = (path: string): boolean => path === '/settings' || path.startsWith('/settings/') || path === '/usage';
+
+function AppRoutes(): React.JSX.Element {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const lastPage = useRef<Location | null>(null);
+  const modal = isModalPath(location.pathname);
+  if (!modal) lastPage.current = location;
+  const behind: Location = modal ? (lastPage.current ?? { ...location, pathname: DEFAULT_PATH, search: '', hash: '' }) : location;
+  const close = (): void => { void navigate(`${behind.pathname}${behind.search}`); };
   return (
-    <HashRouter>
-      <Routes>
+    <>
+      <Routes location={behind}>
         <Route element={<AppLayout />}>
           <Route index element={<Navigate to={DEFAULT_PATH} replace />} />
           <Route path="work" element={<WorkScreen />} />
           <Route path="agents" element={<Suspense fallback={<ScreenFallback />}><AgentsScreen /></Suspense>} />
+          <Route path="secrets" element={<Navigate to="/settings/secrets" replace />} />
           <Route path="pr/:workspaceId/:number" element={<Suspense fallback={<ScreenFallback />}><PullRequestScreen /></Suspense>} />
           {NAV_ENTRIES.map((entry) => {
             const Screen = SCREENS[entry.id];
@@ -73,6 +82,25 @@ export function App(): React.JSX.Element {
           <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
         </Route>
       </Routes>
+      {modal ? (
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="settings" element={<Navigate to="/settings/appearance" replace />} />
+            <Route path="settings/:section" element={<SettingsScreen onClose={close} />} />
+            <Route path="usage" element={<UsageScreen onClose={close} />} />
+          </Routes>
+        </Suspense>
+      ) : null}
+    </>
+  );
+}
+
+// A HashRouter is used because the packaged renderer loads from a `file://`
+// origin where path-based history has no server to resolve deep links.
+export function App(): React.JSX.Element {
+  return (
+    <HashRouter>
+      <AppRoutes />
     </HashRouter>
   );
 }

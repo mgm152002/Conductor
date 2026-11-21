@@ -20,11 +20,11 @@ import { DetailsPanel } from './DetailsPanel';
 import { MessagesTimeline } from './MessagesTimeline';
 import { PendingApprovalPanel } from './PendingApprovalPanel';
 import { PendingQuestionPanel } from './PendingQuestionPanel';
-import { EnvironmentCard } from './EnvironmentCard';
 import { AgentSetupNotice } from './AgentSetupNotice';
 import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanResults, runLabel } from './PlanCard';
-import { PlanDock } from './PlanDock';
+import { cn } from '../../lib/cn';
+import { ThreadDetailsFloat } from './ThreadDetailsCard';
 import { WorkBoard } from './WorkBoard';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
@@ -215,14 +215,17 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
         {/* Inside the column so the compact (narrow-window) variant is in
             flow under the header; the floating variant positions itself
             against .thread-layout from here. */}
-        {!detailsOpen ? <EnvironmentCard task={latest} project={project} /> : null}
+        {/* Wide windows: Floating details card (environment and
+            subagents). Narrow ones keep the in-flow strip and the plan dock. */}
+        {!detailsOpen ? <ThreadDetailsFloat task={latest} project={project} details={latestDetails} /> : null}
         <div
           ref={scroller}
           onScroll={(event) => {
             const el = event.currentTarget;
             stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
           }}
-          className="min-h-0 flex-1 overflow-y-auto"
+          // Room on the right for the floating details card, so it never covers the chat.
+          className={cn('min-h-0 flex-1 overflow-y-auto', !detailsOpen && '@min-[60rem]:pr-[300px]')}
         >
           <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-8 px-5 pt-6 pb-8">
             {turns.map((turn, index) => (
@@ -238,12 +241,11 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
             ))}
           </div>
         </div>
-        <div className="shrink-0 px-5">
+        <div className={cn('shrink-0 px-5', !detailsOpen && '@min-[60rem]:pr-[320px]')}>
           <AgentSetupNotice />
           <Mem0OfflineNotice />
           <PendingApprovalPanel task={latest} />
           <PendingQuestionPanel scopeId={latest.id} />
-          <PlanDock task={latest} details={latestDetails} />
           <Composer task={latest} currentAgentId={[...(latestDetails?.steps ?? [])].reverse().find((s) => s.assignedAdapterId !== undefined)?.assignedAdapterId} />
         </div>
       </div>

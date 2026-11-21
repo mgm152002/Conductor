@@ -80,6 +80,19 @@ export interface PricedTokens {
 }
 
 /** Estimated USD cost of one usage row at a model's public prices. */
+/** The same estimate, split by what was paid for (cost by type). */
+export function estimateCostParts(modelPrice: ModelPrice, tokens: PricedTokens): { input: number; cacheRead: number; cacheWrite: number; output: number } {
+  const cached = Math.min(Math.max(tokens.cachedInputTokens, 0), Math.max(tokens.inputTokens, 0));
+  const written = Math.min(Math.max(tokens.cacheWriteTokens ?? 0, 0), Math.max(tokens.inputTokens, 0) - cached);
+  const uncached = Math.max(tokens.inputTokens, 0) - cached - written;
+  return {
+    input: (uncached * modelPrice.inputPerMillion) / 1_000_000,
+    cacheRead: (cached * (modelPrice.cacheReadPerMillion ?? modelPrice.inputPerMillion)) / 1_000_000,
+    cacheWrite: (written * (modelPrice.cacheWritePerMillion ?? modelPrice.inputPerMillion)) / 1_000_000,
+    output: (Math.max(tokens.outputTokens, 0) * modelPrice.outputPerMillion) / 1_000_000,
+  };
+}
+
 export function estimateCostUsd(modelPrice: ModelPrice, tokens: PricedTokens): number {
   const cached = Math.min(Math.max(tokens.cachedInputTokens, 0), Math.max(tokens.inputTokens, 0));
   const written = Math.min(Math.max(tokens.cacheWriteTokens ?? 0, 0), Math.max(tokens.inputTokens, 0) - cached);

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import type { Appearance } from '@shared/ipc-contract';
-import { useThemeStore } from '../stores';
+import { BUILT_IN_THEMES, GRAPHITE_DARK_THEME_COLORS, GRAPHITE_LIGHT_THEME_COLORS, getThemeColorsForAppearance, type ThemeColorRole } from '@shared/theme-palettes';
+import { useThemeStore, type ThemeId } from '../stores/theme-store';
 
 // Keeps the renderer appearance in lockstep with macOS. On mount it asks the
 // main process for the current appearance (`theme.get`) and subscribes to the
@@ -13,16 +14,29 @@ function isAppearance(value: unknown): value is Appearance {
   return value === 'dark' || value === 'light';
 }
 
-function applyAppearance(appearance: Appearance): void {
+/** camelCase role → the --app-theme-* variable the stylesheet maps from. */
+const roleVariable = (role: ThemeColorRole): string => {
+  const special: Partial<Record<ThemeColorRole, string>> = { terminalSelection: '--app-theme-terminal-selection-background' };
+  return special[role] ?? `--app-theme-${role.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+};
+
+/** Paint a theme's colours for the shown appearance onto <html>. */
+export function applyTheme(themeId: ThemeId, appearance: Appearance): void {
   const root = document.documentElement;
   root.classList.toggle('dark', appearance === 'dark');
   // Hint built-in form controls and scrollbars at the OS level too.
   root.style.colorScheme = appearance;
+  const palette = BUILT_IN_THEMES.find((theme) => theme.id === themeId);
+  const colors = palette !== undefined
+    ? getThemeColorsForAppearance(palette, appearance) ?? palette.colors
+    : appearance === 'dark' ? GRAPHITE_DARK_THEME_COLORS : GRAPHITE_LIGHT_THEME_COLORS;
+  for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) root.style.setProperty(roleVariable(role), value);
+  root.dataset.themeId = themeId;
 }
 
 export function useSystemAppearance(): Appearance {
   const appearance = useThemeStore((state) => state.appearance);
-  const accent = useThemeStore((state) => state.accent);
+  const themeId = useThemeStore((state) => state.themeId);
   const setAppearance = useThemeStore((state) => state.setAppearance);
 
   useEffect(() => {
@@ -51,15 +65,10 @@ export function useSystemAppearance(): Appearance {
     };
   }, [setAppearance]);
 
-  // Apply whenever the resolved appearance changes.
+  // Apply whenever the shown appearance or the theme changes.
   useEffect(() => {
-    applyAppearance(appearance);
-  }, [appearance]);
-
-  // The accent theme is a `data-accent` attribute the CSS keys off.
-  useEffect(() => {
-    document.documentElement.dataset.accent = accent;
-  }, [accent]);
+    applyTheme(themeId, appearance);
+  }, [themeId, appearance]);
 
   return appearance;
 }

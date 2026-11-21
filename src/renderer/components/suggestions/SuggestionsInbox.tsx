@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Suggestion } from '@shared/domain';
 import { relativeTime } from '../../lib/time';
+import { SIDEBAR_ICON } from '../ui/sidebar-styles';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/primitives';
 import { InboxIcon, SparklesIcon, XIcon } from '../ui/icons';
@@ -103,7 +104,7 @@ export function SuggestionsInbox({ variant = 'inline' }: { /** `bar` opens under
         aria-label={`Inbox${total > 0 ? ` (${total})` : ''}`}
         title="Inbox — suggestions and threads waiting on you"
         data-active={variant === 'bar' ? open : undefined}
-        className={variant === 'bar' ? 'bar-icon relative' : variant === 'footer' ? 'side-icon relative size-7' : 'relative flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring'}
+        className={variant === 'bar' ? 'bar-icon relative' : variant === 'footer' ? 'side-icon relative size-7' : cn(SIDEBAR_ICON, 'relative')}
       >
         <InboxIcon size={variant === 'footer' ? 14 : 15} />
         {total > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold text-primary-foreground tabular-nums">{total}</span> : null}

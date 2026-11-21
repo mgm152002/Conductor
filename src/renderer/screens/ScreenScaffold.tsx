@@ -16,9 +16,10 @@ interface ScreenScaffoldProps {
 }
 
 const LAYOUTS = {
-  ledger: 'max-w-3xl',
-  wide: 'max-w-5xl',
-  dashboard: 'max-w-6xl',
+  // WorkspacePageContainer widths: readable, wide, expanded.
+  ledger: 'max-w-4xl',
+  wide: 'max-w-4xl',
+  dashboard: 'max-w-5xl',
   workbench: 'max-w-[84rem]',
 } as const;
 
@@ -30,7 +31,7 @@ export function ScreenScaffold({ title, actions, layout = 'ledger', screen, chil
         {actions !== undefined ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={`mx-auto flex w-full ${LAYOUTS[layout]} flex-col gap-6 px-6 pt-6 pb-12`}>
+        <div className={`mx-auto flex w-full ${LAYOUTS[layout]} flex-col gap-8 px-5 pt-6 pb-12 sm:px-6`}>
           {children !== undefined ? children : <p className="py-10 text-center text-sm text-muted-foreground">Not built yet.</p>}
         </div>
       </div>

@@ -9,6 +9,7 @@ import { SANDBOX_AGENT_PREFIX, sandboxAgentIdFrom, useSandboxAgentStore } from '
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import { ProviderAvatar, agentBrand } from '../ui/BrandMarks';
 import { MenuSelect } from '../ui/MenuSelect';
+import { AgentAvatar } from '../ui/AgentAvatar';
 import { useAgents } from '../../hooks/useAgents';
 import type { RunOptions } from '@shared/agent-models';
 import { preferredAgent } from '@shared/agent-preference';
@@ -188,7 +189,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
     ? 'Add a project to start a task'
     : task !== null && variant === 'docked'
       ? busy ? 'Steer the agent, or queue a follow-up…' : 'Reply…'
-      : planMode ? 'Describe what to build…' : 'Ask anything…';
+      : planMode ? 'Describe what to build…' : 'Ask anything. @ files, / commands';
 
   return (
     <form
@@ -217,7 +218,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           ))}
         </ul>
       ) : null}
-      <div className="relative rounded-xl border border-border bg-card shadow-composer transition-[border-color] focus-within:border-border-strong">
+      <div className="relative rounded-2xl border border-input bg-popover shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 dark:bg-card">
         {planMode && subAgentsOpen ? (
           <div className="border-b border-border px-4 pt-3 pb-2.5">
             <p className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground"><LayersIcon size={12} /> Sub-agents</p>
@@ -314,7 +315,8 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
                   value: `${SANDBOX_AGENT_PREFIX}${agent.id}`,
                   label: agent.name,
                   hint: 'Agent with a sandbox',
-                  mark: <span aria-hidden="true" className="flex size-[13px] items-center justify-center rounded-[4px] text-[7px] font-bold text-white" style={{ background: agent.color }}>{agent.name.slice(0, 1).toUpperCase()}</span>,
+                  // The agent's own icon, the same one the Agents list and its chat show.
+                  mark: <AgentAvatar agent={agent} size={16} />,
                 })) : []),
               ]}
             />

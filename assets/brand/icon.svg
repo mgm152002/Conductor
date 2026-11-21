@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a2a30"/>
+      <stop offset="1" stop-color="#0b0b0e"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="185.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <g fill="none" stroke-width="48" stroke-linecap="round">
+  <path d="M 706.7 336.7 A 262 262 0 1 0 706.7 687.3" stroke="#5b8cff" />
+  <path d="M 631.6 369.5 A 186 186 0 1 0 631.6 654.5" stroke="#9b6bff" />
+  <path d="M 563.6 414.9 A 110 110 0 1 0 563.6 609.1" stroke="#f0609e" />
+  </g>
+  <circle cx="686" cy="512" r="38" fill="#ffffff"/>
+</svg>

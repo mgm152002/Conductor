@@ -1,7 +1,7 @@
 import type { Task, TaskState } from '@shared/domain';
 
 // Maps a task (shown as a "thread") to the compact status pill used in the
-// sidebar and chat header, in the style of T3 Code's thread status pills.
+// sidebar and chat header, as status pills.
 
 export interface ThreadStatus {
   label: string;

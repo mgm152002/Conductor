@@ -28,7 +28,7 @@ function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }
   const checks = item.criteria.filter((criterion) => criterion !== 'response: nonempty');
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] min-w-0 rounded-2xl rounded-br-md bg-message px-3.5 py-2.5 text-message-foreground">
+      <div className="relative max-w-[80%] min-w-0 rounded-2xl bg-message px-4 py-2.5 text-message-foreground">
         <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{item.text}</p>
         {item.attachments.length > 0 ? (
           <div className="mt-3">
@@ -105,16 +105,22 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
     tools > 0 ? `${tools} tool call${tools === 1 ? '' : 's'}` : null,
   ].filter(Boolean);
   const last = [...entries].reverse().find((e) => e.notice !== true) ?? entries[entries.length - 1]!;
-  // Short groups and the live group stay expanded, like T3 Code's work log.
+  // Short groups and the live group stay expanded.
   const expanded = open || live || entries.length <= 3;
+  // Work heading: "Worked for 4m 6s ›" over a hairline; the steps open beneath it.
+  const started = Date.parse(entries[0]!.at);
+  const ended = Date.parse(entries[entries.length - 1]!.at);
+  const seconds = Number.isFinite(started) && Number.isFinite(ended) ? Math.max(0, Math.round((ended - started) / 1000)) : 0;
+  const took = seconds >= 3600 ? `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m` : seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
   return (
-    <div className="border-l-2 border-border pl-1.5">
+    <div className="flex flex-col">
       {entries.length > 3 && !live ? (
-        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded} className="flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
-          <ChevronRightIcon size={12} className={cn('transition-transform', expanded && 'rotate-90')} />
-          <span className="shrink-0 font-medium whitespace-nowrap text-foreground/85">Work log</span>
-          <span className="shrink-0 whitespace-nowrap">{entries.length} steps{summaryParts.length > 0 ? ` — ${summaryParts.join(', ')}` : ''}</span>
-          {!expanded ? <span className="ml-auto min-w-0 truncate text-muted-foreground/70">{last.label}</span> : null}
+        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={expanded}
+          title={`${entries.length} steps${summaryParts.length > 0 ? ` — ${summaryParts.join(', ')}` : ''}`}
+          className="flex h-8 w-full cursor-pointer items-center gap-1 border-b border-border text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <span className="shrink-0 whitespace-nowrap">Worked for {took}</span>
+          <ChevronRightIcon size={14} className={cn('shrink-0 transition-transform', expanded && 'rotate-90')} />
+          {!expanded ? <span className="ms-auto min-w-0 truncate ps-4 text-xs text-muted-foreground/70">{entries.length} steps · {last.label}</span> : null}
         </button>
       ) : null}
       {expanded ? <ul className="flex flex-col py-1">{entries.map((entry) => <WorkRow key={entry.id} entry={entry} live={live} />)}</ul> : null}

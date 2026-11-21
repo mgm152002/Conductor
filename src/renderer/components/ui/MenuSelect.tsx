@@ -18,7 +18,7 @@ export interface MenuOption {
   disabled?: boolean;
 }
 
-export function MenuSelect({ value, options, onChange, label, disabled, variant = 'pill', className, title, searchable = false }: {
+export function MenuSelect({ value, options, onChange, label, disabled, variant = 'pill', className, title, searchable = false, icon }: {
   value: string;
   options: MenuOption[];
   onChange: (value: string) => void;
@@ -30,6 +30,8 @@ export function MenuSelect({ value, options, onChange, label, disabled, variant 
   title?: string | undefined;
   /** Show a filter input at the top of the menu (long model lists). */
   searchable?: boolean;
+  /** Render the trigger as this icon alone (a toolbar icon button). */
+  icon?: React.ReactNode;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -45,10 +47,14 @@ export function MenuSelect({ value, options, onChange, label, disabled, variant 
     const rect = el.getBoundingClientRect();
     const menuHeight = Math.min(options.length * 36 + 8, 288) + (searchable ? 37 : 0);
     const above = rect.bottom + menuHeight + 8 > window.innerHeight && rect.top > menuHeight + 8;
+    // Never wider than the window; an icon trigger's menu opens leftwards from
+    // its right edge (it sits at the end of a toolbar), and both stay on screen.
+    const width = Math.min(Math.max(rect.width, icon !== undefined ? 280 : 200), window.innerWidth - 16);
+    const preferred = icon !== undefined ? rect.right - width : rect.left;
     setPos({
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 200) - 8)),
+      left: Math.max(8, Math.min(preferred, window.innerWidth - width - 8)),
       top: above ? rect.top - 4 : rect.bottom + 4,
-      width: Math.max(rect.width, 200),
+      width,
       above,
     });
   };
@@ -103,15 +109,21 @@ export function MenuSelect({ value, options, onChange, label, disabled, variant 
         onClick={() => { setQuery(''); setOpen((v) => !v); }}
         className={cn(
           'flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-1.5 text-xs whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none disabled:cursor-default disabled:opacity-60',
-          variant === 'pill'
+          icon !== undefined
+            ? 'size-7 justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground'
+            : variant === 'pill'
             ? 'rounded-full pr-2 pl-2.5 text-muted-foreground hover:bg-accent hover:text-foreground'
             : 'h-8 w-full rounded-lg border border-input bg-card px-2.5 text-foreground hover:border-border-strong',
           className,
         )}
       >
-        {selected?.mark !== undefined ? <span className="flex shrink-0 items-center text-foreground/80">{selected.mark}</span> : null}
-        <span className="min-w-0 truncate">{selected?.label ?? value}</span>
-        <ChevronDownIcon size={11} className={cn('shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
+        {icon !== undefined ? icon : (
+          <>
+            {selected?.mark !== undefined ? <span className="flex shrink-0 items-center text-foreground/80">{selected.mark}</span> : null}
+            <span className="min-w-0 truncate">{selected?.label ?? value}</span>
+            <ChevronDownIcon size={11} className={cn('shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-180')} />
+          </>
+        )}
       </button>
       {open && pos !== null && typeof document !== 'undefined' ? createPortal(
         <div

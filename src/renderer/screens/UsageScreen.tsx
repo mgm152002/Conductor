@@ -6,8 +6,7 @@ import { UsageLimitsView } from '../components/usage/UsageLimitsView';
 import { UsageTokensView } from '../components/usage/UsageTokensView';
 import { Alert, Button, EmptyState } from '../components/ui/primitives';
 import { useUsageOverview } from '../hooks/useUsageOverview';
-import { ScreenScaffold } from './ScreenScaffold';
-import { UsageIcon } from '../components/ui/icons';
+import { AppRouteModal, AppRouteModalClose } from '../components/ui/AppRouteModal';
 
 // The Usage destination (Requirement 2.1). `UsageScreen` owns the selected
 // view/range and the bridge request; `UsageScreenView` is a pure render of that
@@ -31,6 +30,8 @@ export interface UsageScreenViewProps {
   onViewChange?: (view: UsageView) => void;
   onRangeChange?: (range: UsageRange) => void;
   onRefresh?: () => void;
+  /** Set inside the route modal: shows the close button. */
+  onClose?: () => void;
 }
 
 const noop = (): void => {};
@@ -71,24 +72,28 @@ export function UsageScreenView({
   onViewChange = noop,
   onRangeChange = noop,
   onRefresh = noop,
+  onClose,
 }: UsageScreenViewProps): React.JSX.Element {
+  // Usage modal: a "Usage" breadcrumb header with the view switch,
+  // refresh and close at the right; the body in the readable column.
   return (
-    <ScreenScaffold
-      title="Usage"
-      screen="usage"
-      layout="dashboard"
-      icon={<UsageIcon size={16} />}
-      actions={(
-        <UsageHeader
-          view={view}
-          range={range}
-          loading={loading}
-          onViewChange={onViewChange}
-          onRangeChange={onRangeChange}
-          onRefresh={onRefresh}
-        />
-      )}
-    >
+    <section data-screen="usage" aria-labelledby="usage-title" className="flex min-h-0 flex-1 flex-col">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border ps-5 pe-2">
+        <h1 id="usage-title" className="text-sm font-medium text-foreground">Usage</h1>
+        <div className="ms-auto flex min-w-0 items-center gap-1">
+          <UsageHeader
+            view={view}
+            range={range}
+            loading={loading}
+            onViewChange={onViewChange}
+            onRangeChange={onRangeChange}
+            onRefresh={onRefresh}
+          />
+          {onClose !== undefined ? <AppRouteModalClose onClose={onClose} /> : null}
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 pt-6 pb-12 sm:px-6">
       {error !== null ? (
         <Alert
           action={(
@@ -112,17 +117,22 @@ export function UsageScreenView({
           title="No usage recorded yet"
         />
       ) : null}
-    </ScreenScaffold>
+      </div>
+      </div>
+    </section>
   );
 }
 
-export function UsageScreen(): React.JSX.Element {
+export function UsageScreen({ onClose }: { onClose?: () => void }): React.JSX.Element {
   const [view, setView] = useState<UsageView>(DEFAULT_VIEW);
   const [range, setRange] = useState<UsageRange>(DEFAULT_RANGE);
   const { summary, loading, error, refresh } = useUsageOverview(range);
 
+  const close = onClose ?? ((): void => { window.history.back(); });
   return (
+    <AppRouteModal label="Usage" onClose={close}>
     <UsageScreenView
+      onClose={close}
       summary={summary}
       loading={loading}
       error={error}
@@ -132,5 +142,6 @@ export function UsageScreen(): React.JSX.Element {
       onRangeChange={setRange}
       onRefresh={refresh}
     />
+    </AppRouteModal>
   );
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { WebDriverSession, browserToolPrefix, type BrowserDriver, type BrowserKind } from './cloud-browser';
+import { browserToolPrefix, type BrowserDriver, type BrowserKind } from './browser-tools';
 import { readFile, stat } from 'node:fs/promises';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -69,9 +69,6 @@ function toAgent(row: AgentRow): SandboxAgent {
 
 export { SANDBOX_MCP_KEY };
 
-/** Sandbox keys of flows (see flow-service). */
-const FLOW_KEY_PREFIX = 'group-flow-';
-
 export interface SandboxAgentServiceDeps {
   store: Store;
   manager: SandboxManager;
@@ -94,10 +91,10 @@ export interface SandboxAgentServiceDeps {
   sharedKnowledge?: { request(force?: boolean): Promise<void> };
   /** The agents' email inbox. Only offered to agents while it is connected. */
   mail?: import('./agentmail').AgentMail;
-  /** The remote WebDriver browser a run gets, if its flow or agent has one set up. */
-  cloudBrowser?: (agentId: string, flowId: string | undefined) => Promise<import('./cloud-browser').CloudBrowserConfig | undefined>;
-  /** Which browser runs use (Settings → Browser). Default: cloud. */
+  /** Which browser runs use (Settings → Browser). Default: sandbox. */
   browserPreference?: () => BrowserPreference;
+  /** The secrets the user saved for this agent (or for all agents) to type into web forms. */
+  agentSecrets?: (agentId: string) => import('./browser-tools').BrowserSecrets;
   /** A new tab in Conductor's Chrome on this Mac, when Chrome is installed. */
   deviceBrowser?: () => BrowserDriver | undefined;
 }
@@ -697,14 +694,10 @@ export class SandboxAgentService {
     const scope = this.sandboxScope(task.id);
     const sandboxKey = scope?.key ?? agent.id;
     const resumed = this.resumedWork(task, stepId, sandboxKey);
-    const flowId = sandboxKey.startsWith(FLOW_KEY_PREFIX) ? sandboxKey.slice(FLOW_KEY_PREFIX.length) : undefined;
-    const preference = this.deps.browserPreference?.() ?? 'cloud';
+    const preference = this.deps.browserPreference?.() ?? 'sandbox';
     // The browser this run uses outside the sandbox, if any (Settings → Browser).
     let browser: { kind: BrowserKind; driver: BrowserDriver } | undefined;
-    if (preference === 'cloud') {
-      const config = await this.deps.cloudBrowser?.(agent.id, flowId).catch(() => undefined);
-      if (config !== undefined) browser = { kind: 'cloud', driver: new WebDriverSession(config) };
-    } else if (preference === 'device' && agent.tools.includes('browser')) {
+    if (preference === 'device' && agent.tools.includes('browser')) {
       const driver = this.deps.deviceBrowser?.();
       if (driver !== undefined) browser = { kind: 'device', driver };
     }
@@ -712,6 +705,8 @@ export class SandboxAgentService {
     // the agent first uses its terminal, files or code: a run that only browses never starts it.
     const tools = browser !== undefined ? agent.tools.filter((group) => group !== 'browser') : agent.tools;
     const noSandbox = browser !== undefined && tools.length === 0;
+    const secrets = browser !== undefined ? this.deps.agentSecrets?.(agent.id) : undefined;
+    const secretLabels = secrets?.labels() ?? [];
     const sandbox = (): Promise<import('./sandbox-manager').SandboxEndpoint> => {
       started ??= (async () => {
         const already = this.deps.manager.endpoint(sandboxKey);
@@ -743,7 +738,7 @@ export class SandboxAgentService {
       return { path: local, name };
     };
     const session = await this.deps.gateway.open({
-      ...(browser !== undefined ? { browser: { ...browser, uploads: () => this.attachmentFiles(task.id), ...(noSandbox ? {} : { fromSandbox }) }, lazySandbox: true } : {}),
+      ...(browser !== undefined ? { browser: { ...browser, uploads: () => this.attachmentFiles(task.id), ...(noSandbox ? {} : { fromSandbox }), ...(secrets !== undefined ? { secrets } : {}) }, lazySandbox: true } : {}),
       ...(noSandbox ? { noSandbox: true } : {}),
       agentName: agent.name,
       tools,
@@ -784,11 +779,9 @@ export class SandboxAgentService {
       : browser !== undefined ? `The user attached: ${files.map((file) => file.name).join(', ')}. To put one on a web form, call ${browserToolPrefix(browser.kind)}upload_file with its name. To open or change one, it is also copied into your sandbox as: ${files.map((file) => `${SANDBOX_ATTACHMENT_DIR}/${task.id.slice(0, 8)}/${file.name}`).join(', ')}.`
       : `The user attached ${files.length} file${files.length === 1 ? '' : 's'}. They are copied into your sandbox as: ${files.map((file) => `${SANDBOX_ATTACHMENT_DIR}/${task.id.slice(0, 8)}/${file.name}`).join(', ')}. Work with them there${files.some((file) => /\.zip$/i.test(file.name)) ? '; unzip archives in the sandbox to read their files' : ''}.`;
     const p = browser !== undefined ? browserToolPrefix(browser.kind) : '';
-    const browserWhat = browser?.kind === 'device'
-      ? 'Chrome on the user\'s Mac (a profile of its own, running out of the user\'s way; sites the user signed into there stay signed in)'
-      : 'your cloud browser (a remote Chrome)';
+    const browserWhat = 'Chrome on the user\'s Mac (a profile of its own, running out of the user\'s way; sites the user signed into there stay signed in)';
     const browserNote = browser === undefined ? ''
-      : `Browse the web with ${browserWhat}: the "${p}*" tools. Open pages with ${p}navigate, read them with ${p}get_text, click and type with ${p}click and ${p}type, and attach files to forms with ${p}upload_file — an attached file by its name, or a file you made in your sandbox by its full path.`;
+      : `Browse the web with ${browserWhat}: the "${p}*" tools. Open pages with ${p}navigate, read them with ${p}get_text, click and type with ${p}click and ${p}type, and attach files to forms with ${p}upload_file — an attached file by its name, or a file you made in your sandbox by its full path.${secretLabels.length > 0 ? ` The user saved these secrets for you: ${secretLabels.map((label) => `"${label}"`).join(', ')}. To sign in, type one into a field with ${p}type_secret by its name; you never see the value, so never ask the user for it.` : ''}`;
     const browserOnlyGuidance = [
       `You are "${agent.name}"${agent.description !== '' ? ` — ${agent.description}` : ''}.`,
       agent.instructions,

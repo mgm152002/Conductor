@@ -9,7 +9,7 @@ import type { ToolApprovalDecision } from '../adapters/tool-gate';
 import { SANDBOX_SHARED_DIR, SANDBOX_WORKSPACE_DIR, type SandboxEndpoint } from './sandbox-manager';
 import shippedTools from './aio-tools.json';
 import { SharedLocks, refusal, type LockOwner } from './shared-locks';
-import { browserLabel, browserToolPrefix, browserTools, callBrowser, type BrowserDriver, type BrowserKind } from './cloud-browser';
+import { browserLabel, browserToolPrefix, browserTools, callBrowser, type BrowserDriver, type BrowserKind, type BrowserSecrets } from './browser-tools';
 
 // The MCP server an agent CLI connects to for its sandbox tools.
 //
@@ -200,12 +200,12 @@ export interface GatewaySessionConfig {
   /** The agents' email inbox (AgentMail). When set, the run gets the email tools. */
   mail?: { send(subject: string, body: string): Promise<string>; inbox(limit: number): Promise<string>; read(id: string): Promise<string> };
   /**
-   * A browser outside the sandbox for this run: a cloud WebDriver hub
-   * (cloud_browser_* tools) or Chrome on this Mac (chrome_browser_* tools).
+   * A browser outside the sandbox for this run: Chrome on this Mac
+   * (chrome_browser_* tools).
    * Its tab or session is closed when the run ends. `uploads` are the files it
    * may attach to forms (the task's attachments, on this Mac).
    */
-  browser?: { kind: BrowserKind; driver: BrowserDriver; uploads?: () => Array<{ path: string; name: string }>; fromSandbox?: (path: string) => Promise<{ path: string; name: string }> };
+  browser?: { kind: BrowserKind; driver: BrowserDriver; uploads?: () => Array<{ path: string; name: string }>; fromSandbox?: (path: string) => Promise<{ path: string; name: string }>; secrets?: BrowserSecrets };
   /** Run without a sandbox (outside browser only): the sandbox is never started or asked for its tools. */
   noSandbox?: boolean;
   /**
@@ -224,6 +224,8 @@ interface Session {
   markListed: () => void;
   client?: Promise<Client>;
   tools?: Promise<GatewayTool[]>;
+  /** Secret values typed into the browser this run: blanked out of whatever the agent reads back. */
+  typedSecrets: Set<string>;
 }
 
 export interface GatewaySession {
@@ -289,7 +291,7 @@ function describeCall(name: string, args: Json): { summary: string; detail?: str
   if (group === 'browser') {
     const index = typeof args['index'] === 'number' ? `element #${args['index']}` : undefined;
     const target = [pick('url', 'selector', 'text', 'element', 'ref', 'key', 'script'), index, pick('value')].filter((part) => part !== undefined).join(', ') || undefined;
-    return { kind: 'permissions', summary: `${/^cloud_browser/i.test(name) ? browserLabel('cloud') : /^chrome_browser/i.test(name) ? browserLabel('device') : 'Browser action'}: ${name.replace(/^(cloud_|chrome_)?browser_?/i, '').replace(/_/g, ' ')}`, ...(target !== undefined ? { detail: target } : {}) };
+    return { kind: 'permissions', summary: `${/^chrome_browser/i.test(name) ? browserLabel('device') : 'Browser action'}: ${name.replace(/^(chrome_)?browser_?/i, '').replace(/_/g, ' ')}`, ...(target !== undefined ? { detail: target } : {}) };
   }
   return { kind: 'permissions', summary: `Sandbox tool: ${name}`, detail: JSON.stringify(args).slice(0, 500) };
 }
@@ -319,7 +321,7 @@ export class SandboxGateway {
     const token = randomBytes(24).toString('hex');
     let markListed: () => void = () => {};
     const listed = new Promise<void>((resolve) => { markListed = resolve; });
-    const session: Session = { config, listed, markListed };
+    const session: Session = { config, listed, markListed, typedSecrets: new Set() };
     this.sessions.set(token, session);
     return {
       url: `http://127.0.0.1:${port}/g/${token}/mcp`,
@@ -401,7 +403,7 @@ export class SandboxGateway {
     if (sandbox && session.config.lockOwner !== undefined) out.push(...LOCK_TOOLS);
     if (session.config.memory !== undefined) out.push(...MEMORY_TOOLS);
     if (session.config.mail !== undefined) out.push(...EMAIL_TOOLS);
-    if (session.config.browser !== undefined) out.push(...(browserTools(session.config.browser.kind) as GatewayTool[]));
+    if (session.config.browser !== undefined) out.push(...(browserTools(session.config.browser.kind, (session.config.browser.secrets?.labels().length ?? 0) > 0) as GatewayTool[]));
     return out;
   }
 
@@ -442,7 +444,7 @@ export class SandboxGateway {
       real.catch(() => undefined);
       return this.visible(session, this.upstream);
     }
-    // A run with a cloud browser can still work when the sandbox can't start (Docker off).
+    // A run with Chrome can still work when the sandbox can't start (Docker off).
     const guarded = session.config.browser !== undefined ? real.catch(() => this.visible(session, [])) : real;
     const waited = await Promise.race([guarded, new Promise<undefined>((resolve) => setTimeout(resolve, LIST_WAIT_MS, undefined))]);
     if (waited !== undefined) return waited;
@@ -523,7 +525,7 @@ export class SandboxGateway {
         if (decision === 'cancel') return { content: [{ type: 'text', text: 'The run was stopped before this action was approved.' }], isError: true };
         if (decision === 'decline') return { content: [{ type: 'text', text: 'The user declined this action. Do not retry it; continue another way or explain what you need.' }], isError: true };
       }
-      const result = await callBrowser(browser.driver, browser.kind, name, args, signal, browser.uploads, browser.fromSandbox);
+      const result = await callBrowser(browser.driver, browser.kind, name, args, signal, browser.uploads, browser.fromSandbox, browser.secrets !== undefined ? { ...browser.secrets, typed: session.typedSecrets } : undefined);
       session.config.onCall?.({ tool: name, ok: result['isError'] !== true });
       return result;
     }

@@ -26,9 +26,11 @@
     "test": "vitest --run"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "5.2.8",
     "@modelcontextprotocol/sdk": "1.32.2",
     "better-sqlite3": "13.0.3",
     "imapflow": "2.9.1",
+    "lucide-react": "0.564.0",
     "mailparser": "3.12.4",
     "mammoth": "1.13.0",
     "mermaid": "12.2.0",
@@ -39,6 +41,7 @@
     "react-markdown": "10.1.0",
     "react-router-dom": "7.18.4",
     "remark-gfm": "4.0.1",
+    "tailwind-merge": "3.4.0",
     "turndown": "7.2.4",
     "zod": "4.6.7",
     "zustand": "5.0.16"

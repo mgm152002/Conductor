@@ -27,9 +27,11 @@ export function moodFor(task: Task, waiting: boolean): AgentMood {
   return 'idle';
 }
 
-export function AgentReply({ agent, task, onText, previousRun, onRun }: {
+export function AgentReply({ agent, task, onText, previousRun, onRun, named = false }: {
   agent: SandboxAgent;
   task: Task;
+  /** Group chats label each reply with its speaker; a 1:1 chat needs no label. */
+  named?: boolean;
   /** The CLI/model the previous turn ran with, to show a switch. */
   previousRun?: TurnRun | undefined;
   /** Reports the CLI/model this turn ran with, for the next turn's comparison. */
@@ -62,13 +64,15 @@ export function AgentReply({ agent, task, onText, previousRun, onRun }: {
   const visible = capacity !== undefined ? items.filter((item) => item.kind !== 'work' || !item.entries.some((entry) => CAPACITY.test(entry.label))) : items;
 
   return (
-    <div className="flex gap-3">
-      <AgentAvatar agent={agent} size={32} mood={moodFor(task, false)} className="mt-0.5" />
-      <div className="min-w-0 flex-1">
-        <p className="mb-1 flex items-baseline gap-2 text-xs">
-          <span className="font-semibold text-foreground">{agent.name}</span>
-          <time dateTime={task.updatedAt} className="text-3xs text-muted-foreground">{relativeTime(task.updatedAt)}</time>
+    <div className="min-w-0">
+      {named ? (
+        <p className="mb-1.5 flex items-center gap-1.5 px-1 text-xs">
+          <AgentAvatar agent={agent} size={16} mood={moodFor(task, false)} />
+          <span className="font-medium text-foreground">{agent.name}</span>
+          <time dateTime={task.updatedAt} className="text-muted-foreground/70">{relativeTime(task.updatedAt)}</time>
         </p>
+      ) : null}
+      <div className="min-w-0">
         {capacity !== undefined ? <div className="mb-2"><Alert tone="warning">{capacity}</Alert></div> : null}
         {visible.length > 0 ? <MessagesTimeline items={visible} live={live} /> : null}
         {details !== null ? <div className="mt-3 empty:hidden"><DeliveredFiles taskId={task.id} artifacts={details.artifacts} /></div> : null}

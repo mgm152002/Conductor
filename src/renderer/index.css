@@ -4,7 +4,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Design tokens.
-   Neutral greys with one blue accent, modelled on t3code: a quiet sidebar,
+   Neutral greys with one blue accent: a quiet sidebar,
    a near-white (or black) canvas, hairline borders, and colour kept for the
    one primary action, the selection and live state. Components use the
    semantic utilities declared in @theme inline (bg-background, border-border…). */
@@ -43,10 +43,25 @@
   --shadow-hard-color: transparent;
   --shadow-pop: 0 1px 2px rgb(0 0 0 / 5%), 0 10px 30px -10px rgb(0 0 0 / 18%);
   --shadow-lift: none;
+  --popover: #ffffff;
+  --chrome: var(--background);
+  --secondary: #fafafa;
+  --placeholder: var(--muted-foreground);
+  --icon-muted: var(--muted-foreground);
+  --accent-foreground: var(--foreground);
+  --error-surface: color-mix(in srgb, var(--destructive) 8%, transparent);
+  --warning-surface: color-mix(in srgb, var(--warning) 8%, transparent);
+  --sidebar-control-surface: #f4f4f5;
+  --toolbar: var(--background);
+  --toolbar-border: var(--border);
+  --toolbar-control: var(--popover);
+  --toolbar-control-hover: var(--accent);
+  --control-radius: 0.5rem;
   --chat-max: 46rem;
-  --topbar-height: 44px;
-  --bar-height: 44px;
-  --header-height: 44px;
+  --topbar-height: 52px;
+  --bar-height: 52px;
+  --header-height: 52px;
+  --sidebar-icon-color: color-mix(in srgb, var(--sidebar-muted-foreground) 85%, var(--sidebar));
 }
 
 .dark {
@@ -85,24 +100,60 @@
   --shadow-lift: none;
 }
 
-/* Accent themes (Settings > Appearance). Only the accent changes. The
-   default (cobalt) is the base above. */
-:root[data-accent='orchid'] { --primary: #ae1f7b; --ring: #ae1f7b; --primary-foreground: #ffffff; }
-:root.dark[data-accent='orchid'] { --primary: #e46cc0; --ring: #e46cc0; --primary-foreground: #2b0a22; }
-:root[data-accent='pine'] { --primary: #17754a; --ring: #17754a; --primary-foreground: #ffffff; }
-:root.dark[data-accent='pine'] { --primary: #4fbf86; --ring: #4fbf86; --primary-foreground: #04170e; }
-:root[data-accent='marigold'] { --primary: #96650a; --ring: #96650a; --primary-foreground: #ffffff; }
-:root.dark[data-accent='marigold'] { --primary: #e0ad48; --ring: #e0ad48; --primary-foreground: #261b04; }
-:root[data-accent='ember'] { --primary: #c2410c; --ring: #c2410c; --primary-foreground: #ffffff; }
-:root.dark[data-accent='ember'] { --primary: #f5865a; --ring: #f5865a; --primary-foreground: #2c1004; }
+/* Themes (Settings > Appearance): a theme sets its colour roles as
+   --app-theme-* on <html> (see hooks/useSystemAppearance.ts) and this maps the
+   roles onto the app's tokens. "Graphite" is the default light/dark pair. */
+html[data-theme-id]:not([data-theme-id='']) {
+  --background: var(--app-theme-canvas);
+  --chrome: var(--app-theme-chrome);
+  --card: var(--app-theme-surface);
+  --surface-raised: var(--app-theme-surface-raised);
+  --popover: var(--app-theme-surface-overlay);
+  --foreground: var(--app-theme-text);
+  --primary: var(--app-theme-message-action);
+  --primary-foreground: var(--app-theme-message-action-foreground);
+  --ring: var(--app-theme-focus);
+  --secondary: var(--app-theme-secondary);
+  --muted: var(--app-theme-muted);
+  --muted-foreground: var(--app-theme-muted-foreground);
+  --placeholder: var(--app-theme-placeholder);
+  --icon-muted: var(--app-theme-icon-muted);
+  --accent: var(--app-theme-accent-surface);
+  --accent-foreground: var(--app-theme-accent-surface-foreground);
+  --border: var(--app-theme-border);
+  --border-strong: var(--app-theme-input);
+  --input: var(--app-theme-input);
+  --message: var(--app-theme-message-surface);
+  --message-foreground: var(--app-theme-message-foreground);
+  --destructive: var(--app-theme-error);
+  --destructive-foreground: var(--app-theme-error-foreground);
+  --error-surface: var(--app-theme-error-surface);
+  --warning: var(--app-theme-warning);
+  --warning-surface: var(--app-theme-warning-surface);
+  --rail: var(--app-theme-sidebar);
+  --sidebar: var(--app-theme-sidebar);
+  --sidebar-foreground: var(--app-theme-sidebar-foreground);
+  --sidebar-muted-foreground: var(--app-theme-sidebar-muted-foreground);
+  --sidebar-control-surface: var(--app-theme-sidebar-control-surface);
+  --sidebar-border: var(--app-theme-sidebar-border);
+  --sidebar-row-hover: var(--app-theme-sidebar-row-hover);
+  --sidebar-row-active: var(--app-theme-sidebar-row-active);
+  --toolbar: var(--app-theme-toolbar);
+  --toolbar-border: var(--app-theme-toolbar-border);
+  --toolbar-control: var(--app-theme-toolbar-control);
+  --toolbar-control-hover: var(--app-theme-toolbar-control-hover);
+  --code: var(--app-theme-code-background);
+}
 
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
-  --radius-xs: 0.25rem;
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.625rem;
+  /* Stacks: the system face on macOS, Inter elsewhere. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  /* Scale around --radius: 0.5rem. */
+  --radius-xs: 0.125rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
   --radius-2xl: 1rem;
   --radius-3xl: 1.25rem;
@@ -144,11 +195,25 @@
   --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-code: var(--code);
+  --color-popover: var(--popover);
+  --color-chrome: var(--chrome);
+  --color-secondary: var(--secondary);
+  --color-placeholder: var(--placeholder);
+  --color-icon-muted: var(--icon-muted);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-error-surface: var(--error-surface);
+  --color-warning-surface: var(--warning-surface);
+  --color-sidebar-control-surface: var(--sidebar-control-surface);
+  --color-toolbar: var(--toolbar);
+  --color-toolbar-border: var(--toolbar-border);
+  --color-toolbar-control: var(--toolbar-control);
+  --color-toolbar-control-hover: var(--toolbar-control-hover);
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: calc(1 / 0.6875);
   --text-3xs: 0.625rem;
   --text-3xs--line-height: calc(0.875 / 0.625);
-  --shadow-composer: 0 18px 40px -22px var(--shadow-composer-color);
+  /* A soft 1px drop in light, a deep pulled-in shadow in dark. */
+  --shadow-composer: 0 1px 2px rgb(0 0 0 / 5%);
   --shadow-pop: var(--shadow-pop);
   --shadow-lift: var(--shadow-lift);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -182,17 +247,25 @@ body {
    control whose active stop is a raised key, and fields that sit level with
    the card. Components use these so no screen invents its own look. */
 @layer components {
+  /* Settings section heading: text-base semibold over its card. */
   .group-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--muted-foreground);
-    margin-bottom: 0.375rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.75rem;
+    padding-inline: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 0.625rem;
   }
+  /* SettingsGroup: rounded-xl border-border/60 bg-card/40 shadow-xs/5. */
   .group-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 0.625rem;
-    overflow: hidden;
+    position: relative;
+    background: color-mix(in srgb, var(--card) 40%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 0.75rem;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 5%);
   }
   /* Conversation bars (thread environment, pinned plan, diagnostics): one
      step brighter than a card so they read as chrome, not as a message. */
@@ -202,72 +275,70 @@ body {
     border-radius: 0.625rem;
     overflow: hidden;
   }
+  /* SettingsRow: px-4 py-3, rows split by border-border/50. */
   .group-row {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.625rem 0.875rem;
+    gap: 2rem;
+    padding: 0.75rem 1rem;
   }
   .group-row + .group-row {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   }
+  /* Segmented ToggleGroup: bg-input/40 p-0.5, pressed item on bg-background. */
   .seg-control {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    padding: 3px;
-    border-radius: 0.625rem;
-    background: var(--muted);
+    padding: 2px;
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--input) 40%, transparent);
   }
   .seg-item {
+    position: relative;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.375rem;
-    height: 1.625rem;
-    padding: 0 0.7rem;
-    border-radius: 0.4375rem;
-    font-size: 0.75rem;
+    height: 1.75rem;
+    padding: 0 0.625rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--muted-foreground);
     cursor: pointer;
     white-space: nowrap;
-    transition: color 120ms, background 120ms;
+    transition: color 120ms, background-color 120ms;
   }
-  .seg-item:hover { color: var(--foreground); }
+  .seg-item:hover { color: var(--foreground); background: color-mix(in srgb, var(--background) 55%, transparent); }
   .seg-item[data-active='true'] {
-    background: var(--surface-raised);
+    background: var(--background);
     color: var(--foreground);
-    box-shadow: 0 0 0 1px var(--border);
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 10%);
   }
+  .dark .seg-item:hover { background: color-mix(in srgb, var(--input) 32%, transparent); }
+  .dark .seg-item[data-active='true'] { background: color-mix(in srgb, var(--input) 72%, transparent); }
+  /* Input: border-input bg-background rounded-lg shadow-xs/5, a 3px ring on focus. */
   .inset-field {
-    background: transparent;
+    background: var(--background);
+    background-clip: padding-box;
     border: 1px solid var(--input);
     border-radius: 0.5rem;
     color: var(--foreground);
     outline: none;
-    transition: border-color 120ms, box-shadow 120ms;
+    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 5%);
+    transition: box-shadow 120ms, border-color 120ms;
   }
-  .inset-field:hover { border-color: var(--border-strong); }
+  .inset-field::placeholder { color: var(--placeholder); }
   .inset-field:focus-visible {
     border-color: var(--ring);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 20%, transparent);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ring) 24%, transparent);
   }
-  .limit-track {
-    position: relative;
-    height: 1.75rem;
-    border-radius: 0.5rem;
-    overflow: hidden;
-    background: var(--muted);
-    border: 1px solid var(--border);
-  }
-  .limit-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    background: color-mix(in srgb, var(--primary) 30%, transparent);
-    border-right: 2px solid var(--primary);
-  }
+  .dark .inset-field { background: color-mix(in srgb, var(--input) 32%, transparent); }
+  /* Usage limit bar (styled inline); the class marks it. */
+  .limit-track { position: relative; }
 
-  /* Sidebar navigation rows (t3code style): icon, label, optional count. */
+  /* Sidebar navigation rows: icon, label, optional count. */
   .nav-row {
     display: flex;
     height: 1.875rem;
@@ -474,6 +545,14 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* Glass surface for floating cards: a translucent popover with blur. */
+@utility dropdown-glass {
+  background: color-mix(in srgb, var(--popover) 94%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
+  backdrop-filter: blur(20px) saturate(1.12);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
 /* The thread inspector is a floating window over this layout, so the
    conversation keeps the full width at every window size. */
 .thread-layout {
@@ -587,16 +666,6 @@ body {
    only restyle existing structure inside the named screen; Settings reuses
    several of the same components and must not inherit these shapes. */
 
-/* Projects: a pinboard of project cards, not a settings list. */
-/* Learning: a control room — configuration on the left, outcomes on the right. */
-@media (min-width: 1024px) {
-  [data-screen='learning'] section[aria-label='Learning'] {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-}
-
 /* Memory: the search bar stays pinned while results scroll under it. */
 [data-screen='memory'] form:has(input[placeholder^='Search']) {
   position: sticky;
@@ -629,3 +698,20 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Dialog backdrop: the app stays visible behind a 4px blur. */
+@utility dialog-backdrop {
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  .dark & {
+    background: color-mix(in srgb, var(--background) 64%, transparent);
+  }
+}
+
+/* Over a draggable title bar, a modal's presses must reach the modal. */
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.dark .shadow-composer { box-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%); }

@@ -37,11 +37,19 @@ interface UiState {
   setDetailsOpen: (open: boolean) => void;
   openDetails: (tab: DetailsTab) => void;
   toggleProject: (id: string) => void;
+  /** Work's thread list shows every project (null) or only this one. */
+  workProject: string | null;
+  setWorkProject: (id: string | null) => void;
   setAddProjectOpen: (open: boolean) => void;
   setPlanMode: (on: boolean) => void;
 }
 
 const PANEL_KEY = 'conductor.sidebar.hidden';
+const WORK_PROJECT_KEY = 'conductor.sidebar.workProject';
+
+function loadWorkProject(): string | null {
+  try { return window.localStorage.getItem(WORK_PROJECT_KEY); } catch { return null; }
+}
 
 function loadPanelCollapsed(): boolean {
   try { return window.localStorage.getItem(PANEL_KEY) === '1'; } catch { return false; }
@@ -76,6 +84,14 @@ export const useUiStore = create<UiState>((set) => ({
   openDetails: (detailsTab): void => { set({ detailsOpen: true, detailsTab }); },
   toggleProject: (id): void => {
     set((state) => ({ collapsedProjects: { ...state.collapsedProjects, [id]: !state.collapsedProjects[id] } }));
+  },
+  workProject: loadWorkProject(),
+  setWorkProject: (workProject): void => {
+    try {
+      if (workProject === null) window.localStorage.removeItem(WORK_PROJECT_KEY);
+      else window.localStorage.setItem(WORK_PROJECT_KEY, workProject);
+    } catch { /* session-only */ }
+    set({ workProject });
   },
   setAddProjectOpen: (addProjectOpen): void => { set({ addProjectOpen }); },
   setPlanMode: (planMode): void => { set({ planMode }); },

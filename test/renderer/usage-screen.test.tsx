@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { UsageClient, UsageSummary } from '../../src/shared/usage';
-import { SettingsScreen } from '../../src/renderer/screens/SettingsScreen';
+import { SETTINGS_PAGE_IDS } from '../../src/renderer/screens/SettingsScreen';
 import { UsageScreenView } from '../../src/renderer/screens/UsageScreen';
 import { USAGE_RANGES } from '../../src/renderer/lib/usage-format';
 
@@ -300,14 +300,8 @@ describe('Usage Limits cards', () => {
 });
 
 describe('Settings usage removal', () => {
-  it('no longer renders the usage section or its range controls', () => {
-    const html = renderToStaticMarkup(createElement(SettingsScreen));
-
-    expect(html).toContain('>Settings<');
-    expect(html).not.toContain('aria-label="Usage"');
-    expect(html).not.toContain('>Usage<');
-    expect(html).not.toContain('Last 7 days');
-    expect(html).not.toContain('Last 30 days');
-    expect(html).not.toContain('Usage statistics');
+  it('keeps usage out of the settings pages (it opens as its own modal)', () => {
+    expect(SETTINGS_PAGE_IDS).toContain('appearance');
+    expect(SETTINGS_PAGE_IDS).not.toContain('usage');
   });
 });

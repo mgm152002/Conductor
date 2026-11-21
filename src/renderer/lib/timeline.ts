@@ -3,7 +3,7 @@ import type { TaskDetails } from '@shared/task-view';
 import type { AttachmentRef } from '@shared/attachments';
 import type { ChatActivity, ChatMessage } from '@shared/chat-contract';
 
-// Turns a task's persisted events into a chat timeline in the T3 Code shape:
+// Turns a task's persisted events into a chat timeline:
 // the user's message, collapsible groups of agent work (commands, file edits,
 // reasoning, lifecycle), the agent's prose replies, and errors.
 //
@@ -611,7 +611,7 @@ function workEntryFor(itemType: string | undefined, item: Json, completed: boole
     case 'mcp_tool_call': {
       const name = [str(item['server']), str(item['tool'])].filter(Boolean).join('.');
       const output = str(item['output']);
-      return { ...base, icon: 'tool', label: /^(cloud|chrome)_browser_/.test(str(item['tool']) ?? '') ? `${(str(item['tool']) ?? '').startsWith('chrome_') ? 'Chrome' : 'Cloud browser'}: ${(str(item['tool']) ?? '').replace(/^(cloud|chrome)_browser_/, '').replace(/_/g, ' ')}` : `Called ${name || 'tool'}`, ...(output !== undefined && output !== '' ? { detail: output } : {}), tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
+      return { ...base, icon: 'tool', label: /^chrome_browser_/.test(str(item['tool']) ?? '') ? `Chrome: ${(str(item['tool']) ?? '').replace(/^chrome_browser_/, '').replace(/_/g, ' ')}` : `Called ${name || 'tool'}`, ...(output !== undefined && output !== '' ? { detail: output } : {}), tone: completed ? (str(item['status']) === 'failed' ? 'error' : 'success') : 'running' };
     }
     case 'image_view': {
       const path = str(item['path']) ?? '';

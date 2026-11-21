@@ -75,7 +75,7 @@ export function UsageClientCard({
           ? <BrandMark brand={agentBrand(client.key)} size={14} className="shrink-0 text-foreground/85" />
           : <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-primary/80" />}
         <h4 className="truncate text-sm font-medium text-foreground">{clientLabel(client)}</h4>
-        <span className="text-3xs text-muted-foreground">{client.sessions} session{client.sessions === 1 ? '' : 's'}</span>
+        <span className="text-2xs text-muted-foreground">{client.sessions} session{client.sessions === 1 ? '' : 's'}</span>
         {empty ? <Badge className="ml-auto">No usage</Badge> : null}
         <span className={cn('ml-auto font-medium text-foreground tabular-nums', empty ? 'text-sm' : 'text-base')}>
           {primaryValue}
@@ -83,7 +83,7 @@ export function UsageClientCard({
       </header>
 
       <div className="flex items-baseline gap-2">
-        <span className="text-2xs text-muted-foreground">{primaryLabel}, {percent}% of total</span>
+        <span className="text-xs text-muted-foreground">{primaryLabel}, {percent}% of total</span>
       </div>
 
       <div className="h-1.5 w-auto overflow-hidden rounded-full bg-muted">
@@ -92,18 +92,18 @@ export function UsageClientCard({
         )}
       </div>
 
-      <p className="text-3xs text-muted-foreground">
+      <p className="text-2xs text-muted-foreground">
         {compactNumber(client.inputTokens)} input
         {' · '}{compactNumber(client.outputTokens)} output
         {client.cachedInputTokens > 0 ? ` · ${compactNumber(client.cachedInputTokens)} cached` : ''}
         {client.reasoningTokens > 0 ? ` · ${compactNumber(client.reasoningTokens)} reasoning` : ''}
       </p>
       {primaryHint !== undefined ? (
-        <p className="text-3xs text-muted-foreground">{primaryHint}</p>
+        <p className="text-2xs text-muted-foreground">{primaryHint}</p>
       ) : null}
 
       {empty ? (
-        <p className="text-3xs text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           No usage recorded for this CLI in the selected range.
           {client.lastUsedAt !== undefined ? ` Last used ${new Date(client.lastUsedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}; choose a longer range to include it.` : ''}
         </p>
@@ -126,7 +126,7 @@ export function UsageMetric({
 }): React.JSX.Element {
   return (
     <div className="group-card flex flex-col justify-center px-4 py-3.5">
-      <dt className="text-2xs font-medium text-muted-foreground">{label}</dt>
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
       <dd
         className={
           emphasis
@@ -136,7 +136,7 @@ export function UsageMetric({
       >
         {value}
       </dd>
-      {hint !== undefined ? <p className="mt-0.5 text-3xs text-muted-foreground">{hint}</p> : null}
+      {hint !== undefined ? <p className="mt-0.5 text-2xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
