@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CloudBrowserSettings, WebDriverSession, callCloudBrowser, connection, storedZip, testCloudBrowser } from '@main/sandbox/cloud-browser';
+import { CloudBrowserSettings, WebDriverSession, callBrowser, callCloudBrowser, connection, storedZip, testCloudBrowser } from '@main/sandbox/cloud-browser';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import type { GateRequest } from '@main/adapters/tool-gate';
 
@@ -128,6 +128,21 @@ describe('uploads', () => {
     expect(text(refused)).toContain('Attached: resume.pdf');
     await browser.close();
   });
+
+  it('uploads a file from the agent\'s sandbox by its full path, brought to the Mac first', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sbx-'));
+    writeFileSync(join(dir, 'tailored.pdf'), '%PDF tailored');
+    const asked: string[] = [];
+    const fromSandbox = async (path: string) => { asked.push(path); return { path: join(dir, 'tailored.pdf'), name: 'tailored.pdf' }; };
+    const browser = new WebDriverSession({ url: withCreds() });
+    const out = await callBrowser(browser, 'cloud', 'cloud_browser_upload_file', { selector: '#cv', file: '/home/gem/workspace/tailored.pdf' }, undefined, () => [], fromSandbox);
+    expect(text(out)).toBe('Attached tailored.pdf to #cv.');
+    expect(asked).toEqual(['/home/gem/workspace/tailored.pdf']);
+    // A bare name that is not attached is still refused, and points at the sandbox option.
+    const refused = await callBrowser(browser, 'cloud', 'cloud_browser_upload_file', { selector: '#cv', file: 'other.pdf' }, undefined, () => [], fromSandbox);
+    expect(text(refused)).toContain('give its full path');
+    await browser.close();
+  });
 });
 
 describe('gateway', () => {
@@ -140,7 +155,7 @@ describe('gateway', () => {
       decide: async (request: GateRequest) => { asked.push(request); return 'accept' as const; },
     };
     const plain = await gateway.open(config);
-    const withCloud = await gateway.open({ ...config, cloudBrowser: new WebDriverSession({ url: withCreds() }) });
+    const withCloud = await gateway.open({ ...config, browser: { kind: 'cloud', driver: new WebDriverSession({ url: withCreds() }) } });
     const client = new Client({ name: 't', version: '1' });
     await client.connect(new StreamableHTTPClientTransport(new URL(withCloud.url)));
     const names = (await client.listTools()).tools.map((tool) => tool.name);

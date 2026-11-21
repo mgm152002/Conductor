@@ -111,7 +111,12 @@ export const INTEGRATION_SCHEMAS = {
   'cloudBrowser.load': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i) }),
   'cloudBrowser.remove': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i) }),
   'cloudBrowser.test': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i), url: z.string().trim().max(2000).optional(), apiKey: z.string().trim().max(2000).optional() }),
-  'sandbox.stop': z.object({ agentId: uuid }),
+  'deviceChrome.status': z.void(),
+  'deviceChrome.profiles': z.void(),
+  'deviceChrome.refresh': z.void(),
+  'deviceChrome.show': z.object({ url: z.string().url().max(2000).optional() }).optional(),
+  // An agent's id, or a group's or workflow's sandbox key (group-<id>, group-flow-<id>).
+  'sandbox.stop': z.object({ agentId: z.string().regex(/^(group-(flow-)?)?[0-9a-f-]{36}$/i) }),
   'sandbox.clearBrowser': z.object({ agentId: z.string().min(1) }),
 
   // MCP servers in each agent CLI's own configuration.
@@ -171,6 +176,8 @@ export type IntegrationRequest<C extends keyof typeof INTEGRATION_SCHEMAS> = z.i
 
 export interface CloudBrowserInfo { configured: boolean; host?: string }
 export interface CloudBrowserTest { ok: boolean; browser?: string; error?: string }
+export interface DeviceChromeStatus { available: boolean; browser?: string; running: boolean; visible?: boolean; profile?: { name: string; email?: string; copiedAt: string }; profileError?: string }
+export interface ChromeProfile { dir: string; name: string; email?: string; picture: boolean }
 export interface AgentOption { id: string; name: string; available: boolean; remote: boolean }
 export interface SecretInfo { id: string; label: string; owner?: string; createdAt: string }
 export interface RemoteHostView {
@@ -230,6 +237,16 @@ export interface IntegrationsBridge {
     disconnect(): Promise<void>;
   };
   /** A remote WebDriver browser for an agent (`agent:<id>`) or a flow (`flow:<id>`); the key stays in the Keychain. */
+  /** Conductor's own Chrome on this Mac, which agents can browse with. */
+  deviceChrome: {
+    status(): Promise<DeviceChromeStatus>;
+    /** The user's own Chrome profiles; error when macOS blocks reading them. */
+    profiles(): Promise<{ profiles: ChromeProfile[]; error?: string }>;
+    /** Copy the chosen profile's logins again. */
+    refresh(): Promise<DeviceChromeStatus>;
+    /** Show it (to sign in to sites, or watch); a hidden one is restarted shown. */
+    show(url?: string): Promise<void>;
+  };
   cloudBrowser: {
     get(scope: string): Promise<CloudBrowserInfo>;
     save(scope: string, url: string, apiKey?: string): Promise<CloudBrowserInfo>;

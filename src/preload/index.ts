@@ -140,6 +140,12 @@ const integrations: IntegrationsBridge = {
     signOut: () => invoke('phone.signOut'),
     stop: () => invoke('phone.stop'),
   },
+  deviceChrome: {
+    status: () => invoke('deviceChrome.status'),
+    profiles: () => invoke('deviceChrome.profiles'),
+    refresh: () => invoke('deviceChrome.refresh'),
+    show: (url) => invoke('deviceChrome.show', url !== undefined ? { url } : undefined),
+  },
   cloudBrowser: {
     get: (scope) => invoke('cloudBrowser.get', { scope }),
     save: (scope, url, apiKey) => invoke('cloudBrowser.save', { scope, url, ...(apiKey !== undefined && apiKey !== '' ? { apiKey } : {}) }),

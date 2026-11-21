@@ -42,7 +42,7 @@ export function connection(config: CloudBrowserConfig): { base: string; host: st
 }
 
 /** One browser session on the hub, opened on first use and closed when the run ends. */
-export class WebDriverSession {
+export class WebDriverSession implements BrowserDriver {
   private session: Promise<string> | undefined;
   private readonly conn: ReturnType<typeof connection>;
 
@@ -195,56 +195,95 @@ export function storedZip(name: string, data: Buffer): Buffer {
 
 // ---- the tools an agent sees -------------------------------------------------
 
-export const CLOUD_BROWSER_TOOLS = [
-  { name: 'cloud_browser_navigate', description: 'Open a URL in your cloud browser (a remote headless Chrome, separate from the sandbox browser). Use it when you were told to use the cloud browser, or the sandbox has no browser.', inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } },
-  { name: 'cloud_browser_get_text', description: 'Read the visible text of the cloud browser page, or of one element (CSS selector or XPath).', inputSchema: { type: 'object', properties: { selector: { type: 'string' } }, additionalProperties: false } },
-  { name: 'cloud_browser_screenshot', description: 'Take a screenshot of the cloud browser page.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'cloud_browser_click', description: 'Click an element in the cloud browser, by CSS selector or XPath.', inputSchema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'], additionalProperties: false } },
-  { name: 'cloud_browser_type', description: 'Type text into a field in the cloud browser (CSS selector or XPath). Set submit to press Enter afterwards, clear to empty the field first.', inputSchema: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' }, clear: { type: 'boolean' }, submit: { type: 'boolean' } }, required: ['selector', 'text'], additionalProperties: false } },
-  { name: 'cloud_browser_execute_script', description: 'Run JavaScript in the cloud browser page and get its return value (use `return …`).', inputSchema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'], additionalProperties: false } },
-  { name: 'cloud_browser_upload_file', description: 'Attach one of the files the user attached to this task to a file field (<input type=file>) in the cloud browser, e.g. a resume on an application form. Give the field (CSS selector or XPath) and the file name as the user attached it.', inputSchema: { type: 'object', properties: { selector: { type: 'string' }, file: { type: 'string', description: 'The attached file\'s name.' } }, required: ['selector', 'file'], additionalProperties: false } },
-  { name: 'cloud_browser_back', description: 'Go back one page in the cloud browser.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'cloud_browser_close', description: 'Close the cloud browser when you are done with it; the next cloud_browser call opens a fresh one.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-] as const;
+/** What every browser an agent can drive outside the sandbox can do (a WebDriver hub, or Chrome on this Mac). */
+export interface BrowserDriver {
+  navigate(url: string, signal?: AbortSignal): Promise<string>;
+  where(signal?: AbortSignal): Promise<string>;
+  screenshot(signal?: AbortSignal): Promise<string>;
+  text(selector: string | undefined, signal?: AbortSignal): Promise<string>;
+  click(selector: string, signal?: AbortSignal): Promise<string>;
+  type(selector: string, text: string, opts: { clear?: boolean; submit?: boolean }, signal?: AbortSignal): Promise<string>;
+  execute(script: string, args?: unknown[], signal?: AbortSignal): Promise<unknown>;
+  back(signal?: AbortSignal): Promise<string>;
+  upload(selector: string, file: { path: string; name: string }, signal?: AbortSignal): Promise<string>;
+  close(): Promise<void>;
+}
 
+/** Which outside browser: a cloud WebDriver hub, or Chrome on the user's own Mac. */
+export type BrowserKind = 'cloud' | 'device';
+
+const BROWSER_NAMES: Record<BrowserKind, { prefix: string; label: string; what: string }> = {
+  cloud: { prefix: 'cloud_browser', label: 'Cloud browser', what: 'your cloud browser (a remote headless Chrome)' },
+  device: { prefix: 'chrome_browser', label: 'Chrome', what: 'Chrome on the user\'s Mac (its own profile, running in the background)' },
+};
+
+export const browserToolPrefix = (kind: BrowserKind): string => `${BROWSER_NAMES[kind].prefix}_`;
+export const browserLabel = (kind: BrowserKind): string => BROWSER_NAMES[kind].label;
+
+/** The tools for one kind of outside browser, e.g. cloud_browser_navigate or chrome_browser_navigate. */
+export function browserTools(kind: BrowserKind): Array<{ name: string; description: string; inputSchema: Json }> {
+  const { prefix: p, what } = BROWSER_NAMES[kind];
+  const sel = { type: 'string', description: 'CSS selector, or XPath starting with / or (.' };
+  return [
+    { name: `${p}_navigate`, description: `Open a URL in ${what}. This is the browser to use for web work.`, inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'], additionalProperties: false } },
+    { name: `${p}_get_text`, description: 'Read the visible text of the page, or of one element.', inputSchema: { type: 'object', properties: { selector: sel }, additionalProperties: false } },
+    { name: `${p}_screenshot`, description: 'Take a screenshot of the page.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: `${p}_click`, description: 'Click an element.', inputSchema: { type: 'object', properties: { selector: sel }, required: ['selector'], additionalProperties: false } },
+    { name: `${p}_type`, description: 'Type text into a field. Set submit to press Enter afterwards, clear to empty the field first.', inputSchema: { type: 'object', properties: { selector: sel, text: { type: 'string' }, clear: { type: 'boolean' }, submit: { type: 'boolean' } }, required: ['selector', 'text'], additionalProperties: false } },
+    { name: `${p}_execute_script`, description: 'Run JavaScript in the page and get its return value (use `return …`).', inputSchema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'], additionalProperties: false } },
+    { name: `${p}_upload_file`, description: 'Attach a file to a file field (<input type=file>), e.g. a resume on an application form: one the user attached to this task (by its name), or one in your sandbox (by its full path).', inputSchema: { type: 'object', properties: { selector: sel, file: { type: 'string', description: 'The attached file\'s name, or the full path of a file in your sandbox (e.g. a resume you built there).' } }, required: ['selector', 'file'], additionalProperties: false } },
+    { name: `${p}_back`, description: 'Go back one page.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: `${p}_close`, description: 'Close this browser tab when you are done with it; the next call opens a fresh one.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  ];
+}
+
+export const CLOUD_BROWSER_TOOLS = browserTools('cloud');
 export const CLOUD_BROWSER_TOOL_NAMES: ReadonlySet<string> = new Set(CLOUD_BROWSER_TOOLS.map((tool) => tool.name));
 
 const str = (args: Json, key: string): string => (typeof args[key] === 'string' ? args[key] : '');
 
-/** Run one cloud_browser_* call; resolves to MCP tool-result content. */
-export async function callCloudBrowser(browser: WebDriverSession, name: string, args: Json, signal?: AbortSignal, files: () => Array<{ path: string; name: string }> = () => []): Promise<Json> {
+/** Run one call on an outside browser; resolves to MCP tool-result content. */
+export async function callBrowser(browser: BrowserDriver, kind: BrowserKind, name: string, args: Json, signal?: AbortSignal, files: () => Array<{ path: string; name: string }> = () => [], fromSandbox?: (path: string) => Promise<{ path: string; name: string }>): Promise<Json> {
   const text = (value: string): Json => ({ content: [{ type: 'text', text: value }] });
+  const prefix = browserToolPrefix(kind);
+  const action = name.startsWith(prefix) ? name.slice(prefix.length) : '';
   try {
-    switch (name) {
-      case 'cloud_browser_navigate': {
+    switch (action) {
+      case 'navigate': {
         const url = str(args, 'url').trim();
         if (!/^https?:\/\//i.test(url)) return { ...text('Give a full http(s) URL.'), isError: true };
         return text(await browser.navigate(url, signal));
       }
-      case 'cloud_browser_get_text': return text(await browser.text(str(args, 'selector').trim() || undefined, signal));
-      case 'cloud_browser_screenshot': return { content: [{ type: 'image', data: await browser.screenshot(signal), mimeType: 'image/png' }] };
-      case 'cloud_browser_click': return text(await browser.click(str(args, 'selector'), signal));
-      case 'cloud_browser_type': return text(await browser.type(str(args, 'selector'), str(args, 'text'), { clear: args['clear'] === true, submit: args['submit'] === true }, signal));
-      case 'cloud_browser_execute_script': {
+      case 'get_text': return text(await browser.text(str(args, 'selector').trim() || undefined, signal));
+      case 'screenshot': return { content: [{ type: 'image', data: await browser.screenshot(signal), mimeType: 'image/png' }] };
+      case 'click': return text(await browser.click(str(args, 'selector'), signal));
+      case 'type': return text(await browser.type(str(args, 'selector'), str(args, 'text'), { clear: args['clear'] === true, submit: args['submit'] === true }, signal));
+      case 'execute_script': {
         const value = await browser.execute(str(args, 'script'), [], signal);
         const out = typeof value === 'string' ? value : JSON.stringify(value ?? null);
         return text(out.length > MAX_TEXT ? `${out.slice(0, MAX_TEXT)}…` : out);
       }
-      case 'cloud_browser_upload_file': {
-        // Only files the user attached to this task can be sent, never any other file on the Mac.
+      case 'upload_file': {
+        // Only the task's attachments or a file from the agent's own sandbox can be sent, never any other file on the Mac.
         const available = files();
         const wanted = str(args, 'file').trim();
-        const file = available.find((item) => item.name === wanted) ?? available.find((item) => item.name.toLowerCase() === wanted.toLowerCase());
-        if (file === undefined) return { ...text(available.length === 0 ? 'No files are attached to this task.' : `No attached file is called "${wanted}". Attached: ${available.map((item) => item.name).join(', ')}.`), isError: true };
+        let file = available.find((item) => item.name === wanted) ?? available.find((item) => item.name.toLowerCase() === wanted.toLowerCase());
+        if (file === undefined && fromSandbox !== undefined && wanted.startsWith('/')) file = await fromSandbox(wanted);
+        if (file === undefined) return { ...text(available.length === 0 ? `No files are attached to this task.${fromSandbox !== undefined ? ' For a file in your sandbox, give its full path.' : ''}` : `No attached file is called "${wanted}". Attached: ${available.map((item) => item.name).join(', ')}.${fromSandbox !== undefined ? ' For a file in your sandbox, give its full path.' : ''}`), isError: true };
         return text(await browser.upload(str(args, 'selector'), file, signal));
       }
-      case 'cloud_browser_back': return text(await browser.back(signal));
-      case 'cloud_browser_close': await browser.close(); return text('Closed the cloud browser.');
+      case 'back': return text(await browser.back(signal));
+      case 'close': await browser.close(); return text(`Closed the ${BROWSER_NAMES[kind].label === 'Chrome' ? 'Chrome tab' : 'cloud browser'}.`);
       default: return { ...text(`Unknown tool ${name}.`), isError: true };
     }
   } catch (error) {
-    return { ...text(`The cloud browser could not do that: ${error instanceof Error ? error.message : 'unknown error'}`), isError: true };
+    return { ...text(`The ${kind === 'cloud' ? 'cloud browser' : 'Chrome browser'} could not do that: ${error instanceof Error ? error.message : 'unknown error'}`), isError: true };
   }
+}
+
+/** Run one cloud_browser_* call. */
+export function callCloudBrowser(browser: BrowserDriver, name: string, args: Json, signal?: AbortSignal, files?: () => Array<{ path: string; name: string }>): Promise<Json> {
+  return callBrowser(browser, 'cloud', name, args, signal, files);
 }
 
 // ---- settings, per agent and per flow ------------------------------------------

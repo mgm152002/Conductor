@@ -44,6 +44,7 @@ export interface IntegrationDeps {
   flows: import('../sandbox/flow-service').AgentFlowService;
   mail: import('../sandbox/agentmail').AgentMail;
   cloudBrowsers: CloudBrowserSettings;
+  deviceChrome: import('../sandbox/device-chrome').DeviceChrome;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -107,6 +108,15 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('agents.sandbox.create', S['agents.sandbox.create'], (_e, input) => deps.sandboxAgents.create(input));
   router.handle('agents.sandbox.update', S['agents.sandbox.update'], (_e, { id, ...input }) => deps.sandboxAgents.update(id, input));
   router.handle('agents.sandbox.remove', S['agents.sandbox.remove'], async (_e, input) => { deps.sandboxAgents.remove(input.id); await deps.cloudBrowsers.remove(`agent:${input.id}`).catch(() => undefined); });
+  router.handle('deviceChrome.status', S['deviceChrome.status'], () => deps.deviceChrome.status());
+  router.handle('deviceChrome.profiles', S['deviceChrome.profiles'], () => {
+    try { return { profiles: deps.deviceChrome.profiles() }; } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return { profiles: [], error: code === 'EPERM' || code === 'EACCES' ? 'macOS did not let Conductor read your Chrome profiles. Allow it in System Settings → Privacy & Security (App Management or Full Disk Access).' : code === 'ENOENT' ? 'Google Chrome has no profiles on this Mac yet.' : 'Your Chrome profiles could not be read.' };
+    }
+  });
+  router.handle('deviceChrome.refresh', S['deviceChrome.refresh'], () => deps.deviceChrome.refreshProfile());
+  router.handle('deviceChrome.show', S['deviceChrome.show'], (_e, input) => deps.deviceChrome.show(input?.url));
   router.handle('cloudBrowser.get', S['cloudBrowser.get'], (_e, input) => deps.cloudBrowsers.info(input.scope as CloudBrowserScope));
   router.handle('cloudBrowser.save', S['cloudBrowser.save'], (_e, input) => deps.cloudBrowsers.save(input.scope as CloudBrowserScope, { url: input.url, ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}) }));
   router.handle('cloudBrowser.load', S['cloudBrowser.load'], async (_e, input) => (await deps.cloudBrowsers.config(input.scope as CloudBrowserScope)) ?? null);
