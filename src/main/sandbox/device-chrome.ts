@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { cp } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { BrowserDriver } from './cloud-browser';
+import type { BrowserDriver } from './browser-tools';
 
 // Chrome on the user's own Mac, driven over the DevTools protocol. It runs in
 // its own profile (Chrome refuses remote control of the everyday profile), so

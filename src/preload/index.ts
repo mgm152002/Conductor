@@ -99,7 +99,7 @@ const system: SystemBridge = {
 };
 const integrations: IntegrationsBridge = {
   agents: { list: () => invoke('agents.list'), models: (agentId, refresh) => invoke('agents.models', { agentId, ...(refresh ? { refresh: true } : {}) }) },
-  secrets: { list: () => invoke('secret.list'), delete: (id) => invoke('secret.delete', { id }) },
+  secrets: { list: () => invoke('secret.list'), delete: (id) => invoke('secret.delete', { id }), create: (input) => invoke('secret.create', input), update: (input) => invoke('secret.update', input) },
   sandboxAgents: {
     list: () => invoke('agents.sandbox.list'),
     create: (input) => invoke('agents.sandbox.create', input),
@@ -145,13 +145,6 @@ const integrations: IntegrationsBridge = {
     profiles: () => invoke('deviceChrome.profiles'),
     refresh: () => invoke('deviceChrome.refresh'),
     show: (url) => invoke('deviceChrome.show', url !== undefined ? { url } : undefined),
-  },
-  cloudBrowser: {
-    get: (scope) => invoke('cloudBrowser.get', { scope }),
-    save: (scope, url, apiKey) => invoke('cloudBrowser.save', { scope, url, ...(apiKey !== undefined && apiKey !== '' ? { apiKey } : {}) }),
-    load: (scope) => invoke('cloudBrowser.load', { scope }),
-    remove: (scope) => invoke('cloudBrowser.remove', { scope }),
-    test: (scope, url, apiKey) => invoke('cloudBrowser.test', { scope, ...(url !== undefined && url !== '' ? { url } : {}), ...(apiKey !== undefined && apiKey !== '' ? { apiKey } : {}) }),
   },
   sandbox: {
     status: () => invoke('sandbox.status'),

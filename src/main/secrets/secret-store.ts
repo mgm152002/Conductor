@@ -87,6 +87,25 @@ export class SecretStore {
     return { id, label, ...(input.owner !== undefined ? { owner: input.owner } : {}), createdAt };
   }
 
+  /**
+   * Rename a secret, replace its value (rotation: the id, and so every
+   * placeholder that names it, stays the same) or change who may use it.
+   */
+  async update(id: string, input: { label?: string; value?: string; owner?: string | null }): Promise<SecretMetadata> {
+    const current = this.get(id);
+    if (current === undefined) throw new Error('That secret no longer exists.');
+    const label = input.label?.trim();
+    if (label !== undefined && (label === '' || label.length > 255)) throw new Error('Secret label must be 1–255 characters');
+    if (input.value !== undefined) {
+      if (input.value.length === 0 || input.value.length > 64 * 1024) throw new Error('Secret value must be 1 byte to 64 KiB');
+      await this.writer.write({ service: this.service, account: id }, input.value);
+    }
+    if (label !== undefined) this.store.db.prepare('UPDATE secrets SET label = ? WHERE id = ?').run(label, id);
+    if (input.owner !== undefined) this.store.db.prepare('UPDATE secrets SET owner = ? WHERE id = ?').run(input.owner, id);
+    this.audit.append({ actor: 'user', action: 'secret.updated', target: id, redactedPayload: { label: label ?? null, valueReplaced: input.value !== undefined, owner: input.owner ?? null } });
+    return this.get(id)!;
+  }
+
   /** Assign (or reassign) the integration allowed to use a secret. */
   setOwner(id: string, owner: string): void {
     this.store.db.prepare('UPDATE secrets SET owner = ? WHERE id = ?').run(owner, id);

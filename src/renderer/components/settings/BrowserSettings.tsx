@@ -7,8 +7,7 @@ import { MenuSelect } from '../ui/MenuSelect';
 
 const OPTIONS: Array<{ id: BrowserPreference; label: string; hint: string }> = [
   { id: 'device', label: 'This Mac', hint: 'Agents browse in Conductor’s own Chrome on this Mac: a separate profile that runs hidden (or in the background), so your own windows are never touched. The sandbox starts only when an agent needs its terminal or files.' },
-  { id: 'cloud', label: 'Cloud', hint: 'Agents and flows with a cloud browser set up browse there; the others use the sandbox browser. The sandbox starts only when an agent needs its terminal or files.' },
-  { id: 'sandbox', label: 'Sandbox', hint: 'Agents browse inside their sandbox, which starts with every run. Cloud browsers and Chrome are not used.' },
+  { id: 'sandbox', label: 'Sandbox', hint: 'Agents browse inside their sandbox, which starts with every run. Chrome on this Mac is not used.' },
 ];
 
 function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<{ id: T; label: string }>; onChange: (next: T) => void }): React.JSX.Element {
@@ -24,7 +23,7 @@ function Segmented<T extends string>({ label, value, options, onChange }: { labe
 
 /** Which browser agents and flows use, and how Conductor's own Chrome behaves. */
 export function BrowserSettings(): React.JSX.Element {
-  const [value, setValue] = useState<BrowserPreference>('cloud');
+  const [value, setValue] = useState<BrowserPreference>('sandbox');
   const [visible, setVisible] = useState(false);
   const [chrome, setChrome] = useState<DeviceChromeStatus | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -79,9 +78,9 @@ export function BrowserSettings(): React.JSX.Element {
     <>
       <div className="group-row">
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-foreground">Agents browse with</p>
-          <p className="text-2xs text-muted-foreground">{current.hint}</p>
-          {missing ? <p className="mt-1 text-2xs text-destructive">Google Chrome isn’t installed, so agents will use the sandbox browser until it is.</p> : null}
+          <p className="text-sm font-medium text-foreground">Agents browse with</p>
+          <p className="text-xs text-muted-foreground">{current.hint}</p>
+          {missing ? <p className="mt-1 text-xs text-destructive">Google Chrome isn’t installed, so agents will use the sandbox browser until it is.</p> : null}
         </div>
         <Segmented label="Agents browse with" value={value} options={OPTIONS} onChange={choose} />
       </div>
@@ -89,13 +88,13 @@ export function BrowserSettings(): React.JSX.Element {
         <>
           <div className="group-row">
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-foreground">Chrome profile</p>
-              <p className="text-2xs text-muted-foreground">
+              <p className="text-sm font-medium text-foreground">Chrome profile</p>
+              <p className="text-xs text-muted-foreground">
                 Agents start from a private copy of this profile, so they are signed in where you are. Your own Chrome is never touched, and their browsing is not synced to your Google account.
                 {chrome?.profile !== undefined ? ` Copied ${new Date(chrome.profile.copiedAt).toLocaleString()}.` : ''}
               </p>
-              {profiles?.error !== undefined ? <p className="mt-1 text-2xs text-destructive">{profiles.error}</p> : null}
-              {chrome?.profileError !== undefined ? <p className="mt-1 text-2xs text-destructive">{chrome.profileError}</p> : null}
+              {profiles?.error !== undefined ? <p className="mt-1 text-xs text-destructive">{profiles.error}</p> : null}
+              {chrome?.profileError !== undefined ? <p className="mt-1 text-xs text-destructive">{chrome.profileError}</p> : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <MenuSelect variant="box" label="Chrome profile" value={profile} disabled={copying} className="max-w-[260px]" onChange={chooseProfile}
@@ -108,8 +107,8 @@ export function BrowserSettings(): React.JSX.Element {
           </div>
           <div className="group-row">
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-foreground">Chrome window</p>
-              <p className="text-2xs text-muted-foreground">
+              <p className="text-sm font-medium text-foreground">Chrome window</p>
+              <p className="text-xs text-muted-foreground">
                 {visible ? 'Opens behind your windows without taking focus, so you can glance at what agents do.' : 'Runs with no window at all. Agents still keep the sites you signed into.'}
               </p>
             </div>
@@ -117,11 +116,11 @@ export function BrowserSettings(): React.JSX.Element {
           </div>
           <div className="group-row">
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium text-foreground">Sign in to sites</p>
-              <p className="text-2xs text-muted-foreground">
+              <p className="text-sm font-medium text-foreground">Sign in to sites</p>
+              <p className="text-xs text-muted-foreground">
                 Opens the agents’ Chrome so you can log in to a site they need that your profile isn’t signed into. Logins made there are kept until you refresh from your profile.
               </p>
-              {error !== undefined ? <p className="mt-1 text-2xs text-destructive">{error}</p> : null}
+              {error !== undefined ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
             </div>
             <Button size="sm" variant="outline" disabled={opening || chrome?.available === false} onClick={() => { void show(); }}>
               {opening ? 'Opening…' : `Open ${chrome?.browser ?? 'Chrome'}`}
