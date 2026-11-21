@@ -79,8 +79,23 @@ export interface UsageLimitStatus {
   checkedAt: string;
 }
 
+/** One day's usage per CLI, for the daily chart. `day` is YYYY-MM-DD (local). */
+export interface UsageDay {
+  day: string;
+  byClient: Record<string, { tokens: number; costUsd?: number }>;
+}
+
+/** Totals split by type: tokens, and the estimated cost of each. */
+export interface UsageByType {
+  tokens: { input: number; cacheRead: number; cacheWrite: number; output: number };
+  costUsd?: { input: number; cacheRead: number; cacheWrite: number; output: number };
+}
+
 export interface UsageSummary {
   range: UsageRange;
+  /** Per-day usage per CLI over the range (oldest first). */
+  daily?: UsageDay[];
+  byType?: UsageByType;
   totals: UsageRow;
   byAgent: UsageRow[];
   byProject: UsageRow[];

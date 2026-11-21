@@ -1,10 +1,10 @@
 import type { AdapterStreamEvent } from '@shared/adapter';
 import type { AdapterRecord } from '@shared/domain';
 import type {
-  UsageClient, UsageLimitStatus, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
+  UsageClient, UsageDay, UsageLimitStatus, UsageLimitWindow, UsageLimitWindowKind, UsageRange, UsageRow, UsageSummary,
 } from '@shared/usage';
 import type { Store } from '../db/types';
-import { estimateCostUsd, type PriceLookup } from './pricing';
+import { estimateCostParts, estimateCostUsd, type PriceLookup } from './pricing';
 import { isQuotaWindowCurrent } from './quota';
 
 // Token usage per agent session. Adapters report usage as a `log` stream
@@ -320,10 +320,40 @@ export function usageSummary(
     if (clients.has(aggregate.key)) continue;
     clients.set(aggregate.key, { ...toRow(aggregate, agentName(aggregate.key)), ...extras(aggregate.key) });
   }
+  // Per-day, per-CLI usage for the daily chart, priced per model like the rest.
+  const dayGroups = store.db.prepare(`SELECT date(u.created_at, 'localtime') AS day, adapter_id AS adapter, COALESCE(model, '') AS model,
+      SUM(input_tokens) AS input, SUM(cached_input_tokens) AS cached, SUM(cache_write_tokens) AS written, SUM(output_tokens) AS output, SUM(total_tokens) AS total
+    FROM ${ALL_USAGE} u ${clause} GROUP BY day, adapter_id, model ORDER BY day`).all(...params) as Array<{ day: string; adapter: string; model: string; input: number; cached: number; written: number; output: number; total: number }>;
+  const dayMap = new Map<string, UsageDay>();
+  const typeTokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+  let typeCost: { input: number; cacheRead: number; cacheWrite: number; output: number } | undefined;
+  for (const group of dayGroups) {
+    const entry = dayMap.get(group.day) ?? { day: group.day, byClient: {} };
+    const slot = entry.byClient[group.adapter] ?? { tokens: 0 };
+    slot.tokens += group.total ?? 0;
+    const cached = Math.min(group.cached ?? 0, group.input ?? 0);
+    const written = Math.min(group.written ?? 0, (group.input ?? 0) - cached);
+    typeTokens.input += (group.input ?? 0) - cached - written;
+    typeTokens.cacheRead += cached;
+    typeTokens.cacheWrite += written;
+    typeTokens.output += group.output ?? 0;
+    const price = options.pricing?.(group.model === '' ? undefined : group.model, group.adapter);
+    if (price !== undefined) {
+      const parts = estimateCostParts(price, { inputTokens: group.input ?? 0, cachedInputTokens: group.cached ?? 0, cacheWriteTokens: group.written ?? 0, outputTokens: group.output ?? 0 });
+      slot.costUsd = (slot.costUsd ?? 0) + parts.input + parts.cacheRead + parts.cacheWrite + parts.output;
+      typeCost ??= { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+      typeCost.input += parts.input; typeCost.cacheRead += parts.cacheRead; typeCost.cacheWrite += parts.cacheWrite; typeCost.output += parts.output;
+    }
+    entry.byClient[group.adapter] = slot;
+    dayMap.set(group.day, entry);
+  }
+
   const clientList = [...clients.values()].sort((a, b) => b.totalTokens - a.totalTokens || a.label.localeCompare(b.label));
 
   return {
     range: input.range,
+    daily: [...dayMap.values()],
+    byType: { tokens: typeTokens, ...(typeCost !== undefined ? { costUsd: typeCost } : {}) },
     totals: toRow(totals, 'All agents'),
     byAgent: byAgent.map((a) => toRow(a, agentName(a.key))),
     byProject: byProject.map((a) => toRow(a, a.key === CHAT_PROJECT ? 'Chat' : workspaceNames.get(a.key) ?? 'Deleted project')),

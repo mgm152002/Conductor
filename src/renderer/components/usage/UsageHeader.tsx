@@ -3,7 +3,7 @@ import { USAGE_RANGES } from '../../lib/usage-format';
 import { RotateIcon, Spinner } from '../ui/icons';
 import { Button } from '../ui/primitives';
 
-// The Usage screen header controls, in the T3 shape: two pill segmented
+// The Usage screen header controls: two pill segmented
 // controls (view, then range) floating at the top-right, plus a refresh
 // action. Every control is a native button for keyboard access.
 
@@ -34,21 +34,6 @@ export function UsageHeader({
 }: UsageHeaderProps): React.JSX.Element {
   return (
     <div className="flex min-w-0 items-center gap-2">
-      <div role="group" aria-label="Usage view" className="seg-control shrink-0">
-        {USAGE_VIEWS.map((entry) => (
-          <button
-            key={entry.id}
-            type="button"
-            data-active={entry.id === view}
-            aria-pressed={entry.id === view}
-            onClick={() => { onViewChange(entry.id); }}
-            className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            {entry.label}
-          </button>
-        ))}
-      </div>
-
       <div role="group" aria-label="Usage range" className="seg-control min-w-0 overflow-x-auto">
         {USAGE_RANGES.map((entry) => (
           <button
@@ -57,6 +42,21 @@ export function UsageHeader({
             data-active={entry.id === range}
             aria-pressed={entry.id === range}
             onClick={() => { onRangeChange(entry.id); }}
+            className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      <div role="group" aria-label="Usage view" className="seg-control shrink-0">
+        {USAGE_VIEWS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            data-active={entry.id === view}
+            aria-pressed={entry.id === view}
+            onClick={() => { onViewChange(entry.id); }}
             className="seg-item focus-visible:outline-2 focus-visible:outline-ring"
           >
             {entry.label}
