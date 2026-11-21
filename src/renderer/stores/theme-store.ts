@@ -1,57 +1,61 @@
 import { create } from 'zustand';
 import type { Appearance } from '@shared/ipc-contract';
+import { BUILT_IN_THEMES, LEGACY_THEME_IDS } from '@shared/theme-palettes';
 
-// Renderer-side mirror of the macOS appearance. The main process (`nativeTheme`)
-// is the single authority: it answers `theme.get` on boot and pushes every
-// change over the `theme.changed` event channel. This store holds the resolved
-// appearance so the whole UI can react from one place; `useSystemAppearance`
-// keeps it in sync with the bridge and applies the `dark` class to <html>.
+// Appearance and theme (Settings > Appearance): a colour scheme (follow macOS,
+// or force light or dark) and a theme (the default Graphite pair, or one of
+// the built-in palettes). The main process reports the macOS appearance over
+// `theme.get` / `theme.changed`; `appearance` is the one actually shown.
 
-/** Accent colour themes (Settings > Appearance). `cobalt` is the default. */
-export type AccentId = 'orchid' | 'cobalt' | 'pine' | 'marigold' | 'ember';
+export type ColorScheme = 'system' | 'light' | 'dark';
+/** "graphite" is the default pair; the rest are the built-in palettes. */
+export type ThemeId = 'graphite' | (typeof BUILT_IN_THEMES)[number]['id'];
 
-export const ACCENTS: Array<{ id: AccentId; label: string; swatch: string }> = [
-  { id: 'cobalt', label: 'Cobalt', swatch: '#3d5cf5' },
-  { id: 'orchid', label: 'Orchid', swatch: '#c9379a' },
-  { id: 'pine', label: 'Pine', swatch: '#2a9763' },
-  { id: 'marigold', label: 'Marigold', swatch: '#c58c1c' },
-  { id: 'ember', label: 'Ember', swatch: '#e0602c' },
+export const THEMES: Array<{ id: ThemeId; label: string }> = [
+  { id: 'graphite', label: 'Graphite' },
+  ...BUILT_IN_THEMES.map((theme) => ({ id: theme.id as ThemeId, label: theme.label })),
 ];
 
-// Versioned: the Score palette replaced the earlier accent set, so a choice
-// stored against the old set is not carried over.
-const ACCENT_KEY = 'conductor.accent.v2';
+const SCHEME_KEY = 'conductor.colorScheme';
+const THEME_KEY = 'conductor.theme';
 
-function loadAccent(): AccentId {
+function load<T extends string>(key: string, valid: readonly T[], fallback: T): T {
   try {
-    const raw = window.localStorage.getItem(ACCENT_KEY);
-    return ACCENTS.some((accent) => accent.id === raw) ? (raw as AccentId) : 'cobalt';
+    const stored = window.localStorage.getItem(key);
+    const raw = stored !== null ? LEGACY_THEME_IDS[stored] ?? stored : null;
+    return valid.includes(raw as T) ? (raw as T) : fallback;
   } catch {
-    return 'cobalt';
+    return fallback;
   }
 }
 
-interface ThemeState {
-  appearance: Appearance;
-  accent: AccentId;
-  setAppearance: (appearance: Appearance) => void;
-  setAccent: (accent: AccentId) => void;
+function save(key: string, value: string): void {
+  try { window.localStorage.setItem(key, value); } catch { /* the choice still applies for this session */ }
 }
 
-export const useThemeStore = create<ThemeState>((set) => ({
-  // Default to dark to match the window's initial background and avoid a flash
-  // before the first `theme.get` resolves.
-  appearance: 'dark',
-  accent: loadAccent(),
-  setAppearance: (appearance): void => {
-    set({ appearance });
-  },
-  setAccent: (accent): void => {
-    try {
-      window.localStorage.setItem(ACCENT_KEY, accent);
-    } catch {
-      // Storage can be unavailable; the accent still applies for the session.
-    }
-    set({ accent });
-  },
+const resolve = (scheme: ColorScheme, system: Appearance): Appearance => (scheme === 'system' ? system : scheme);
+
+interface ThemeState {
+  /** What macOS is set to. */
+  system: Appearance;
+  scheme: ColorScheme;
+  themeId: ThemeId;
+  /** What is shown: the scheme, or macOS's when following it. */
+  appearance: Appearance;
+  setAppearance: (system: Appearance) => void;
+  setScheme: (scheme: ColorScheme) => void;
+  setTheme: (themeId: ThemeId) => void;
+}
+
+const initialScheme = load<ColorScheme>(SCHEME_KEY, ['system', 'light', 'dark'], 'system');
+
+export const useThemeStore = create<ThemeState>((set, get) => ({
+  // Dark until macOS answers, matching the window's first paint.
+  system: 'dark',
+  scheme: initialScheme,
+  themeId: load<ThemeId>(THEME_KEY, THEMES.map((theme) => theme.id), 'graphite'),
+  appearance: resolve(initialScheme, 'dark'),
+  setAppearance: (system): void => { set({ system, appearance: resolve(get().scheme, system) }); },
+  setScheme: (scheme): void => { save(SCHEME_KEY, scheme); set({ scheme, appearance: resolve(scheme, get().system) }); },
+  setTheme: (themeId): void => { save(THEME_KEY, themeId); set({ themeId }); },
 }));
