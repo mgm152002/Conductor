@@ -54,7 +54,7 @@ export function ChatPendingApprovals({ threadId }: { threadId: string }): React.
 }
 
 // Pending approvals for the focused thread, attached above the composer like
-// T3 Code's pending-approval panel. Approving or denying round-trips through
+// Pending-approval panel. Approving or denying round-trips through
 // the main process; the adapter is never invoked before an approval.
 
 export function PendingApprovalPanel({ task }: { task: Task }): React.JSX.Element | null {

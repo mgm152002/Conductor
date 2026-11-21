@@ -44,6 +44,16 @@ export async function fileToIcon(file: File): Promise<string> {
   }
 }
 
+/** An SVG tile (from the icon chooser) as a square 128px raster icon. */
+export async function svgToIcon(dataUrl: string): Promise<string> {
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode().catch(() => { throw new Error('That icon could not be drawn.'); });
+  const [element, context] = canvas();
+  context.drawImage(image, 0, 0, SIZE, SIZE);
+  return finish(element);
+}
+
 function rng(seed: number): () => number {
   let state = seed >>> 0 || 1;
   return () => {

@@ -9,8 +9,10 @@ import { Alert, Button, Switch, inputClassName, textareaClassName } from '../ui/
 import { ClockIcon, GlobeIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon } from '../ui/icons';
 import { message } from './AgentDialog';
 import { MailPanel } from './MailPanel';
-import { CloudBrowserButton } from './CloudBrowserButton';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
+import { MenuSelect } from '../ui/MenuSelect';
+import { AgentMark } from '../chat/AgentMark';
+import { RunMarkdown } from './RunMarkdown';
 import type { AgentOption } from '@shared/integrations-contract';
 import { FLOW_TEMPLATES, pickAgent, type FlowTemplate } from '@shared/flow-templates';
 
@@ -22,9 +24,9 @@ const NODE_W = 232;
 const NODE_H = 92;
 
 const STATUS_TEXT: Record<FlowNodeStatus, string> = { waiting: 'Waiting', running: 'Working…', done: 'Done', failed: 'Failed', skipped: 'Skipped' };
-const STATUS_RING: Record<FlowNodeStatus, string> = {
-  waiting: 'border-border', running: 'border-info shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-info)_25%,transparent)]',
-  done: 'border-success', failed: 'border-destructive', skipped: 'border-border opacity-60',
+// Cards stay neutral and signals state with a small dot, not a coloured frame.
+const STATUS_DOT: Record<FlowNodeStatus, string> = {
+  waiting: 'bg-muted-foreground/40', running: 'bg-info animate-status-pulse', done: 'bg-success', failed: 'bg-destructive', skipped: 'bg-muted-foreground/30',
 };
 
 interface Draft { name: string; input: string; nodes: FlowNode[]; edges: FlowEdge[]; schedule: FlowSchedule | null }
@@ -46,22 +48,21 @@ function SchedulePanel({ schedule, onChange, nextRunAt }: { schedule: FlowSchedu
   return (
     <section className="flex flex-col gap-2.5" aria-label="Schedule">
       <div className="flex items-center gap-2">
-        <ClockIcon size={14} className="text-muted-foreground" />
-        <h3 className="flex-1 text-xs font-semibold text-foreground">Schedule</h3>
+        <h3 className="flex-1 text-sm font-medium text-foreground">Schedule</h3>
         <Switch label="Run on a schedule" checked={schedule?.enabled === true} onChange={(on) => { onChange({ cron: schedule?.cron ?? '0 9 * * *', enabled: on }); }} />
       </div>
       {schedule !== null ? (
         <>
-          <select aria-label="Repeat" className={inputClassName} value={preset.kind} onChange={(e) => { set({ kind: e.target.value as ScheduleKind }); }}>
-            <option value="minutes">Every few minutes</option><option value="hourly">Every hour</option><option value="daily">Every day</option>
-            <option value="weekdays">Weekdays</option><option value="weekly">Every week</option><option value="custom">Custom (cron)</option>
-          </select>
+          <MenuSelect variant="box" label="Repeat" value={preset.kind} onChange={(value) => { set({ kind: value as ScheduleKind }); }} options={[
+            { value: 'minutes', label: 'Every few minutes' }, { value: 'hourly', label: 'Every hour' }, { value: 'daily', label: 'Every day' },
+            { value: 'weekdays', label: 'Weekdays' }, { value: 'weekly', label: 'Every week' }, { value: 'custom', label: 'Custom (cron)' },
+          ]} />
           {preset.kind === 'minutes' ? <label className="flex items-center gap-2 text-xs text-muted-foreground">Every<input type="number" min={1} max={59} aria-label="Minutes" className={cn(inputClassName, 'w-20')} value={preset.every} onChange={(e) => { set({ every: Number(e.target.value) }); }} />minutes</label> : null}
-          {preset.kind === 'weekly' ? <select aria-label="Day" className={inputClassName} value={preset.day} onChange={(e) => { set({ day: Number(e.target.value) }); }}>{WEEKDAYS.map((day, i) => <option key={day} value={i}>{day}</option>)}</select> : null}
+          {preset.kind === 'weekly' ? <MenuSelect variant="box" label="Day" value={String(preset.day)} onChange={(value) => { set({ day: Number(value) }); }} options={WEEKDAYS.map((day, i) => ({ value: String(i), label: day }))} /> : null}
           {preset.kind === 'daily' || preset.kind === 'weekdays' || preset.kind === 'weekly' ? <label className="flex items-center gap-2 text-xs text-muted-foreground">At<input type="time" aria-label="Time" className={cn(inputClassName, 'w-28')} value={preset.time} onChange={(e) => { set({ time: e.target.value }); }} /></label> : null}
           {preset.kind === 'hourly' ? <label className="flex items-center gap-2 text-xs text-muted-foreground">At minute<input type="number" min={0} max={59} aria-label="Minute" className={cn(inputClassName, 'w-20')} value={Number(preset.time.slice(3))} onChange={(e) => { set({ time: `09:${String(Number(e.target.value) || 0).padStart(2, '0')}` }); }} /></label> : null}
           {preset.kind === 'custom' ? <input aria-label="Cron expression" className={cn(inputClassName, 'font-mono')} placeholder="minute hour day month weekday" value={schedule.cron} onChange={(e) => { onChange({ cron: e.target.value, enabled: schedule.enabled }); }} /> : null}
-          <p className="text-2xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {describeCron(schedule.cron)}
             {schedule.enabled && nextRunAt !== null ? ` · next ${new Date(nextRunAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
             {!schedule.enabled ? ' · paused' : ''}
@@ -238,11 +239,10 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="window-header flex shrink-0 items-center gap-1.5 border-b border-border px-4">
-        <input aria-label="Flow name" value={draft.name} maxLength={80} onChange={(e) => { update({ name: e.target.value }); }} className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-foreground outline-none" />
-        {live ? <span className="flex items-center gap-1.5 text-2xs text-info"><Spinner size={12} />Running</span> : null}
+        <input aria-label="Flow name" value={draft.name} maxLength={80} onChange={(e) => { update({ name: e.target.value }); }} className="min-w-0 flex-1 bg-transparent text-sm font-medium text-foreground outline-none" />
+        {live ? <span className="flex items-center gap-1.5 text-xs text-info"><Spinner size={12} />Running</span> : null}
         {live && latest !== undefined ? <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void stopRun(latest.id); }}>Stop</Button> : null}
         {flow !== null && sandboxRunning ? <Button size="sm" variant="ghost" title="Watch the flow’s browser live" onClick={() => { window.conductor.sandbox.openFlowViewer(flow.id).catch((err: unknown) => { setError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not open the sandbox'); }); }}><GlobeIcon size={13} />Watch</Button> : null}
-        {flow !== null ? <CloudBrowserButton scope={`flow:${flow.id}`} label={flow.name} /> : null}
         <Button size="sm" variant="ghost" title="Every run of your flows" onClick={onOpenHistory}><ClockIcon size={13} />History</Button>
         {flow !== null && latest !== undefined && !live ? <Button size="sm" variant="outline" disabled={busy !== null || dirty} title={dirty ? 'Save your changes first' : 'Run again with the input of the last run'} onClick={() => { void runAgain(latest.input); }}><PlayIcon size={13} />Run again</Button> : null}
         <Button size="sm" variant="outline" disabled={busy !== null || !dirty || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void save(); }}>{busy === 'save' ? <Spinner size={13} /> : null}{dirty ? 'Save' : 'Saved'}</Button>
@@ -253,7 +253,7 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
       {problem !== undefined && draft.nodes.length > 0 ? <div className="px-4 pt-3"><Alert tone="warning">{problem}</Alert></div> : null}
 
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1 overflow-auto bg-muted/30" aria-label="Flow canvas" tabIndex={0}
+        <div className="relative min-w-0 flex-1 overflow-auto bg-background" aria-label="Flow canvas" tabIndex={0}
           onPointerDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}
           onKeyDown={(e) => {
             if ((e.key === 'Delete' || e.key === 'Backspace') && (e.target as HTMLElement).tagName !== 'TEXTAREA' && (e.target as HTMLElement).tagName !== 'INPUT') {
@@ -261,7 +261,7 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
               else if (selected?.kind === 'edge') { update({ edges: draft.edges.filter((_, i) => i !== selected.index) }); setSelected(null); }
             }
           }}>
-          <div ref={canvas} className="relative min-h-full min-w-full" style={{ width: size.w, height: size.h, backgroundImage: 'radial-gradient(var(--color-border) 1px, transparent 1px)', backgroundSize: '22px 22px' }}
+          <div ref={canvas} className="relative min-h-full min-w-full" style={{ width: size.w, height: size.h, backgroundImage: 'radial-gradient(color-mix(in srgb, var(--color-muted-foreground) 22%, transparent) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
             onPointerDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
             <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} aria-hidden="true">
               <defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor" /></marker></defs>
@@ -271,14 +271,14 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
                 const d = edgePath({ x: a.x + NODE_W, y: a.y + NODE_H / 2 }, { x: b.x, y: b.y + NODE_H / 2 });
                 const on = selected?.kind === 'edge' && selected.index === index;
                 return (
-                  <g key={`${edge.from}-${edge.to}`} className={on ? 'text-primary' : 'text-muted-foreground'}>
-                    <path d={d} fill="none" stroke="currentColor" strokeWidth={on ? 2.5 : 1.75} markerEnd="url(#flow-arrow)" />
+                  <g key={`${edge.from}-${edge.to}`} className={on ? 'text-foreground' : 'text-muted-foreground/60'}>
+                    <path d={d} fill="none" stroke="currentColor" strokeWidth={on ? 2 : 1.25} markerEnd="url(#flow-arrow)" />
                     <path d={d} fill="none" stroke="transparent" strokeWidth={14} className="cursor-pointer" style={{ pointerEvents: 'stroke' }} onPointerDown={(e) => { e.stopPropagation(); setSelected({ kind: 'edge', index }); }} />
                   </g>
                 );
               })}
               {connecting !== null && nodePos(connecting.from) !== undefined ? (
-                <path d={edgePath({ x: nodePos(connecting.from)!.x + NODE_W, y: nodePos(connecting.from)!.y + NODE_H / 2 }, connecting)} fill="none" stroke="currentColor" strokeWidth={1.75} strokeDasharray="5 4" className="text-primary" />
+                <path d={edgePath({ x: nodePos(connecting.from)!.x + NODE_W, y: nodePos(connecting.from)!.y + NODE_H / 2 }, connecting)} fill="none" stroke="currentColor" strokeWidth={1.25} strokeDasharray="4 4" className="text-muted-foreground" />
               ) : null}
             </svg>
             {draft.nodes.map((item) => {
@@ -288,19 +288,19 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
               const on = selected?.kind === 'node' && selected.id === item.id;
               return (
                 <div key={item.id} data-node-id={item.id} onPointerDown={(e) => { dragNode(e, item); }}
-                  className={cn('absolute flex cursor-grab touch-none select-none flex-col justify-center gap-1 rounded-2xl border-2 bg-card px-3 shadow-lift active:cursor-grabbing',
-                    status !== undefined ? STATUS_RING[status] : on ? 'border-primary' : 'border-border')}
+                  className={cn('absolute flex cursor-grab touch-none select-none flex-col justify-center gap-1.5 rounded-xl border bg-card px-3.5 shadow-xs/5 transition-colors active:cursor-grabbing',
+                    on ? 'border-ring ring-2 ring-ring/20' : 'border-border hover:border-input', status === 'skipped' && 'opacity-60')}
                   style={{ left: item.x, top: item.y, width: NODE_W, height: NODE_H }}>
-                  <span data-handle title="Receives the work of the steps before it" className="absolute top-1/2 -left-2 size-3.5 -translate-y-1/2 rounded-full border-2 border-border-strong bg-card" />
+                  <span data-handle title="Receives the work of the steps before it" className="absolute top-1/2 -left-[5px] size-2.5 -translate-y-1/2 rounded-full border border-input bg-background" />
                   <span data-handle role="button" aria-label={`Draw an arrow from ${agent?.name ?? 'this step'}`} title="Drag to another step to run it after this one"
                     onPointerDown={(e) => { startConnect(e, item); }}
-                    className="absolute top-1/2 -right-2 size-3.5 -translate-y-1/2 cursor-crosshair rounded-full border-2 border-primary bg-card hover:scale-125" />
+                    className="absolute top-1/2 -right-[5px] size-2.5 -translate-y-1/2 cursor-crosshair rounded-full border border-input bg-background transition-transform hover:scale-150 hover:border-foreground" />
                   <span className="flex items-center gap-2">
-                    {isReply ? <span className="grid size-[26px] place-items-center rounded-lg bg-info/15 text-info"><MailIcon size={14} /></span> : agent !== undefined ? <AgentAvatar agent={agent} size={26} /> : <span className="size-[26px] rounded-lg bg-muted" />}
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{isReply ? 'Wait for your reply' : agent?.name ?? 'Missing agent'}</span>
-                    {status !== undefined ? <span className={cn('text-3xs font-medium', status === 'failed' ? 'text-destructive-foreground' : status === 'done' ? 'text-success' : 'text-muted-foreground')}>{status === 'running' ? <Spinner size={11} /> : STATUS_TEXT[status]}</span> : null}
+                    {isReply ? <span className="grid size-5 place-items-center rounded-md bg-accent text-muted-foreground"><MailIcon size={12} /></span> : agent !== undefined ? <AgentAvatar agent={agent} size={20} /> : <span className="size-5 rounded-md bg-muted" />}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{isReply ? 'Wait for your reply' : agent?.name ?? 'Missing agent'}</span>
+                    {status !== undefined ? <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">{status === 'running' ? <Spinner size={11} /> : <span aria-hidden="true" className={cn('size-1.5 rounded-full', STATUS_DOT[status])} />}{STATUS_TEXT[status]}</span> : null}
                   </span>
-                  <span className="line-clamp-2 text-2xs text-muted-foreground">{isReply ? `Pauses until you answer the email (up to ${item.waitHours ?? DEFAULT_REPLY_HOURS} h)` : item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}</span>
+                  <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{isReply ? `Pauses until you answer the email (up to ${item.waitHours ?? DEFAULT_REPLY_HOURS} h)` : item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}</span>
                 </div>
               );
             })}
@@ -316,23 +316,23 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
               </div>
             ) : null}
           </div>
-          <div className="sticky bottom-3 left-3 flex w-fit items-center gap-2 rounded-lg border border-border bg-card p-1 shadow-pop">
-            <PlusIcon size={14} className="ml-1 text-muted-foreground" />
-            <select aria-label="Add a step" className={cn(inputClassName, 'w-44')} value="" disabled={agents.length === 0} onChange={(e) => { if (e.target.value !== '') addStep(e.target.value); }}>
-              <option value="">{agents.length === 0 ? 'Create an agent first' : 'Add a step…'}</option>
-              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-              <option value={REPLY}>Wait for my email reply</option>
-            </select>
+          <div className="sticky bottom-3 left-3 w-fit">
+            <MenuSelect label="Add a step" value="" disabled={agents.length === 0} onChange={(value) => { if (value !== '') addStep(value); }} className="bg-popover shadow-lg/5"
+              options={[
+                { value: '', label: agents.length === 0 ? 'Create an agent first' : 'Add a step…', mark: <PlusIcon size={13} /> },
+                ...agents.map((agent) => ({ value: agent.id, label: agent.name, mark: <AgentAvatar agent={agent} size={16} /> })),
+                { value: REPLY, label: 'Wait for my email reply', mark: <MailIcon size={13} /> },
+              ]} />
           </div>
         </div>
 
-        <aside aria-label="Details" className="flex w-[300px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-4">
+        <aside aria-label="Details" className="flex w-[320px] shrink-0 flex-col gap-6 overflow-y-auto border-l border-border bg-card/40 p-4">
           {node !== undefined ? (
             <section className="flex flex-col gap-2.5" aria-label="Step">
-              <h3 className="text-xs font-semibold text-foreground">Step</h3>
+              <h3 className="text-sm font-medium text-foreground">Step</h3>
               {node.kind === 'reply' ? (
                 <>
-                  <p className="text-2xs text-muted-foreground">Waits for your email reply, then passes it on.</p>
+                  <p className="text-xs text-muted-foreground">Waits for your email reply, then passes it on.</p>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">Give up after<input type="number" min={1} max={336} aria-label="Hours to wait" className={cn(inputClassName, 'w-20')} value={node.waitHours ?? DEFAULT_REPLY_HOURS} onChange={(e) => { patchNode(node.id, { waitHours: Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_REPLY_HOURS) }); }} />hours</label>
                   {!mailReady ? (
                     <>
@@ -343,21 +343,21 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
                 </>
               ) : (
                 <>
-                  <select aria-label="Agent" className={inputClassName} value={node.agentId} onChange={(e) => { patchNode(node.id, { agentId: e.target.value }); }}>
-                    {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-                  </select>
+                  <MenuSelect variant="box" label="Agent" value={node.agentId} onChange={(value) => { patchNode(node.id, { agentId: value }); }}
+                    options={agents.map((agent) => ({ value: agent.id, label: agent.name, mark: <AgentAvatar agent={agent} size={16} /> }))} />
                   <div className="flex flex-col gap-1.5">
-                    <span className="text-2xs font-medium text-muted-foreground">Runs on</span>
-                    <select aria-label="CLI for this step" className={inputClassName} value={node.cli ?? ''} onChange={(e) => { patchNode(node.id, { cli: e.target.value === '' ? undefined : e.target.value, model: undefined, effort: undefined }); }}>
-                      <option value="">The agent’s own order ({(agentById.get(node.agentId)?.clis ?? []).map((id) => clis.find((c) => c.id === id)?.name ?? id).join(' → ') || 'none'})</option>
-                      {clis.filter((c) => !c.remote).map((c) => <option key={c.id} value={c.id} disabled={!c.available}>{c.name}{c.available ? '' : ' (not available)'}</option>)}
-                    </select>
+                    <span className="text-xs text-muted-foreground">Runs on</span>
+                    <MenuSelect variant="box" label="CLI for this step" value={node.cli ?? ''} onChange={(value) => { patchNode(node.id, { cli: value === '' ? undefined : value, model: undefined, effort: undefined }); }}
+                      options={[
+                        { value: '', label: 'The agent’s own order', hint: (agentById.get(node.agentId)?.clis ?? []).map((id) => clis.find((c) => c.id === id)?.name ?? id).join(' → ') || 'none' },
+                        ...clis.filter((c) => !c.remote).map((c) => ({ value: c.id, label: c.name, disabled: !c.available, ...(c.available ? {} : { hint: 'not available' }), mark: <AgentMark agentId={c.id} name={c.name} size={14} /> })),
+                      ]} />
                     {(node.cli ?? agentById.get(node.agentId)?.clis[0]) !== undefined ? (
                       <ModelEffortPicker variant="box" agentId={(node.cli ?? agentById.get(node.agentId)?.clis[0])!} label="Step model"
                         value={{ ...(node.model !== undefined ? { model: node.model } : {}), ...(node.effort !== undefined ? { effort: node.effort } : {}) }}
                         onChange={(choice) => { patchNode(node.id, { model: choice.model, effort: choice.effort }); }} />
                     ) : null}
-                    <p className="text-2xs text-muted-foreground">{node.model === undefined && node.effort === undefined ? 'Model and effort: Auto (or what the agent set for that CLI).' : 'This step overrides the agent’s model.'}</p>
+                    <p className="text-xs text-muted-foreground">{node.model === undefined && node.effort === undefined ? 'Model and effort: Auto (or what the agent set for that CLI).' : 'This step overrides the agent’s model.'}</p>
                   </div>
                   <textarea aria-label="What this step does" rows={9} className={textareaClassName} value={node.prompt} placeholder="What should this agent do? Use {{input}} for the flow's input." onChange={(e) => { patchNode(node.id, { prompt: e.target.value }); }} />
                 </>
@@ -367,13 +367,13 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
             </section>
           ) : selected?.kind === 'edge' ? (
             <section className="flex flex-col gap-2.5" aria-label="Arrow">
-              <h3 className="text-xs font-semibold text-foreground">Arrow</h3>
+              <h3 className="text-sm font-medium text-foreground">Arrow</h3>
               <Button size="sm" variant="outline" className="self-start" onClick={() => { update({ edges: draft.edges.filter((_, i) => i !== selected.index) }); setSelected(null); }}><TrashIcon size={13} />Remove arrow</Button>
             </section>
           ) : (
             <>
               <section className="flex flex-col gap-2" aria-label="Input">
-                <h3 className="text-xs font-semibold text-foreground">What this flow should do</h3>
+                <h3 className="text-sm font-medium text-foreground">What this flow should do</h3>
                 <textarea aria-label="Flow input" rows={7} className={textareaClassName} value={draft.input} placeholder="The exact details of this run (for example which jobs you want). Steps use it as {{input}}, so edit it any time without touching the steps." onChange={(e) => { update({ input: e.target.value }); }} />
               </section>
               <SchedulePanel schedule={draft.schedule} nextRunAt={flow?.nextRunAt ?? null} onChange={(schedule) => { update({ schedule }); }} />
@@ -382,14 +382,18 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
           )}
           {flow !== null ? (
             <section className="flex flex-col gap-1.5" aria-label="Runs">
-              <h3 className="text-xs font-semibold text-foreground">Runs</h3>
-              {runs.length === 0 ? <p className="text-2xs text-muted-foreground">No runs yet.</p> : runs.map((run) => (
-                <p key={run.id} className="flex items-center gap-2 text-2xs text-muted-foreground">
-                  <span className={cn('size-1.5 shrink-0 rounded-full', run.status === 'running' ? 'bg-info' : run.status === 'done' ? 'bg-success' : 'bg-destructive')} />
-                  <span className="flex-1">{run.status === 'running' ? 'Running' : run.status === 'done' ? 'Finished' : 'Failed'} · {run.trigger === 'schedule' ? 'scheduled' : 'by hand'}</span>
-                  <span>{relativeTime(run.startedAt)}</span>
-                </p>
-              ))}
+              <h3 className="text-sm font-medium text-foreground">Runs</h3>
+              {runs.length === 0 ? <p className="text-xs text-muted-foreground">No runs yet.</p> : (
+                <ul className="flex flex-col">
+                  {runs.map((run) => (
+                    <li key={run.id} className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-foreground/85 hover:bg-accent">
+                      <span className={cn('size-1.5 shrink-0 rounded-full', run.status === 'running' ? 'bg-info animate-status-pulse' : run.status === 'done' ? 'bg-success' : 'bg-destructive')} />
+                      <span className="min-w-0 flex-1 truncate">{run.status === 'running' ? 'Running' : run.status === 'done' ? 'Finished' : 'Failed'}<span className="text-muted-foreground"> · {run.trigger === 'schedule' ? 'scheduled' : 'by hand'}</span></span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{relativeTime(run.startedAt)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           ) : null}
         </aside>
@@ -402,10 +406,10 @@ function StepOutput({ run, nodeId }: { run: FlowRun | undefined; nodeId: string 
   const state = run?.nodes.find((item) => item.nodeId === nodeId);
   if (state === undefined) return null;
   return (
-    <div className="rounded-xl bg-muted/60 p-2.5">
-      <p className="text-2xs font-semibold text-foreground">Last run: {STATUS_TEXT[state.status]}</p>
-      {state.note !== '' ? <p className="mt-1 text-2xs text-destructive-foreground">{state.note}</p> : null}
-      {state.output !== '' ? <p className="mt-1 max-h-40 overflow-y-auto text-2xs whitespace-pre-wrap text-muted-foreground">{state.output}</p> : null}
+    <div className="rounded-xl border border-border bg-card p-3">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" className={cn('size-1.5 rounded-full', STATUS_DOT[state.status])} />Last run · {STATUS_TEXT[state.status]}</p>
+      {state.note !== '' ? <p className="mt-1.5 text-xs text-destructive-foreground">{state.note}</p> : null}
+      {state.output !== '' ? <div className="mt-2 max-h-60 overflow-y-auto text-sm"><RunMarkdown text={state.output} /></div> : null}
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { reportMemoryCleanup } from '../../lib/memory-cleanup';
 import { Badge, Button, Dialog, EmptyState, Switch, inputClassName } from '../ui/primitives';
-import { CalendarIcon, ChevronRightIcon, DatabaseIcon, FileTextIcon, FolderIcon, FolderOpenIcon, MailIcon, MessageIcon, PlusIcon, RotateIcon, Spinner, TrashIcon } from '../ui/icons';
+import { CalendarIcon, ChevronRightIcon, FileTextIcon, FolderIcon, FolderOpenIcon, MailIcon, MessageIcon, PlusIcon, RotateIcon, Spinner, TrashIcon } from '../ui/icons';
 // Email/Calendar/Slack connection options are removed for now; AddAccountDialog is kept for when they return.
 
 // Local folder connectors: index a folder's text files into searchable memory
@@ -73,7 +73,7 @@ function ConnectorRow({ connector, onError }: { connector: ConnectorView; onErro
   }, [open, connector.id, connector.itemCount]);
 
   return (
-    <li className="rounded-xl border border-border bg-card">
+    <li className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
       <div className="flex items-start gap-3 p-3.5">
         <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground"><KindIcon kind={connector.kind} /></div>
         <div className="min-w-0 flex-1">
@@ -81,13 +81,13 @@ function ConnectorRow({ connector, onError }: { connector: ConnectorView; onErro
             <p className="truncate text-sm font-medium text-foreground">{connector.name}</p>
             <HealthBadge connector={connector} />
           </div>
-          <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground" title={sourceLabel(connector)}>{sourceLabel(connector)}</p>
-          <p className="mt-1 text-2xs text-muted-foreground">
+          <p className="mt-0.5 truncate text-xs text-muted-foreground" title={sourceLabel(connector)}>{sourceLabel(connector)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
             {connector.itemCount.toLocaleString()} {itemNoun(connector, connector.itemCount)} indexed
             {connector.lastSyncedAt ? <> · synced {relativeTime(connector.lastSyncedAt)}{relativeTime(connector.lastSyncedAt) === 'now' ? '' : ' ago'}</> : null}
             {project !== undefined ? <> · context for <span className="text-foreground/80">{project.name}</span></> : <> · not linked to a project</>}
           </p>
-          {connector.lastError && connector.health === 'unhealthy' ? <p className="mt-1.5 text-2xs break-words text-destructive-foreground">{connector.lastError}</p> : null}
+          {connector.lastError && connector.health === 'unhealthy' ? <p className="mt-1.5 text-xs break-words text-destructive-foreground">{connector.lastError}</p> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {connector.authState === 'authorized' ? (
@@ -104,7 +104,7 @@ function ConnectorRow({ connector, onError }: { connector: ConnectorView; onErro
         </div>
       </div>
       <div className="border-t border-border">
-        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={open} className="flex h-8 w-full cursor-pointer items-center gap-1.5 px-3.5 text-2xs text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={() => { setOpen((v) => !v); }} aria-expanded={open} className="flex h-8 w-full cursor-pointer items-center gap-1.5 px-3.5 text-xs text-muted-foreground hover:text-foreground">
           <ChevronRightIcon size={11} className={cn('transition-transform', open && 'rotate-90')} />Indexed {itemNoun(connector, 2)}
           <span className="ml-auto flex items-center gap-3">
             {connector.authState === 'authorized' ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); void act('reindex', () => window.conductor.connectors.sync({ id: connector.id, full: true })); }} onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); void act('reindex', () => window.conductor.connectors.sync({ id: connector.id, full: true })); } }} className="hover:text-foreground hover:underline">Full re-index</span> : null}
@@ -113,10 +113,10 @@ function ConnectorRow({ connector, onError }: { connector: ConnectorView; onErro
         </button>
         {open ? (
           <div className="max-h-64 overflow-y-auto px-3.5 pb-3">
-            {items === null ? <p className="text-2xs text-muted-foreground">Loading…</p> : items.length === 0 ? <p className="text-2xs text-muted-foreground">Nothing indexed yet.</p> : (
+            {items === null ? <p className="text-xs text-muted-foreground">Loading…</p> : items.length === 0 ? <p className="text-xs text-muted-foreground">Nothing indexed yet.</p> : (
               <ul className="flex flex-col">
                 {items.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2 py-0.5 text-2xs">
+                  <li key={item.id} className="flex items-center gap-2 py-0.5 text-xs">
                     <KindIcon kind={connector.kind} size={11} />
                     <span className="min-w-0 flex-1 truncate font-mono text-foreground/85">{item.origin ?? item.externalId ?? item.id}</span>
                     <span className="shrink-0 text-muted-foreground tabular-nums">{relativeTime(item.ingestedAt)}</span>
@@ -200,7 +200,7 @@ function AddFolderDialog({ open, onClose }: { open: boolean; onClose: () => void
             { value: '', label: 'No project (search only)' },
             ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
           ]} />
-          <p className="text-3xs text-muted-foreground">Added to tasks as reference data.</p>
+          <p className="text-2xs text-muted-foreground">Added to tasks as reference data.</p>
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         <div className="mt-2 flex justify-end gap-2">
@@ -231,7 +231,7 @@ export function FolderConnectors(): React.JSX.Element {
     <section aria-label="Indexed folders" className="flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><DatabaseIcon size={15} className="text-muted-foreground" />Sources</h2>
+          <h2 className="flex min-h-7 items-center px-3 text-base font-semibold text-foreground sm:px-4">Sources</h2>
         </div>
         <div className="flex gap-1.5">
           <Button size="sm" variant="primary" onClick={() => { setAdding(true); }}><PlusIcon size={13} />Folder</Button>

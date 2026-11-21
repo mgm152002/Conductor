@@ -25,7 +25,7 @@ function Field({ label, children, hint, id }: { label: string; id: string; hint?
     <div className="flex flex-col gap-1.5">
       <label htmlFor={id} className="text-xs font-medium text-foreground">{label}</label>
       {children}
-      {hint !== undefined ? <p className="text-3xs text-muted-foreground">{hint}</p> : null}
+      {hint !== undefined ? <p className="text-2xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }
@@ -122,7 +122,7 @@ export function AddAccountDialog({ kind, onClose }: { kind: AccountKind | null; 
             ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name })),
           ]} />
         </Field>
-        <p className="text-3xs text-muted-foreground">Connecting records your consent for Conductor to contact this provider. You can revoke it in Settings → External provider consent.</p>
+        <p className="text-2xs text-muted-foreground">Connecting records your consent for Conductor to contact this provider. You can revoke it in Settings → External provider consent.</p>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         <div className="mt-2 flex justify-end gap-2">
           <Button size="md" variant="ghost" onClick={onClose}>Cancel</Button>

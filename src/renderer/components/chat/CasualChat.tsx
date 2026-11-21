@@ -222,7 +222,7 @@ export function CasualChat(): React.JSX.Element {
                     reason="The CLI or model changed between replies"
                   />
                 ) : null}
-              <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-message px-3.5 py-2.5 text-message-foreground')}>
+              <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[80%] rounded-2xl bg-message px-4 py-2.5 text-message-foreground')}>
                 {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Thinking…'}</p> : null}
                 {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 px-1 text-xs text-muted-foreground"><span className="text-shimmer">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Working…'}</span></p> : null}
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
@@ -242,7 +242,7 @@ export function CasualChat(): React.JSX.Element {
           </div>
         ) : (
           <div className="flex flex-col items-center px-6 pb-5 text-center">
-            <h2 className="text-xl font-medium">What’s on your mind?</h2>
+            <h1 className="w-full text-center text-2xl font-normal tracking-tight text-foreground sm:text-3xl">What’s on your mind?</h1>
           </div>
         )}
       </div>
@@ -253,7 +253,7 @@ export function CasualChat(): React.JSX.Element {
         <Mem0OfflineNotice />
         {selectedId !== null ? <PendingQuestionPanel scopeId={selectedId} /> : null}
         {selectedId !== null ? <ChatPendingApprovals threadId={selectedId} /> : null}
-        <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-xl border border-border bg-card p-2.5 shadow-composer transition-[border-color] focus-within:border-border-strong">
+        <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-input bg-popover p-2.5 shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 dark:bg-card">
           <label htmlFor="casual-message" className="sr-only">Message</label>
           <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }

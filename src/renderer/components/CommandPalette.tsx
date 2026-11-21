@@ -11,7 +11,15 @@ import { relativeTime } from '../lib/time';
 import { cn } from '../lib/cn';
 import {
   FolderIcon, FolderPlusIcon, MessageIcon, PanelLeftIcon, ReturnIcon, SearchIcon, SquarePenIcon, TerminalIcon,
+  BrainIcon, GradCapIcon, HomeIcon, ListChecksIcon, PlugIcon, SettingsIcon, ShapesIcon, SparklesIcon, UsageIcon, WorkflowIcon,
 } from './ui/icons';
+import type { NavEntryId } from '../navigation';
+
+/** The same icons the sidebar uses for each destination. */
+const NAV_ICONS: Record<NavEntryId, typeof FolderIcon> = {
+  home: HomeIcon, projects: FolderIcon, 'active-tasks': ListChecksIcon, learning: GradCapIcon, workflows: WorkflowIcon,
+  skills: ShapesIcon, 'connected-apps': PlugIcon, memory: BrainIcon, usage: UsageIcon, settings: SettingsIcon,
+};
 
 // ⌘K: one field that reaches everything — any screen, any project thread,
 // any chat, and the handful of actions that start something new. Results
@@ -62,13 +70,13 @@ function PaletteBody({ onClose }: { onClose: () => void }): React.JSX.Element {
         icon: <FolderIcon size={15} />, run: () => { void newThread(workspace.id); },
       })),
       { id: 'go:work', group: 'Go to', label: 'Work', keywords: 'threads projects', icon: <TerminalIcon size={15} />, run: () => { navigate('/work'); } },
-      { id: 'go:agents', group: 'Go to', label: 'Agents', keywords: 'sandbox bots browser', icon: <span className="size-[15px]" />, run: () => { navigate('/agents'); } },
+      { id: 'go:agents', group: 'Go to', label: 'Agents', keywords: 'sandbox bots browser', icon: <SparklesIcon size={15} />, run: () => { navigate('/agents'); } },
       { id: 'go:home', group: 'Go to', label: 'Chat', keywords: 'home conversations', icon: <MessageIcon size={15} />, run: () => { navigate('/home'); } },
       ...NAV_ENTRIES.filter((entry) => entry.id !== 'home').map((entry): Command => ({
         id: `go:${entry.id}`, group: 'Go to', label: entry.id === 'connected-apps' ? 'Connections' : entry.label,
         ...(entry.id === 'settings' ? { hint: '⌘,' } : {}),
         keywords: entry.id === 'connected-apps' ? 'connected apps mcp agents cli' : entry.id === 'usage' ? 'cost tokens limits' : '',
-        icon: <span className="size-[15px]" />, run: () => { navigate(entry.path); },
+        icon: (() => { const Icon = NAV_ICONS[entry.id]; return <Icon size={15} />; })(), run: () => { navigate(entry.path); },
       })),
       ...groupThreads(Object.values(tasks)).map((thread): Command => ({
         id: `thread:${thread.key}`, group: 'Threads', label: threadTitle(thread.root),

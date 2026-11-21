@@ -46,7 +46,7 @@ function AgentRow({
           <BrandMark brand={agentBrand(id)} size={13} className="shrink-0 text-foreground/80" />
           <span className="truncate">{name}</span>
         </span>
-        <span className="text-2xs text-muted-foreground">Default</span>
+        <span className="text-xs text-muted-foreground">Default</span>
       </div>
       <div className="flex items-center gap-2 pl-32">
         {catalog === null || listed ? (
@@ -72,7 +72,7 @@ function AgentRow({
       </div>
       <div className="flex items-center gap-2">
         <span className="w-32 shrink-0 text-xs font-medium text-foreground" />
-        <span className="text-2xs text-muted-foreground">Fallback model</span>
+        <span className="text-xs text-muted-foreground">Fallback model</span>
       </div>
       <div className="flex items-center gap-2 pl-32">
         {catalog === null || listed ? (
@@ -112,7 +112,7 @@ function AgentRow({
           </div>
         )}
       </div>
-      {catalog?.error ? <p className="pl-34 text-3xs text-muted-foreground">{catalog.error}</p> : null}
+      {catalog?.error ? <p className="pl-34 text-2xs text-muted-foreground">{catalog.error}</p> : null}
     </div>
   );
 }
@@ -178,7 +178,7 @@ export function AgentModels(): React.JSX.Element {
     <section aria-label="Agent models" className="flex flex-col gap-3">
       <div className="flex items-start gap-3">
         <div className="flex-1">
-          <h2 className="text-sm font-semibold text-foreground">Default and fallback models</h2>
+          <h2 className="text-base font-semibold text-foreground">Default and fallback models</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Fallback runs once if the default hits a limit. The composer can override per message.
           </p>
@@ -227,12 +227,12 @@ export function AgentModels(): React.JSX.Element {
           Save defaults
         </Button>
         {saved !== null ? (
-          <span role="status" className="text-2xs text-success">
+          <span role="status" className="text-xs text-success">
             {saved}
           </span>
         ) : null}
         {error !== null ? (
-          <span role="alert" className="text-2xs text-destructive-foreground">
+          <span role="alert" className="text-xs text-destructive-foreground">
             {error}
           </span>
         ) : null}

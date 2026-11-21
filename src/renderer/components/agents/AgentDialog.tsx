@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
-  SANDBOX_AGENT_COLORS, SANDBOX_TOOL_GROUPS,
+  SANDBOX_TOOL_GROUPS,
   type SandboxAgent, type SandboxAgentInput, type SandboxApprovalPolicy, type SandboxToolGroup,
 } from '@shared/sandbox-agents';
 import type { RunChoice } from '@shared/agent-models';
@@ -8,9 +8,11 @@ import type { AgentOption } from '@shared/integrations-contract';
 import { AgentMark } from '../chat/AgentMark';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Dialog, Switch, inputClassName, textareaClassName } from '../ui/primitives';
-import { ArrowUpIcon, ChevronDownIcon, PlusIcon, SparklesIcon, Spinner, XIcon } from '../ui/icons';
+import { ArrowUpIcon, ChevronDownIcon, PencilIcon, PlusIcon, Spinner, XIcon } from '../ui/icons';
 import { cn } from '../../lib/cn';
-import { fileToIcon, generateIcon } from '../../lib/agent-icon';
+import { fileToIcon, svgToIcon } from '../../lib/agent-icon';
+import { IconChooser } from '../icons/IconChooser';
+import { choiceDataUrl } from '../icons/IconPickerDialog';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 
 // Creating and editing a sandbox agent: who it is, what it does, which CLIs
@@ -45,6 +47,10 @@ export function message(err: unknown): string {
   return err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err);
 }
 
+const LABEL = 'text-sm font-medium text-foreground';
+// Grouped rows: one rounded card, hairline dividers.
+const GROUP = 'flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card/40 *:not-first:border-t *:not-first:border-border/50';
+
 export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }: {
   open: boolean;
   initial: SandboxAgentInput;
@@ -56,8 +62,8 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
   const [form, setForm] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  useEffect(() => { setForm(initial); setError(null); }, [initial]);
+  const [choosing, setChoosing] = useState(false);
+  useEffect(() => { setForm(initial); setError(null); setChoosing(false); }, [initial]);
   const ids = { name: useId(), description: useId(), instructions: useId() };
   const local = clis.filter((cli) => !cli.remote);
   const unused = local.filter((cli) => !form.clis.includes(cli.id));
@@ -99,56 +105,56 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
         </Button>
       </>}
     >
-      <form className="flex max-h-[68vh] flex-col gap-4 overflow-y-auto pr-1" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-        <div className="flex items-end gap-3">
+      <form className="flex max-h-[68vh] flex-col gap-5 overflow-y-auto pr-1" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+        {/* Dialog shape: identity first, then labelled fields and grouped rows. */}
+        <div className="flex items-start gap-4">
+          {/* The icon opens the chooser below it: icon, emoji, monogram or image. */}
           <div className="flex shrink-0 flex-col items-center gap-1.5">
-            <AgentAvatar agent={{ name: form.name || 'New agent', color: form.color, icon: form.icon }} size={64} />
-            <div className="flex gap-1">
-              <Button type="button" size="sm" variant="ghost" title="Upload an image" onClick={() => { fileInput.current?.click(); }}>Upload</Button>
-              <Button type="button" size="sm" variant="ghost" title="Generate a new icon" onClick={() => { setError(null); try { setForm({ ...form, icon: generateIcon(form.color) }); } catch (err) { setError(message(err)); } }}><SparklesIcon size={12} />Generate</Button>
-              {form.icon !== undefined && form.icon !== '' ? <Button type="button" size="sm" variant="ghost" title="Remove the icon" onClick={() => { setForm({ ...form, icon: '' }); }}>Remove</Button> : null}
-            </div>
-            <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden aria-label="Upload an icon"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file === undefined) return;
-                setError(null);
-                void fileToIcon(file).then((icon) => { setForm((current) => ({ ...current, icon })); }).catch((err: unknown) => { setError(message(err)); });
-              }} />
+            <button type="button" aria-label="Choose icon" aria-expanded={choosing} title="Choose icon" onClick={() => { setChoosing((v) => !v); }}
+              className="group/avatar relative cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <AgentAvatar agent={{ name: form.name || 'New agent', color: form.color, icon: form.icon }} size={64} />
+              <span aria-hidden="true" className="absolute -right-1 -bottom-1 flex size-6 items-center justify-center rounded-full border border-border bg-popover text-muted-foreground shadow-xs/5 group-hover/avatar:text-foreground"><PencilIcon size={11} /></span>
+            </button>
+            {form.icon !== undefined && form.icon !== '' ? <Button type="button" size="xs" variant="ghost" onClick={() => { setForm({ ...form, icon: '' }); }}>Reset</Button> : null}
           </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <label htmlFor={ids.name} className="text-2xs font-medium text-muted-foreground">Name</label>
+          {/* The icon chooser carries its own colours, so there is no separate colour row. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5 self-center">
+            <label htmlFor={ids.name} className={LABEL}>Name</label>
             <input id={ids.name} className={inputClassName} value={form.name} maxLength={60} placeholder="Web researcher" onChange={(e) => { setForm({ ...form, name: e.target.value }); }} />
           </div>
-          <div role="radiogroup" aria-label="Colour" className="flex shrink-0 gap-1.5 pb-1.5">
-            {SANDBOX_AGENT_COLORS.map((color) => (
-              <button key={color} type="button" role="radio" aria-checked={form.color === color} aria-label={color} onClick={() => { setForm({ ...form, color }); }}
-                className={cn('size-5 cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring', form.color === color && 'ring-2 ring-foreground ring-offset-2 ring-offset-surface-raised')} style={{ background: color }} />
-            ))}
-          </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={ids.description} className="text-2xs font-medium text-muted-foreground">What it’s for</label>
+        {choosing ? (
+          <div className="rounded-xl border border-border/60 bg-card/40 p-3">
+            <IconChooser name={form.name || 'Agent'} initialColor={form.color}
+              onImage={fileToIcon}
+              onChange={(choice) => {
+                setError(null);
+                const next = choice.kind === 'image' ? Promise.resolve(choice.dataUrl) : svgToIcon(choiceDataUrl(choice));
+                void next.then((icon) => { setForm((current) => ({ ...current, icon })); }).catch((err: unknown) => { setError(message(err)); });
+              }} />
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={ids.description} className={LABEL}>What it’s for</label>
           <input id={ids.description} className={inputClassName} value={form.description} maxLength={300} placeholder="Researches a topic on the web and writes up what it found" onChange={(e) => { setForm({ ...form, description: e.target.value }); }} />
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={ids.instructions} className="text-2xs font-medium text-muted-foreground">Instructions <span className="font-normal">(given to the CLI on every run)</span></label>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={ids.instructions} className={LABEL}>Instructions <span className="font-normal text-muted-foreground">· given to the CLI on every run</span></label>
           <textarea id={ids.instructions} rows={4} className={textareaClassName} value={form.instructions} maxLength={8000} placeholder="How it should work, what to check, what to hand back…" onChange={(e) => { setForm({ ...form, instructions: e.target.value }); }} />
         </div>
 
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Runs on <span className="font-normal">(in order; when one is out of usage the next takes over; pick a model for each)</span></legend>
-          {form.clis.length === 0 ? <p className="text-2xs text-muted-foreground">Add at least one CLI.</p> : (
-            <ol className="flex flex-col gap-1.5">
+          <legend className={cn(LABEL, 'mb-0.5')}>Runs on</legend>
+          <p className="-mt-1 text-xs text-muted-foreground">In order: when one is out of usage the next takes over. Pick a model for each.</p>
+          {form.clis.length === 0 ? <p className="text-xs text-muted-foreground">Add at least one CLI.</p> : (
+            <ol className={GROUP}>
               {form.clis.map((id, index) => {
                 const cli = clis.find((option) => option.id === id);
                 return (
-                  <li key={id} className="flex items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-1.5">
-                    <span className="w-14 shrink-0 text-3xs font-medium text-muted-foreground">{index === 0 ? 'First' : `Fallback ${index}`}</span>
-                    <AgentMark agentId={id} name={nameOf(id)} size={20} />
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{nameOf(id)}</span>
-                    {cli !== undefined && !cli.available ? <span className="text-3xs text-warning">not available</span> : null}
+                  <li key={id} className="flex items-center gap-2 px-3 py-2">
+                    <AgentMark agentId={id} name={nameOf(id)} size={18} />
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">{nameOf(id)}<span className="text-xs text-muted-foreground"> · {index === 0 ? 'first' : `fallback ${index}`}</span></span>
+                    {cli !== undefined && !cli.available ? <span className="text-xs text-warning">not available</span> : null}
                     <ModelEffortPicker
                       agentId={id}
                       label={nameOf(id)}
@@ -171,7 +177,7 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
             <div className="flex flex-wrap gap-1.5">
               {unused.map((cli) => (
                 <button key={cli.id} type="button" onClick={() => { setForm({ ...form, clis: [...form.clis, cli.id] }); }} disabled={!cli.available}
-                  className="flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-dashed border-border-strong pr-2.5 pl-1 text-2xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border pr-2.5 pl-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
                   title={cli.available ? `Add ${cli.name}` : `${cli.name} is not available`}>
                   <AgentMark agentId={cli.id} name={cli.name} size={18} />{cli.name}<PlusIcon size={11} />
                 </button>
@@ -181,17 +187,17 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
         </fieldset>
 
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Sandbox tools</legend>
-          <div className="grid gap-1.5 sm:grid-cols-2">
+          <legend className={cn(LABEL, 'mb-1')}>Sandbox tools</legend>
+          <div className={GROUP}>
             {SANDBOX_TOOL_GROUPS.map((group) => {
               const on = form.tools.includes(group.id);
               return (
-                <label key={group.id} className={cn('flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2 transition-colors', on ? 'border-primary/40 bg-primary/6' : 'border-border hover:border-border-strong')}>
-                  <Switch label={group.label} checked={on} onChange={() => { toggleTool(group.id); }} />
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium text-foreground">{group.label}</span>
-                    <span className="block text-3xs leading-snug text-muted-foreground">{group.description}</span>
+                <label key={group.id} className="flex cursor-pointer items-center gap-3 px-3 py-2.5">
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-foreground">{group.label}</span>
+                    <span className="block text-xs leading-snug text-muted-foreground">{group.description}</span>
                   </span>
+                  <Switch label={group.label} checked={on} onChange={() => { toggleTool(group.id); }} />
                 </label>
               );
             })}
@@ -199,22 +205,22 @@ export function AgentDialog({ open, initial, editingId, clis, onClose, onSaved }
         </fieldset>
 
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Approval gate</legend>
-          <div role="radiogroup" aria-label="Approval gate" className="flex flex-col gap-1.5">
+          <legend className={cn(LABEL, 'mb-1')}>Approval gate</legend>
+          <div role="radiogroup" aria-label="Approval gate" className={GROUP}>
             {(Object.keys(APPROVAL) as SandboxApprovalPolicy[]).map((policy) => (
               <button key={policy} type="button" role="radio" aria-checked={form.approval === policy} onClick={() => { setForm({ ...form, approval: policy }); }}
-                className={cn('flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring', form.approval === policy ? 'border-primary/50 bg-primary/8' : 'border-border hover:border-border-strong')}>
-                <span aria-hidden="true" className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', form.approval === policy ? 'border-primary' : 'border-border-strong')}>
-                  {form.approval === policy ? <span className="size-2 rounded-full bg-primary" /> : null}
+                className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-foreground">{APPROVAL[policy].label}</span>
+                  <span className="block text-xs leading-snug text-muted-foreground">{APPROVAL[policy].description}</span>
                 </span>
-                <span className="min-w-0">
-                  <span className="block text-xs font-medium text-foreground">{APPROVAL[policy].label}</span>
-                  <span className="block text-3xs leading-snug text-muted-foreground">{APPROVAL[policy].description}</span>
+                <span aria-hidden="true" className={cn('flex size-4 shrink-0 items-center justify-center rounded-full border', form.approval === policy ? 'border-primary bg-primary' : 'border-input')}>
+                  {form.approval === policy ? <span className="size-1.5 rounded-full bg-primary-foreground" /> : null}
                 </span>
               </button>
             ))}
           </div>
-          <p className="text-3xs text-muted-foreground">Your permission profile still applies: Trusted automation or Auto-approve everything accepts without asking.</p>
+          <p className="text-xs text-muted-foreground">Your permission profile still applies: Trusted automation or Auto-approve everything accepts without asking.</p>
         </fieldset>
         {error !== null ? <Alert>{error}</Alert> : null}
       </form>

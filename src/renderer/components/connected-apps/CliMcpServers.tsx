@@ -53,7 +53,7 @@ function PresenceChip({ cli, presence, busy, onInstall, onRemove }: {
   onRemove: () => void;
 }): React.JSX.Element {
   const name = MCP_CLI_NAMES[cli];
-  const base = 'group/chip flex h-7 shrink-0 items-center gap-1.5 rounded-full border pr-2 pl-1 text-2xs font-medium transition-colors';
+  const base = 'group/chip flex h-7 shrink-0 items-center gap-1.5 rounded-full border pr-2 pl-1 text-xs font-medium transition-colors';
   if (presence.state === 'installed') {
     return (
       <span className={cn(base, 'border-success/30 bg-success/8 text-foreground')} title={`${name}: installed${presence.entry.disabled ? ' (disabled in its config)' : ''}`}>
@@ -79,7 +79,7 @@ function PresenceChip({ cli, presence, busy, onInstall, onRemove }: {
   if (presence.state === 'unsupported') {
     return (
       <span className={cn(base, 'border-dashed border-border text-muted-foreground opacity-70')} title={presence.reason}>
-        <AgentMark agentId={cli} name={name} size={18} />{name}<span className="text-3xs">n/a</span>
+        <AgentMark agentId={cli} name={name} size={18} />{name}<span className="text-2xs">n/a</span>
       </span>
     );
   }
@@ -94,7 +94,7 @@ function PresenceChip({ cli, presence, busy, onInstall, onRemove }: {
       <span className="opacity-60"><AgentMark agentId={cli} name={name} size={18} /></span>
       {name}
       {busy ? <Spinner size={11} /> : <PlusIcon size={11} />}
-      {presence.state === 'excluded' ? <span className="text-3xs">removed</span> : null}
+      {presence.state === 'excluded' ? <span className="text-2xs">removed</span> : null}
     </button>
   );
 }
@@ -117,20 +117,20 @@ function ServerRow({ server, clis, busy, onAct, onRemoveEverywhere }: {
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
             {server.name}
-            <span className="rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-muted-foreground">{server.transport === 'http' ? 'Remote' : 'Local command'}</span>
-            <span className={cn('text-2xs font-medium', installedIn === available ? 'text-success' : 'text-muted-foreground')}>
+            <span className="rounded-full bg-accent px-1.5 py-px text-2xs font-medium text-muted-foreground">{server.transport === 'http' ? 'Remote' : 'Local command'}</span>
+            <span className={cn('text-xs font-medium', installedIn === available ? 'text-success' : 'text-muted-foreground')}>
               In {installedIn} of {available} CLI{available === 1 ? '' : 's'}
             </span>
           </p>
-          <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground" title={server.endpoint}>{server.endpoint}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground" title={server.endpoint}>{server.endpoint}</p>
           {server.envNames.length > 0 || server.headerNames.length > 0 ? (
-            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-3xs text-muted-foreground">
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-2xs text-muted-foreground">
               <KeyIcon size={10} />
               {[...server.envNames, ...server.headerNames].map((key) => <span key={key} className="rounded bg-accent px-1 font-mono">{key}</span>)}
               <span>copied with the server</span>
             </p>
           ) : null}
-          {!server.portable && server.note !== undefined ? <p className="mt-1 text-2xs text-muted-foreground">{server.note} It stays in that CLI only.</p> : null}
+          {!server.portable && server.note !== undefined ? <p className="mt-1 text-xs text-muted-foreground">{server.note} It stays in that CLI only.</p> : null}
         </div>
         <Button size="icon-sm" variant="ghost" aria-label={`Remove ${server.name} from every CLI`} title="Remove from every CLI" onClick={onRemoveEverywhere} className="hover:text-destructive-foreground">
           <TrashIcon size={13} />
@@ -223,30 +223,30 @@ function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
     >
       <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <div className="flex flex-col gap-1">
-          <label htmlFor={ids.name} className="text-2xs font-medium text-muted-foreground">Name</label>
+          <label htmlFor={ids.name} className="text-xs font-medium text-muted-foreground">Name</label>
           <input id={ids.name} className={inputClassName} value={form.name} maxLength={64} placeholder="github" onChange={(e) => { setForm({ ...form, name: e.target.value }); }} />
-          {form.name.trim() !== '' && serverSlug(form.name) !== form.name.trim() ? <p className="text-3xs text-muted-foreground">Saved as <span className="font-mono">{serverSlug(form.name) || '…'}</span> (names can only use letters, digits, dots, dashes and underscores).</p> : null}
+          {form.name.trim() !== '' && serverSlug(form.name) !== form.name.trim() ? <p className="text-2xs text-muted-foreground">Saved as <span className="font-mono">{serverSlug(form.name) || '…'}</span> (names can only use letters, digits, dots, dashes and underscores).</p> : null}
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor={ids.endpoint} className="text-2xs font-medium text-muted-foreground">Command or URL</label>
+          <label htmlFor={ids.endpoint} className="text-xs font-medium text-muted-foreground">Command or URL</label>
           <input id={ids.endpoint} className={cn(inputClassName, 'font-mono')} value={form.endpoint} placeholder="npx -y @modelcontextprotocol/server-github  or  https://mcp.example.com/mcp" onChange={(e) => { setForm({ ...form, endpoint: e.target.value }); }} />
         </div>
         {/\bgoogle-drive-mcp\s+auth\b/.test(form.endpoint) ? <Alert tone="warning">“auth” is this package’s one-time sign-in command; it exits when done and isn’t the server. Run it yourself in a terminal first, then install the server without “auth”: <span className="font-mono">npx -y @piotr-agier/google-drive-mcp</span>.</Alert> : null}
-        <p className="text-3xs text-muted-foreground">Conductor only registers the server with your CLIs; it doesn’t sign you in. If the server needs a login (for example an <span className="font-mono">auth</span> command, or Google/OAuth), run that yourself in a terminal before an agent uses it.</p>
+        <p className="text-2xs text-muted-foreground">Conductor only registers the server with your CLIs; it doesn’t sign you in. If the server needs a login (for example an <span className="font-mono">auth</span> command, or Google/OAuth), run that yourself in a terminal before an agent uses it.</p>
         {http ? (
           <div className="flex flex-col gap-1">
-            <label htmlFor={ids.headers} className="text-2xs font-medium text-muted-foreground">Headers <span className="font-normal">(optional, one per line: Name: value)</span></label>
+            <label htmlFor={ids.headers} className="text-xs font-medium text-muted-foreground">Headers <span className="font-normal">(optional, one per line: Name: value)</span></label>
             <textarea id={ids.headers} rows={2} className={cn(textareaClassName, 'font-mono text-xs')} value={form.headers} placeholder="Authorization: Bearer …" onChange={(e) => { setForm({ ...form, headers: e.target.value }); }} />
-            <p className="text-3xs text-muted-foreground">Codex and Kiro get headers written into their config files. Servers that use sign-in ask for it the first time an agent connects.</p>
+            <p className="text-2xs text-muted-foreground">Codex and Kiro get headers written into their config files. Servers that use sign-in ask for it the first time an agent connects.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <label htmlFor={ids.env} className="text-2xs font-medium text-muted-foreground">Environment <span className="font-normal">(optional, one per line: NAME=value)</span></label>
+            <label htmlFor={ids.env} className="text-xs font-medium text-muted-foreground">Environment <span className="font-normal">(optional, one per line: NAME=value)</span></label>
             <textarea id={ids.env} rows={2} className={cn(textareaClassName, 'font-mono text-xs')} value={form.env} placeholder="GITHUB_TOKEN=…" onChange={(e) => { setForm({ ...form, env: e.target.value }); }} />
           </div>
         )}
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-2xs font-medium text-muted-foreground">Install into</legend>
+          <legend className="mb-1 text-xs font-medium text-muted-foreground">Install into</legend>
           <div role="radiogroup" aria-label="CLI to install into" className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {installed.map((cli) => {
               const on = form.cli === cli.id;
@@ -269,14 +269,14 @@ function AddServerDialog({ open, clis, initial, onClose, onAdded }: {
               );
             })}
           </div>
-          {installed.length === 0 ? <p className="text-2xs text-muted-foreground">No supported agent CLI is installed.</p> : null}
+          {installed.length === 0 ? <p className="text-xs text-muted-foreground">No supported agent CLI is installed.</p> : null}
         </fieldset>
         {installed.length > 1 ? (
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border px-3 py-2.5">
             <Switch label="Also install in the other CLIs" checked={form.everywhere} onChange={(everywhere) => { setForm({ ...form, everywhere }); }} />
             <span className="min-w-0">
               <span className="block text-xs font-medium text-foreground">Also install in the other CLIs</span>
-              <span className="block text-2xs text-muted-foreground">
+              <span className="block text-xs text-muted-foreground">
                 {form.cli === null ? 'Copies it into every other installed CLI too.' : `Copies it into ${installed.filter((cli) => cli.id !== form.cli).map((cli) => cli.name).join(', ')} too.`} You can also add it to one CLI at a time later.
               </span>
             </span>
@@ -325,7 +325,7 @@ export function CliMcpServers(): React.JSX.Element {
     <section aria-label="MCP servers in your agent CLIs" className="flex flex-col gap-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 max-w-[62ch]">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />MCP servers in your agent CLIs</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />MCP servers in your agent CLIs</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             Installed straight into a CLI’s own configuration, so it works in that CLI on its own too.
             Add one to the CLI you choose, then copy it to others with the + on its card, or turn on auto-sync to keep every CLI in step.
@@ -360,7 +360,7 @@ export function CliMcpServers(): React.JSX.Element {
             <li key={cli.id} title={cli.installed ? `${cli.name} config: ${cli.configPath}` : `${cli.name} is not installed`} className={cn('flex h-8 items-center gap-2 rounded-lg border px-2 text-xs', cli.installed ? 'border-border bg-card text-foreground' : 'border-dashed border-border text-muted-foreground opacity-60')}>
               <AgentMark agentId={cli.id} name={cli.name} size={18} />
               <span className="font-medium">{cli.name}</span>
-              <span className="text-3xs text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 {!cli.installed ? 'not installed' : cli.error !== undefined ? 'config unreadable' : ((count: number) => `${count} server${count === 1 ? '' : 's'}`)((overview?.servers ?? []).filter((server) => server.presence[cli.id]?.state === 'installed').length)}
               </span>
             </li>
@@ -399,8 +399,8 @@ export function CliMcpServers(): React.JSX.Element {
                     <li key={server.key} className="flex items-center gap-2.5 py-2">
                       {owner !== undefined ? <AgentMark agentId={owner.id} name={owner.name} size={18} /> : null}
                       <span className="min-w-0 flex-1">
-                        <span className="text-[13px] font-medium text-foreground">{server.name}</span>
-                        <span className="ml-2 text-2xs text-muted-foreground">{owner?.name}{server.note !== undefined ? `. ${server.note}` : ''}</span>
+                        <span className="text-sm font-medium text-foreground">{server.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{owner?.name}{server.note !== undefined ? `. ${server.note}` : ''}</span>
                       </span>
                     </li>
                   );

@@ -48,7 +48,7 @@ export function RemoteHosts(): React.JSX.Element {
     <section aria-label="Remote hosts" className="flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><ServerIcon size={15} className="text-muted-foreground" />Remote hosts</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground"><ServerIcon size={15} className="text-muted-foreground" />Remote hosts</h2>
         </div>
         <Button size="sm" variant="primary" onClick={() => { setForm({ name: '', host: '', remoteDir: '~/', installIfMissing: false }); setError(null); setAdding(true); }}><PlusIcon size={13} />Add host</Button>
       </header>
@@ -60,17 +60,17 @@ export function RemoteHosts(): React.JSX.Element {
           {hosts.map((host) => {
             const result = tests[host.id];
             return (
-              <li key={host.id} className="rounded-xl border border-border bg-card p-3.5">
+              <li key={host.id} className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 p-3.5">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-medium text-foreground">{host.name}</p>
                       {!host.enabled ? <Badge>Disabled</Badge> : host.available ? <Badge tone="success">Ready</Badge> : <Badge tone="destructive">Unavailable</Badge>}
                     </div>
-                    <p className="mt-0.5 font-mono text-2xs text-muted-foreground">{host.host} · {host.remoteDir}</p>
-                    {result === 'testing' ? <p className="mt-1 text-2xs text-muted-foreground">Testing connection…</p> : null}
+                    <p className="mt-0.5 text-xs text-muted-foreground">{host.host} · {host.remoteDir}</p>
+                    {result === 'testing' ? <p className="mt-1 text-xs text-muted-foreground">Testing connection…</p> : null}
                     {result !== undefined && result !== 'testing' ? (
-                      <p className={`mt-1 text-2xs ${result.connected && result.agentInstalled ? 'text-success' : 'text-destructive-foreground'}`}>
+                      <p className={`mt-1 text-xs ${result.connected && result.agentInstalled ? 'text-success' : 'text-destructive-foreground'}`}>
                         {result.connected ? (result.agentInstalled ? 'Connected · Codex is installed' : `Connected · Codex not found${host.installIfMissing ? ' (will be installed on first run)' : ''}`) : `Connection failed: ${result.error ?? 'unknown error'}`}
                       </p>
                     ) : null}

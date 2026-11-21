@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { agentBrand, BrandMark } from '../ui/BrandMarks';
+import { Badge, Button } from '../ui/primitives';
 import type {
   CatalogEntryView,
   CatalogStatus,
@@ -37,11 +39,6 @@ const STATUS_LABEL: Record<CatalogStatus, string> = {
   unconfigured: 'Not yet available',
 };
 
-const STATUS_STYLE: Record<CatalogStatus, string> = {
-  installed: 'text-success ',
-  available: 'text-warning ',
-  unconfigured: 'text-muted-foreground ',
-};
 
 export function CatalogEntryCard({
   entry,
@@ -132,24 +129,21 @@ export function CatalogEntryCard({
   }
 
   return (
-    <div className="flex flex-col gap-2 px-3.5 py-2.5">
+    <div className="flex flex-col gap-2 px-3 py-3 sm:px-4">
       <div className="flex items-center gap-3" title={entry.setupNote}>
-        <span className="w-36 shrink-0 truncate text-[13px] text-foreground">
-          {entry.displayName}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted-foreground">
-          {entry.status === 'installed' ? entry.discoveredBinary ?? '' : ''}
+        <span className="flex size-5 shrink-0 items-center justify-center"><BrandMark brand={agentBrand(entry.id)} size={18} /></span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-medium text-foreground">{entry.displayName}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {entry.status === 'installed' ? entry.discoveredBinary ?? 'Installed' : entry.status === 'available' ? 'Not installed' : 'Not yet available'}
+          </span>
         </span>
         {entry.status === 'available' && entry.installRunnable !== false && pending === null ? (
-          <button type="button" disabled={busy} onClick={() => { void requestInstall(); }} className="h-6 shrink-0 cursor-pointer rounded-md border border-border px-2 text-2xs font-medium text-foreground hover:bg-accent disabled:opacity-40">
-            {busy ? 'Loading…' : 'Install'}
-          </button>
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => { void requestInstall(); }}>{busy ? 'Loading…' : 'Install'}</Button>
         ) : null}
-        <span
-          className={`shrink-0 text-2xs font-medium ${STATUS_STYLE[entry.status]}`}
-        >
+        <Badge tone={entry.status === 'installed' ? (entry.canRunTasks === false ? 'warning' : 'success') : entry.status === 'available' ? 'neutral' : 'neutral'}>
           {entry.status === 'installed' && entry.canRunTasks === false ? 'Installed · can’t route' : STATUS_LABEL[entry.status]}
-        </span>
+        </Badge>
       </div>
 
       {entry.status === 'available' && entry.installRunnable === false ? (
@@ -160,7 +154,7 @@ export function CatalogEntryCard({
             <button type="button" onClick={() => { void navigator.clipboard.writeText(entry.installCommand ?? '').then(() => { setMessage('Command copied.'); }); }} className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent">Copy command</button>
             <button type="button" onClick={() => { void (rescan ?? (async () => { await window.conductor.cliCatalog.rescan(); }))().then(() => { setMessage('Rescanned. If it still shows as not installed, open a new Terminal window and check that the command runs.'); }); }} className="rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent">I’ve installed it — rescan</button>
           </div>
-          {entry.docsUrl !== undefined ? <p className="text-2xs text-muted-foreground">Instructions: {entry.docsUrl}</p> : null}
+          {entry.docsUrl !== undefined ? <p className="text-xs text-muted-foreground">Instructions: {entry.docsUrl}</p> : null}
         </div>
       ) : entry.status === 'available' ? (
         pending !== null ? (

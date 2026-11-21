@@ -6,7 +6,6 @@ import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, u
 import { useThreadNavigation } from '../hooks/useThreadNavigation';
 import { pickFocusedTask } from './workspace/useFocusedTask';
 import { threadStatus, threadTitle } from '../lib/thread-status';
-import { relativeTime } from '../lib/time';
 import { groupThreads, threadKey, type ThreadView } from '../lib/threads';
 import {
   classifyThreadTier, formatSnoozeCountdown, groupThreadsByTier, nextSnoozeWakeAt,
@@ -16,14 +15,16 @@ import {
 import { prNumberFromUrl, prPath } from '../lib/pull-request';
 import { cn } from '../lib/cn';
 import {
-  BrainIcon, CheckIcon, ChevronRightIcon, ClockIcon, FolderIcon, FolderPlusIcon, GradCapIcon, ImageIcon, ListChecksIcon,
-  MessageIcon, PanelLeftIcon, PencilIcon, PhoneIcon, PlugIcon, PlusIcon, PullRequestIcon, RotateIcon, SearchIcon,
-  SettingsIcon, SparklesIcon, SquarePenIcon, TerminalIcon, TrashIcon, UsageIcon,
+  BrainIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, FolderPlusIcon, GradCapIcon, ImageIcon, ListChecksIcon,
+  ArrowLeftIcon, ArrowRightIcon, MessageIcon, PanelLeftIcon, PencilIcon, PhoneIcon, PlugIcon, PlusIcon, PullRequestIcon, RotateIcon, SearchIcon,
+  SettingsIcon, SparklesIcon, SquarePenIcon, TerminalIcon, TrashIcon, UsageIcon, XIcon,
 } from './ui/icons';
 import { isTerminalTask } from '../stores/task-store';
+import { SIDEBAR_ICON, SIDEBAR_ROW } from './ui/sidebar-styles';
 import { SuggestionsInbox } from './suggestions/SuggestionsInbox';
 import { PhoneControlDialog } from './phone/PhoneControlDialog';
 import { EntityIcon } from './ui/EntityIcon';
+import { MenuSelect } from './ui/MenuSelect';
 import { IconPickerDialog } from './icons/IconPickerDialog';
 import { SnoozePickerDialog } from './threads/SnoozePickerDialog';
 import { DeleteProjectDialog } from './projects/DeleteProjectDialog';
@@ -35,8 +36,8 @@ import { DeleteSpaceDialog, SpaceNameDialog } from './threads/SpaceDialogs';
 import { RenameThreadDialog } from './threads/RenameThreadDialog';
 import { useChatStore } from '../stores/chat-store';
 
-// The app sidebar. In Work it lists projects as collapsible groups with their
-// threads sorted into tiers; in Chat it lists spaces and personal chats. Each
+// The app sidebar. In Work it lists every project's threads in one list sorted
+// into tiers, each row led by its project badge; in Chat it lists spaces and personal chats. Each
 // thread row leads with a status dot, so a column can be scanned by colour.
 
 const ATTENTION_PILL_CLASSES: Record<string, { text: string; dot: string }> = {
@@ -49,8 +50,20 @@ const ATTENTION_PILL_CLASSES: Record<string, { text: string; dot: string }> = {
   'snooze-woke': { text: 'text-violet-600 dark:text-violet-300/90', dot: 'bg-violet-500 dark:bg-violet-300/90' },
 };
 
-function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, onOpen, onRename, onDelete, onMarkSettled, onSnooze, onClearTier }: {
+/** Short age: now, 5m, 4h, 18d, 3mo. */
+function compactAge(iso: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h`;
+  if (minutes < 60 * 24 * 60) return `${Math.round(minutes / 1440)}d`;
+  return `${Math.round(minutes / 43_200)}mo`;
+}
+
+function ThreadRow({ thread, project, selected, pendingApproval, tierInfo, snoozedUntil, onOpen, onRename, onDelete, onMarkSettled, onSnooze, onClearTier }: {
   thread: ThreadView;
+  /** In the all-projects list, the project badge leading the row. */
+  project?: Workspace | undefined;
   selected: boolean;
   pendingApproval: boolean;
   tierInfo: ThreadTierInfo;
@@ -76,9 +89,9 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
   return (
     <li
       className={cn(
-        'group/thread relative flex items-center rounded-lg transition-colors',
+        'group/thread relative flex items-center rounded-[var(--control-radius)] transition-colors',
         'focus-within:bg-sidebar-row-hover',
-        selected ? 'bg-sidebar-row-active text-sidebar-foreground shadow-lift' : 'text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
+        selected ? 'bg-sidebar-row-active text-sidebar-foreground' : 'text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground',
       )}
     >
       <button
@@ -86,24 +99,37 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
         onClick={onOpen}
         aria-current={selected ? 'page' : undefined}
         title={thread.root.objective}
-        className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 rounded-lg py-1.5 pr-2 pl-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-[var(--control-radius)] ps-2.5 pe-2 text-left outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <span
-          aria-hidden="true"
-          className={cn(
-            'mt-[4px] size-2 shrink-0 rounded-full',
-            showPill ? (attentionPill?.dot ?? status.dotClass) : 'border border-sidebar-muted-foreground/45',
-            showPill && status.pulse && tierInfo.tier !== 'snoozed' && 'animate-status-pulse',
-          )}
-        />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn('truncate text-[13px] leading-tight', selected && 'font-medium', thread.root.prUrl !== undefined && 'pr-5')}>{title}</span>
-          <span className="flex min-w-0 items-center gap-1.5 text-3xs text-sidebar-muted-foreground transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0">
-            {showPill ? <span className={cn('shrink-0 font-medium', attentionPill?.text ?? status.colorClass)}>{statusLabel}</span> : null}
-            <span className="shrink-0 tabular-nums">{relativeTime(task.updatedAt)}</span>
-            {thread.tasks.length > 1 ? <span className="shrink-0 tabular-nums" title={`${thread.tasks.length} messages`}>{thread.tasks.length} messages</span> : null}
-            {tierInfo.tier === 'snoozed' && snoozedUntil !== undefined ? <span className="min-w-0 truncate" title={new Date(snoozedUntil).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}>wakes{snoozeCountdown !== null ? ` ${snoozeCountdown}` : ''}</span> : null}
+        {project !== undefined ? (
+          <span className="relative shrink-0" title={project.name}>
+            <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" size={16} />
+            {showPill ? (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-sidebar',
+                  attentionPill?.dot ?? status.dotClass,
+                  status.pulse && tierInfo.tier !== 'snoozed' && 'animate-status-pulse',
+                )}
+              />
+            ) : null}
           </span>
+        ) : (
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-2 shrink-0 rounded-full',
+              showPill ? (attentionPill?.dot ?? status.dotClass) : 'border border-sidebar-muted-foreground/45',
+              showPill && status.pulse && tierInfo.tier !== 'snoozed' && 'animate-status-pulse',
+            )}
+          />
+        )}
+        {/* Thread row: one line, the title and its age (or status) at the right. */}
+        <span className={cn('min-w-0 flex-1 truncate text-sm', selected && 'font-medium')}>{title}</span>
+        <span className={cn('flex shrink-0 items-center gap-1.5 text-xs text-sidebar-muted-foreground tabular-nums transition-opacity group-hover/thread:opacity-0 group-focus-within/thread:opacity-0', thread.root.prUrl !== undefined && 'pe-5')}
+          title={`${thread.tasks.length > 1 ? `${thread.tasks.length} messages · ` : ''}${tierInfo.tier === 'snoozed' && snoozedUntil !== undefined ? `wakes ${new Date(snoozedUntil).toLocaleString()}` : new Date(task.updatedAt).toLocaleString()}`}>
+          {showPill ? <span className={cn('font-medium', attentionPill?.text ?? status.colorClass)}>{tierInfo.tier === 'snoozed' ? `wakes${snoozeCountdown !== null ? ` ${snoozeCountdown}` : ''}` : statusLabel}</span> : <span>{compactAge(task.updatedAt)}</span>}
         </span>
       </button>
       {thread.root.prUrl !== undefined ? (
@@ -113,7 +139,7 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
           aria-label={`Open pull request ${prNumber !== null ? `#${prNumber} ` : ''}for thread: ${threadTitle(thread.root)}`}
           title={`Pull request${prNumber !== null ? ` #${prNumber}` : ''}${thread.root.prState !== undefined ? ` · ${thread.root.prState}` : ''} — open in the PR reader`}
           className={cn(
-            'absolute top-1 right-1 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring',
+            'absolute top-1.5 right-1.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring',
             thread.root.prState === 'merged' ? 'text-violet-500' : thread.root.prState === 'closed' ? 'text-destructive' : 'text-success',
           )}
         >
@@ -122,7 +148,8 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
       ) : null}
       {/* Hover actions take the place of the meta line, so the title never
           shifts or truncates further when they appear. */}
-      <span className="pointer-events-none absolute right-1 bottom-0.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100">
+      {/* Centred in the one-line row, over the age, on the row's own hover colour. */}
+      <span className={cn('pointer-events-none absolute inset-y-0 right-1 my-auto flex h-6 items-center gap-0.5 rounded-md ps-1 opacity-0 transition-opacity group-hover/thread:pointer-events-auto group-hover/thread:opacity-100 group-focus-within/thread:pointer-events-auto group-focus-within/thread:opacity-100', selected ? 'bg-sidebar-row-active' : 'bg-sidebar-row-hover')}>
         {tierInfo.tier !== 'settled' ? (
           <button
             type="button"
@@ -178,9 +205,16 @@ function ThreadRow({ thread, selected, pendingApproval, tierInfo, snoozedUntil, 
   );
 }
 
-function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pendingQuestionTaskIds, query = '', onNavigate }: {
-  project: Workspace;
+/**
+ * Work's thread list: one flat list across every project,
+ * sorted into tier sections, each row led by its project's badge. Filtered
+ * to one project (`project`), a header row carries that project's actions.
+ */
+function WorkThreads({ project, projects, active, tasks, focusedKey, pendingTaskIds, pendingQuestionTaskIds, query = '', onNavigate, onClearProject }: {
+  project: Workspace | null;
+  projects: ReadonlyMap<string, Workspace>;
   active: boolean;
+  onClearProject: () => void;
   tasks: Task[];
   focusedKey: string | null;
   pendingTaskIds: ReadonlySet<string>;
@@ -188,8 +222,6 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   query?: string;
   onNavigate?: (() => void) | undefined;
 }): React.JSX.Element {
-  const collapsed = useUiStore((s) => s.collapsedProjects[project.id] === true) && query === '';
-  const toggle = useUiStore((s) => s.toggleProject);
   const tierPrefs = useThreadTierStore((s) => s.prefs);
   const { openThread, newThread } = useThreadNavigation();
   // Every tier — Needs attention included — is a collapsible section.
@@ -217,13 +249,15 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
   const [snoozingThread, setSnoozingThread] = useState<ThreadView | null>(null);
   // Locally recorded PR count for the header badge; the dialog syncs the
   // repository's full list from GitHub when opened.
+  const projectId = project?.id ?? null;
   useEffect(() => {
+    if (projectId === null) return undefined;
     let active = true;
-    void window.conductor.github.listPrs(project.id)
+    void window.conductor.github.listPrs(projectId)
       .then((list) => { if (active) setPrCount(list.filter((pr) => pr.state === 'open').length); })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [project.id]);
+  }, [projectId]);
   // Keep the snooze countdowns fresh once a minute; the exact wake itself
   // is driven by the dedicated snooze timer below, not by this poll.
   useEffect(() => {
@@ -301,26 +335,16 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
       });
     }
   }, [focusedKey, tierGroups]);
-  if (query !== '' && threads.length === 0) return <></>;
-  const working = tierGroups.find((group) => group.id === 'working')?.threads.length ?? 0;
-  const needsAttention = tierGroups.find((group) => group.id === 'needs-attention')?.threads.length ?? 0;
+  const scope = project !== null ? ` in ${project.name}` : '';
 
   return (
-    <li className="flex flex-col">
-      <div className={cn('group flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-sidebar-row-hover')}>
-        <button
-          type="button"
-          onClick={() => { toggle(project.id); }}
-          aria-expanded={!collapsed}
-          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 pl-1.5 text-left text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-          title={project.rootPath}
-        >
-          <ChevronRightIcon size={12} className={cn('shrink-0 text-sidebar-muted-foreground transition-transform duration-150', !collapsed && 'rotate-90')} />
-          <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" active={active} />
-          <span className={cn('min-w-0 flex-1 truncate font-semibold', active ? 'text-sidebar-foreground' : 'text-sidebar-foreground/85')}>{project.name}</span>
-          {needsAttention > 0 ? <span title={`${needsAttention} need${needsAttention === 1 ? 's' : ''} attention`} className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-3xs font-medium text-amber-600 tabular-nums dark:text-amber-300">{needsAttention}</span> : null}
-          {working > 0 ? <span title={`${working} working`} className="shrink-0 rounded-full bg-sky-500/12 px-1.5 text-3xs font-medium text-sky-600 tabular-nums dark:text-sky-300">{working}</span> : null}
-        </button>
+    <div className="flex flex-col">
+      {project !== null ? (
+      <div className={cn('group mb-1 flex h-8 items-center rounded-lg pr-1 transition-colors hover:bg-sidebar-row-hover')}>
+        <span className="flex h-full min-w-0 flex-1 items-center gap-2 pl-2 text-sm" title={project.rootPath}>
+          <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" size={16} active={active} />
+          <span className="min-w-0 flex-1 truncate font-medium text-sidebar-foreground">{project.name}</span>
+        </span>
         <button
           type="button"
           onClick={() => { setPrsOpen(true); }}
@@ -329,7 +353,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
           className={cn('h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1 text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:flex focus-visible:outline-2 focus-visible:outline-ring', prCount > 0 ? 'flex' : 'hidden group-focus-within:flex group-hover:flex')}
         >
           <PullRequestIcon size={13} />
-          {prCount > 0 ? <span className="text-3xs font-medium tabular-nums">{prCount}</span> : null}
+          {prCount > 0 ? <span className="text-xs font-medium tabular-nums">{prCount}</span> : null}
         </button>
         <button
           type="button"
@@ -344,7 +368,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
           type="button"
           onClick={() => { setIconOpen(true); }}
           aria-label={`Icon for ${project.name}`}
-          title="Project icon — generate with a model or upload"
+          title="Change icon"
           className="hidden size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground group-focus-within:flex group-hover:flex hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
         >
           <ImageIcon size={13} />
@@ -358,10 +382,20 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
         >
           <TrashIcon size={13} />
         </button>
+        <button
+          type="button"
+          onClick={onClearProject}
+          aria-label="Show threads from every project"
+          title="Show every project"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <XIcon size={13} />
+        </button>
       </div>
-      <DeleteProjectDialog project={project} open={deleting} onClose={() => { setDeleting(false); }} />
-      {iconOpen ? <IconPickerDialog target={{ kind: 'project', id: project.id, name: project.name, icon: project.icon ?? null }} open onClose={() => { setIconOpen(false); }} /> : null}
-      {prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
+      ) : null}
+      {project !== null ? <DeleteProjectDialog project={project} open={deleting} onClose={() => { setDeleting(false); onClearProject(); }} /> : null}
+      {project !== null && iconOpen ? <IconPickerDialog target={{ kind: 'project', id: project.id, name: project.name, icon: project.icon ?? null }} open onClose={() => { setIconOpen(false); }} /> : null}
+      {project !== null && prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
       {deletingThread !== null ? <DeleteThreadDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameThreadDialog key={renamingThread.key} threadId={renamingThread.key} currentTitle={threadTitle(renamingThread.root)} open onClose={() => { setRenamingThread(null); }} /> : null}
       {snoozingThread !== null ? (
@@ -371,11 +405,10 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
           onSnooze={(until) => { useThreadTierStore.getState().snooze(snoozingThread.key, snoozingThread.latest.updatedAt, until); }}
         />
       ) : null}
-      {!collapsed ? (
-        threads.length === 0 ? (
-          <p className="py-1 pl-8 text-2xs text-sidebar-muted-foreground">No threads yet</p>
+      {threads.length === 0 ? (
+          <p className="px-2.5 py-1 text-xs text-sidebar-muted-foreground">{query !== '' ? 'No matching threads' : 'No threads yet'}</p>
         ) : (
-          <div className="ml-[13px] flex flex-col border-l border-sidebar-border pb-1 pl-1.5">
+          <div className="flex flex-col gap-1 pb-1">
             {tierGroups.map((group) => {
               const isAttention = group.id === 'needs-attention';
               const containsFocused = focusedKey !== null && group.threads.some((thread) => thread.key === focusedKey);
@@ -385,21 +418,22 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
               // when clicked. Search forces sections open so matches show.
               const tierCollapsed = query === '' && (tierOverrides[group.id] ?? (!containsFocused && collapsedTiers[group.id] === true));
               return (
-                <section key={group.id} aria-label={`${group.label} threads in ${project.name}`} className="flex flex-col">
+                <section key={group.id} aria-label={`${group.label} threads${scope}`} className="flex flex-col">
                   <button
                     type="button"
                     onClick={() => { setTierOverrides((current) => ({ ...current, [group.id]: !tierCollapsed })); }}
                     aria-expanded={!tierCollapsed}
-                    aria-label={`${group.label} threads in ${project.name}`}
+                    aria-label={`${group.label} threads${scope}`}
                     className={cn(
-                      'flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-md pr-1.5 pl-1 text-left text-2xs font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
+                      // Section heading: "Settled   9 ⌄".
+                      'flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-left text-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
                       isAttention ? 'text-amber-600 hover:text-amber-500 dark:text-amber-300/90' : 'text-sidebar-muted-foreground hover:text-sidebar-foreground',
                     )}
                   >
-                    <ChevronRightIcon size={11} className={cn('shrink-0 transition-transform duration-150', !tierCollapsed && 'rotate-90')} />
                     {isAttention ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-300/90" /> : null}
                     <span className="flex-1">{group.label}</span>
-                    <span className="tabular-nums">{group.threads.length}</span>
+                    <span className="text-xs tabular-nums">{group.threads.length}</span>
+                    <ChevronDownIcon size={13} className={cn('shrink-0 transition-transform duration-150', tierCollapsed && '-rotate-90')} />
                   </button>
                   {!tierCollapsed ? (
                     <ul className="flex flex-col gap-px pb-1">
@@ -410,6 +444,7 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
                           <ThreadRow
                             key={thread.key}
                             thread={thread}
+                            project={project === null ? projects.get(thread.root.workspaceId) : undefined}
                             selected={focusedKey === thread.key}
                             pendingApproval={pendingTaskIds.has(thread.latest.id) || thread.tasks.some((task) => pendingTaskIds.has(task.id))}
                             tierInfo={tierInfo}
@@ -435,9 +470,8 @@ function ProjectGroup({ project, active, tasks, focusedKey, pendingTaskIds, pend
               );
             })}
           </div>
-        )
-      ) : null}
-    </li>
+        )}
+    </div>
   );
 }
 
@@ -529,9 +563,9 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
         event.dataTransfer.setData('text/plain', thread.id);
       }}
       onDragEnd={() => { setDraggedId(null); setDropTarget(null); }}
-      className={cn('group/chat relative flex h-8 cursor-grab items-center rounded-lg transition-colors focus-within:bg-sidebar-row-hover active:cursor-grabbing', selectedId === thread.id ? 'bg-sidebar-row-active font-medium shadow-lift' : 'text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground', draggedId === thread.id && 'opacity-50')}
+      className={cn('group/chat relative flex h-8 cursor-grab items-center rounded-lg transition-colors focus-within:bg-sidebar-row-hover active:cursor-grabbing', selectedId === thread.id ? 'bg-sidebar-row-active font-medium' : 'text-sidebar-foreground/85 hover:bg-sidebar-row-hover hover:text-sidebar-foreground', draggedId === thread.id && 'opacity-50')}
     >
-      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-lg px-2.5 text-left text-[13px] transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
+      <button type="button" title={thread.title} aria-current={selectedId === thread.id ? 'page' : undefined} onClick={() => { useChatStore.getState().select(thread.id); onNavigate?.(); }} className="flex h-full min-w-0 flex-1 cursor-pointer items-center rounded-lg px-2.5 text-left text-sm transition-[padding] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring group-hover/chat:pr-14 group-focus-within/chat:pr-14">
         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       </button>
       <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/chat:pointer-events-auto group-hover/chat:opacity-100 group-focus-within/chat:pointer-events-auto group-focus-within/chat:opacity-100">
@@ -588,9 +622,9 @@ function ChatHistory({ query = '', onNavigate }: { query?: string; onNavigate?: 
                 <ChevronRightIcon size={11} className={cn('transition-transform duration-150', !spaceCollapsed && 'rotate-90')} />
               </button>
               <EntityIcon icon={space.icon ?? null} name={space.name} kind="space" />
-              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold" title={space.name}>{space.name}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={space.name}>{space.name}</span>
               <span className="shrink-0 text-2xs text-sidebar-muted-foreground">{members.length}</span>
-              <button type="button" onClick={() => { setIconSpace(space); }} aria-label={`Icon for space: ${space.name}`} title="Space icon — generate with a model or upload" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
+              <button type="button" onClick={() => { setIconSpace(space); }} aria-label={`Icon for space: ${space.name}`} title="Change icon" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
                 <ImageIcon size={12} />
               </button>
               <button type="button" onClick={() => { setRenamingSpace(space); }} aria-label={`Rename space: ${space.name}`} title="Rename space" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground opacity-0 hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover/space:opacity-100">
@@ -640,7 +674,7 @@ const MORE = [
 ] as const;
 
 /**
- * The app sidebar, after t3code: where to go at the top, the list for the
+ * The app sidebar, where to go at the top, the list for the
  * surface you are on in the middle (threads by project in Work, chats and
  * spaces in Chat, agents and flows in Agents), the other destinations and
  * Settings at the bottom. ⌘B hides it.
@@ -666,16 +700,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const onAgents = path === '/agents';
   const onWork = path === '/work' || path.startsWith('/pr/');
 
-  const byProject = useMemo(() => {
-    const groups = new Map<string, Task[]>();
-    for (const task of Object.values(tasks)) {
-      const list = groups.get(task.workspaceId) ?? [];
-      list.push(task);
-      groups.set(task.workspaceId, list);
-    }
-    for (const list of groups.values()) list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id));
-    return groups;
-  }, [tasks]);
+  const workProjectId = useUiStore((s) => s.workProject);
+  const setWorkProject = useUiStore((s) => s.setWorkProject);
+  const projectsById = useMemo(() => new Map(workspaces.map((project) => [project.id, project])), [workspaces]);
+  const workProject = workProjectId !== null ? projectsById.get(workProjectId) ?? null : null;
+  // Every project's threads in one list, newest first; a project filter narrows it.
+  const workTasks = useMemo(() => Object.values(tasks)
+    .filter((task) => projectsById.has(task.workspaceId) && (workProject === null || task.workspaceId === workProject.id))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)), [tasks, projectsById, workProject]);
   const running = useMemo(() => Object.values(tasks).filter((task) => !isTerminalTask(task)).length, [tasks]);
 
   const pendingTaskIds = useMemo(() => new Set(pending.map((request) => request.taskId)), [pending]);
@@ -689,26 +721,28 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const openWork = (): void => { void newThread(); onNavigate?.(); };
 
   return (
-    <nav aria-label="Primary" className="flex h-full w-[248px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="app-drag flex h-(--header-height) shrink-0 items-center justify-end gap-0.5 pr-2 pl-[84px]">
-        <button type="button" onClick={() => { setPaletteOpen(true); }} aria-label="Search" title="Search (⌘K)" className="side-icon"><SearchIcon size={14} /></button>
-        <button type="button" onClick={() => { setPanelCollapsed(true); }} aria-label="Hide sidebar" title="Hide sidebar (⌘B)" className="side-icon"><PanelLeftIcon size={14} /></button>
+    <nav aria-label="Primary" className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+      {/* Sidebar header: the toggle, the app name and history arrows, clear of the traffic lights. */}
+      <div className="app-drag flex h-[52px] shrink-0 items-center gap-1 pr-1.5 pl-[78px]">
+        <button type="button" onClick={() => { setPanelCollapsed(true); }} aria-label="Hide sidebar" title="Hide sidebar (⌘B)" className={cn(SIDEBAR_ICON, 'size-7')}><PanelLeftIcon /></button>
+        <button type="button" onClick={openChat} className="ml-0.5 flex h-7 min-w-max shrink-0 items-center rounded-md px-1 text-sm font-medium tracking-tight text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring">Conductor</button>
+        <button type="button" onClick={() => { navigate(-1); }} aria-label="Back" title="Back (⌘[)" className={cn(SIDEBAR_ICON, 'size-7 [&>svg]:size-3.5')}><ArrowLeftIcon /></button>
+        <button type="button" onClick={() => { navigate(1); }} aria-label="Forward" title="Forward (⌘])" className={cn(SIDEBAR_ICON, 'size-7 [&>svg]:size-3.5')}><ArrowRightIcon /></button>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-px px-2 pb-2">
-        <button type="button" onClick={openChat} aria-current={onHome ? 'page' : undefined} className="nav-row"><MessageIcon size={15} /><span className="flex-1">Chat</span></button>
-        <button type="button" onClick={openWork} aria-current={onWork ? 'page' : undefined} className="nav-row">
-          <TerminalIcon size={15} /><span className="flex-1">Work</span>
-          {attention > 0 ? <span title={`${attention} waiting on you`} className="rounded-full bg-amber-500/15 px-1.5 text-3xs font-medium text-amber-600 tabular-nums dark:text-amber-300">{attention}</span> : null}
+      <div className="flex shrink-0 flex-col gap-0.5 px-2 pb-2">
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={() => { setPaletteOpen(true); }} title="Search (⌘K)" className={cn(SIDEBAR_ROW, 'min-w-0 flex-1')}><SearchIcon /><span>Search</span></button>
+          <SuggestionsInbox />
+          {onWork ? <button type="button" onClick={() => { setAddProjectOpen(true); }} aria-label="Add project" title="Add project" className={SIDEBAR_ICON}><FolderPlusIcon /></button> : null}
+          <button type="button" onClick={onHome ? openChat : openWork} aria-label={onHome ? 'New chat' : 'New thread'} title={`${onHome ? 'New chat' : 'New thread'} (⌘N)`} className={SIDEBAR_ICON}><SquarePenIcon /></button>
+        </div>
+        <button type="button" onClick={openChat} aria-current={onHome ? 'page' : undefined} className={SIDEBAR_ROW}><MessageIcon /><span>Chat</span></button>
+        <button type="button" onClick={openWork} aria-current={onWork ? 'page' : undefined} className={SIDEBAR_ROW}>
+          <TerminalIcon /><span className="flex-1">Work</span>
+          {attention > 0 ? <span title={`${attention} waiting on you`} className="rounded-sm bg-warning/8 px-1 text-xs font-medium text-warning tabular-nums dark:bg-warning/16">{attention}</span> : null}
         </button>
-        <button type="button" onClick={() => { navigate('/agents'); onNavigate?.(); }} aria-current={onAgents ? 'page' : undefined} className="nav-row"><SparklesIcon size={15} /><span className="flex-1">Agents</span></button>
-        <div className="my-1 h-px bg-sidebar-border" />
-        {MORE.map(({ to, label, Icon }) => (
-          <NavLink key={to} to={to} onClick={onNavigate} aria-current={path === to ? 'page' : undefined} className="nav-row h-7">
-            <Icon size={15} /><span className="flex-1">{label}</span>
-            {to === '/active-tasks' && running > 0 ? <span title={`${running} running`} className="rounded-full bg-primary/15 px-1.5 text-3xs font-medium text-primary tabular-nums">{running}</span> : null}
-          </NavLink>
-        ))}
+        <button type="button" onClick={() => { navigate('/agents'); onNavigate?.(); }} aria-current={onAgents ? 'page' : undefined} className={SIDEBAR_ROW}><SparklesIcon /><span>Agents</span></button>
       </div>
 
       {onAgents ? (
@@ -717,6 +751,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
         <div className="flex min-h-0 flex-1 flex-col border-t border-sidebar-border">
           <div className="side-label mt-1.5 px-2">
             <span className="flex-1 pl-2">{onHome ? 'Chats' : 'Threads'}</span>
+            {!onHome && workspaces.length > 1 ? (
+              <MenuSelect
+                label="Show threads from"
+                title="Show threads from"
+                value={workProject?.id ?? ''}
+                onChange={(value) => { setWorkProject(value === '' ? null : value); }}
+                options={[{ value: '', label: 'All projects' }, ...workspaces.map((project) => ({ value: project.id, label: project.name, mark: <EntityIcon icon={project.icon ?? null} name={project.name} kind="project" size={16} /> }))]}
+                className="max-w-32"
+              />
+            ) : null}
             {!onHome ? <button type="button" onClick={() => { setAddProjectOpen(true); }} aria-label="Add project" title="Add project" className="side-icon"><FolderPlusIcon size={14} /></button> : null}
             <button type="button" onClick={onHome ? openChat : openWork} aria-label={onHome ? 'New chat' : 'New thread'} title={`${onHome ? 'New chat' : 'New thread'} (⌘N)`} className="side-icon mr-1"><SquarePenIcon size={14} /></button>
           </div>
@@ -726,29 +770,34 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
                 <FolderPlusIcon size={14} /><span>Add your first project</span>
               </button>
             ) : (
-              <ul className="flex flex-col gap-0.5">
-                {workspaces.map((project) => (
-                  <ProjectGroup
-                    key={project.id}
-                    project={project}
-                    active={project.id === activeWorkspaceId}
-                    tasks={byProject.get(project.id) ?? []}
-                    focusedKey={focusedKey}
-                    pendingTaskIds={pendingTaskIds}
-                    pendingQuestionTaskIds={pendingQuestionTaskIds}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              </ul>
+              <WorkThreads
+                key={workProject?.id ?? 'all'}
+                project={workProject}
+                projects={projectsById}
+                active={workProject !== null && workProject.id === activeWorkspaceId}
+                tasks={workTasks}
+                focusedKey={focusedKey}
+                pendingTaskIds={pendingTaskIds}
+                pendingQuestionTaskIds={pendingQuestionTaskIds}
+                onNavigate={onNavigate}
+                onClearProject={() => { setWorkProject(null); }}
+              />
             )}
           </div>
         </div>
       )}
 
-      <div className="flex shrink-0 items-center gap-0.5 border-t border-sidebar-border px-2 py-2">
-        <NavLink to="/settings" onClick={onNavigate} aria-current={path === '/settings' ? 'page' : undefined} className="nav-row flex-1"><SettingsIcon size={15} /><span>Settings</span></NavLink>
-        <SuggestionsInbox variant="footer" />
-        <button type="button" aria-label="Control on phone" title="Control on phone" onClick={() => { setPhoneOpen(true); }} className="side-icon size-7"><PhoneIcon size={14} /></button>
+      {/* Utility bar: the other destinations as icons along the bottom. */}
+      <div className="flex shrink-0 items-center gap-px p-2">
+        <NavLink to="/settings" onClick={onNavigate} aria-label="Settings" title="Settings" className={cn(SIDEBAR_ICON, 'size-7')}><SettingsIcon /></NavLink>
+        {MORE.map(({ to, label, Icon }) => (
+          <NavLink key={to} to={to} onClick={onNavigate} aria-label={label} title={label} aria-current={path === to ? 'page' : undefined} className={cn(SIDEBAR_ICON, 'relative size-7')}>
+            <Icon />
+            {to === '/active-tasks' && running > 0 ? <span className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" aria-label={`${running} running`} /> : null}
+          </NavLink>
+        ))}
+        <span className="flex-1" />
+        <button type="button" aria-label="Control on phone" title="Control on phone" onClick={() => { setPhoneOpen(true); }} className={cn(SIDEBAR_ICON, 'size-7')}><PhoneIcon /></button>
       </div>
       {phoneOpen ? <PhoneControlDialog onClose={() => { setPhoneOpen(false); }} /> : null}
     </nav>

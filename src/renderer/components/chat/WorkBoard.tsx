@@ -14,7 +14,7 @@ export function WorkBoard(): React.JSX.Element {
       </header>
       <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto px-5 pb-[12vh]">
         <div className="mx-auto w-full max-w-(--chat-max)">
-          <p className="mb-5 text-center text-xl font-medium text-foreground">What should we build?</p>
+          <h1 className="mb-6 w-full text-center text-2xl font-normal tracking-tight text-foreground sm:text-3xl">What should we work on?</h1>
           <AgentSetupNotice />
           <Mem0OfflineNotice />
           <Composer task={null} autoFocus variant="hero" />

@@ -34,7 +34,7 @@ function AgentRow({ agent, selected, onSelect, lastAt }: {
         <span className="min-w-0 flex-1 truncate">{agent.name}</span>
         {activity.mood === 'working' ? <span title="Working" className="size-1.5 shrink-0 animate-status-pulse rounded-full bg-info" />
           : activity.mood === 'waiting' ? <span title="Needs your approval" className="size-1.5 shrink-0 rounded-full bg-amber-500" />
-            : lastAt !== undefined ? <span className="shrink-0 text-3xs text-sidebar-muted-foreground tabular-nums">{relativeTime(lastAt)}</span> : null}
+            : lastAt !== undefined ? <span className="shrink-0 text-xs text-sidebar-muted-foreground tabular-nums">{relativeTime(lastAt)}</span> : null}
       </button>
     </li>
   );
@@ -47,7 +47,7 @@ function GroupRow({ group, agents, selected, onSelect }: { group: AgentGroup; ag
       <button type="button" onClick={onSelect} aria-current={selected ? 'page' : undefined} title={members.map((member) => member.name).join(', ')} className={rowClass(selected)}>
         <GroupAvatar members={members} size={20} />
         <span className="min-w-0 flex-1 truncate">{group.name}</span>
-        <span className="shrink-0 text-3xs text-sidebar-muted-foreground tabular-nums">{relativeTime(group.updatedAt)}</span>
+        <span className="shrink-0 text-xs text-sidebar-muted-foreground tabular-nums">{relativeTime(group.updatedAt)}</span>
       </button>
     </li>
   );
@@ -133,7 +133,7 @@ function NewGroupDialog({ agents, onClose, onCreated }: { agents: SandboxAgent[]
                 <button type="button" role="checkbox" aria-checked={on} onClick={() => { setPicked(on ? picked.filter((id) => id !== agent.id) : [...picked, agent.id]); }}
                   className={cn('flex w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-ring', on ? 'bg-primary/10' : 'hover:bg-accent')}>
                   <AgentAvatar agent={agent} size={30} />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{agent.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{agent.name}</span>
                   <span className={cn('flex size-5 items-center justify-center rounded-full border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong')}>{on ? <CheckIcon size={11} /> : null}</span>
                 </button>
               </li>

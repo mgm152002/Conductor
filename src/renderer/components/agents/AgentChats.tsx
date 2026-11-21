@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { CloudBrowserButton } from './CloudBrowserButton';
 import type { Task } from '@shared/domain';
 import type { RunChoice } from '@shared/agent-models';
 import type { AgentGroup, AgentGroupMessage, AgentGroupPlan, SandboxAgent } from '@shared/sandbox-agents';
@@ -15,7 +14,7 @@ import { AgentAvatar } from '../ui/AgentAvatar';
 import { MenuSelect } from '../ui/MenuSelect';
 import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 import { Alert, Button } from '../ui/primitives';
-import { ArrowUpIcon, CheckIcon, ClockIcon, FolderIcon, GlobeIcon, PencilIcon, Spinner, SquarePenIcon, StopIcon, TrashIcon, XIcon } from '../ui/icons';
+import { ArrowUpIcon, CheckIcon, ClockIcon, FolderIcon, GlobeIcon, HistoryIcon, PencilIcon, Spinner, SquarePenIcon, StopIcon, TrashIcon, XIcon } from '../ui/icons';
 import { AgentReply } from './AgentReply';
 import { AgentMark } from '../chat/AgentMark';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
@@ -35,7 +34,7 @@ function UserBubble({ text, at, task }: { text: string; at: string; task?: Task 
   return (
     <div className="flex flex-col items-end gap-1">
       {files.length > 0 ? <div className="max-w-[78%]"><AttachmentTray attachments={files} /></div> : null}
-      <div className="max-w-[78%] rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words text-primary-foreground">{text}</div>
+      <div className="max-w-[80%] min-w-0 rounded-2xl bg-message px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words text-message-foreground">{text}</div>
       <time dateTime={at} className="pr-1 text-3xs text-muted-foreground">{relativeTime(at)}</time>
     </div>
   );
@@ -382,9 +381,10 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
         {chats.length > 1 || (fresh && chats.length > 0) ? (
           <MenuSelect
             label="Earlier chats"
+            title="Earlier chats"
+            icon={<HistoryIcon size={15} />}
             value={current ?? ''}
             onChange={(value) => { if (value !== '') { setThreadId(value); setFresh(false); } }}
-            className="max-w-48"
             // A new chat has no title yet; without its own entry the picker would keep showing the newest earlier chat.
             options={[...(current === null ? [{ value: '', label: 'New chat' }] : []), ...chats.map((id) => ({ value: id, label: titleOf(id) }))]}
           />
@@ -392,7 +392,6 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
         {sandboxRunning ? (
           <Button size="sm" variant="ghost" title="Watch its browser live" onClick={() => { void window.conductor.sandbox.openViewer(agent.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
         ) : null}
-        <CloudBrowserButton scope={`agent:${agent.id}`} label={agent.name} />
         <Button size="icon" variant="ghost" aria-label="New chat" title="New chat" onClick={() => { setFresh(true); }}><SquarePenIcon size={15} /></Button>
         <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} title="Edit" onClick={onEdit}><PencilIcon size={14} /></Button>
         <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} title="Delete" onClick={onDelete} className="hover:text-destructive-foreground"><TrashIcon size={14} /></Button>
@@ -552,7 +551,7 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
                 {repliesInOrder(item, tasks).map(([agentId, taskId]) => {
                   const agent = members.find((member) => member.id === agentId) ?? agents.find((candidate) => candidate.id === agentId);
                   const task: Task | undefined = tasks[taskId];
-                  return agent !== undefined && task !== undefined ? <AgentReply key={taskId} agent={agent} task={task} onText={onText} /> : null;
+                  return agent !== undefined && task !== undefined ? <AgentReply key={taskId} agent={agent} task={task} onText={onText} named /> : null;
                 })}
                 {item.waiting !== undefined ? (
                   <ul aria-label="Waiting for members" className="flex flex-col gap-1.5">

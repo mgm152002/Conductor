@@ -12,6 +12,15 @@ vi.mock('../../src/renderer/stores/chat-store', async (importOriginal) => {
   return { ...actual, useChatStore: renderStore };
 });
 
+vi.mock('../../src/renderer/stores/ui-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/stores/ui-store')>();
+  const renderStore = Object.assign(
+    (<T,>(selector: (state: ReturnType<typeof actual.useUiStore.getState>) => T): T => selector(actual.useUiStore.getState())),
+    actual.useUiStore,
+  ) as typeof actual.useUiStore;
+  return { ...actual, useUiStore: renderStore };
+});
+
 vi.mock('../../src/renderer/stores/workspace-store', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/renderer/stores/workspace-store')>();
   const renderStore = Object.assign(
@@ -56,6 +65,7 @@ import { useQuestionStore } from '../../src/renderer/stores/question-store';
 import { useTaskStore } from '../../src/renderer/stores/task-store';
 import { useThreadTierStore } from '../../src/renderer/stores/thread-tier-store';
 import { useWorkspaceStore } from '../../src/renderer/stores/workspace-store';
+import { useUiStore } from '../../src/renderer/stores/ui-store';
 import type { ChatConversation } from '../../src/shared/chat-contract';
 
 const conversation: ChatConversation = {
@@ -152,8 +162,14 @@ it('shows the renamed Work thread title with a rename action in the sidebar', ()
 
   expect(html).toContain('Renamed thread');
   expect(html).toContain('aria-label="Rename thread: Renamed thread"');
-  expect(html).toContain('aria-label="Pull requests for Project"');
   expect(html).not.toContain('Original objective<');
+
+  // Filtered to one project, a header row carries that project's actions.
+  useUiStore.getState().setWorkProject(project.id);
+  const filtered = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/work'] }, createElement(Sidebar)));
+  useUiStore.getState().setWorkProject(null);
+  expect(filtered).toContain('aria-label="Pull requests for Project"');
+  expect(filtered).toContain('aria-label="Needs attention threads in Project"');
 });
 
 it('groups Work threads into tiers with Needs attention first and settled threads behind a collapsible list', () => {
@@ -182,7 +198,7 @@ it('groups Work threads into tiers with Needs attention first and settled thread
   expect(html).toContain('aria-label="Mark thread as settled: Finished thread"');
   expect(html).toContain('aria-label="Snooze thread: Finished thread"');
   // Settled threads are hidden behind their collapsible list.
-  expect(html).toContain('aria-label="Settled threads in Project"');
+  expect(html).toContain('aria-label="Settled threads"');
   expect(html).toContain('aria-expanded="false"');
   expect(html).not.toContain('Old finished thread');
 });
@@ -208,8 +224,8 @@ it('makes every tier section collapsible and shows the snooze timer countdown on
   const html = renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: ['/work'] }, createElement(Sidebar)));
 
   // Needs attention is a collapsible section like the other tiers.
-  expect(html).toContain('aria-label="Needs attention threads in Project"');
-  expect(html).toContain('aria-label="Snoozed threads in Project"');
+  expect(html).toContain('aria-label="Needs attention threads"');
+  expect(html).toContain('aria-label="Snoozed threads"');
   // The snoozed (focused, so visible) thread shows its wake timer counting down.
   expect(html).toContain('Snoozed thread');
   expect(html).toContain('wakes in');

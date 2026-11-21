@@ -50,13 +50,8 @@ export function PlanDock({ task, details }: { task: Task; details: TaskDetails |
     summary.failed.length > 0 ? `${summary.failed.length} failed` : null,
   ].filter(Boolean).join(', ');
   const lastFallback = summary.fallbacks[summary.fallbacks.length - 1];
-  const hint = open
-    ? 'Click to collapse'
-    : summary.running.length > 0
-      ? `Running: ${summary.running.join(', ')}`
-      : summary.total > 0
-        ? 'Click to view tasks and status'
-        : 'Click to view the plan';
+  // A second line only when it says something: what is running, or the latest fallback.
+  const hint = summary.running.length > 0 ? `Running: ${summary.running.join(', ')}` : null;
 
   return (
     <section aria-label="Pinned plan tasks" className="mx-auto mb-2 w-full max-w-(--chat-max)">
@@ -71,31 +66,33 @@ export function PlanDock({ task, details }: { task: Task; details: TaskDetails |
           <LayersIcon size={14} className={cn('shrink-0', plan.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 truncate text-xs font-medium text-foreground">{title}</span>
-              <span className="shrink-0 text-3xs text-muted-foreground tabular-nums">{progress}</span>
-              {status !== '' ? <span className="shrink-0 text-3xs text-muted-foreground">{status}</span> : null}
+              <span className="min-w-0 truncate text-sm text-foreground">{title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{progress}</span>
+              {status !== '' ? <span className="shrink-0 text-xs text-muted-foreground">· {status}</span> : null}
               {plan.plan === undefined && plan.status !== 'failed' ? <Spinner size={11} className="shrink-0 text-info" /> : null}
               {summary.fallbacks.length > 0 ? (
                 <span
-                  className="shrink-0 rounded-full bg-amber-500/12 px-1.5 py-px text-3xs font-medium text-amber-700 dark:text-amber-300"
+                  className="shrink-0 text-xs text-warning"
                   title={summary.fallbacks.map((f) => `${f.fromAgent ?? 'Agent'} → ${f.toAgent}${f.reason !== undefined ? `: ${f.reason}` : ''}`).join('\n')}
                 >
-                  {summary.fallbacks.length === 1 ? '1 fallback' : `${summary.fallbacks.length} fallbacks`}
+                  · {summary.fallbacks.length === 1 ? '1 fallback' : `${summary.fallbacks.length} fallbacks`}
                 </span>
               ) : null}
             </span>
-            <span className="truncate text-3xs text-muted-foreground">
-              {!open && lastFallback !== undefined
-                ? `${lastFallback.kind === 'model' ? `${lastFallback.toAgent} switched to ${lastFallback.toModel?.split('/').pop() ?? 'its fallback model'}` : `${lastFallback.fromAgent ?? 'An agent'} → ${lastFallback.toAgent}`}${lastFallback.reason !== undefined ? `: ${lastFallback.reason}` : ''}`
-                : hint}
-            </span>
+            {hint !== null || (!open && lastFallback !== undefined) ? (
+              <span className="truncate text-xs text-muted-foreground">
+                {hint ?? (lastFallback !== undefined
+                  ? `${lastFallback.kind === 'model' ? `${lastFallback.toAgent} switched to ${lastFallback.toModel?.split('/').pop() ?? 'its fallback model'}` : `${lastFallback.fromAgent ?? 'An agent'} → ${lastFallback.toAgent}`}${lastFallback.reason !== undefined ? `: ${lastFallback.reason}` : ''}`
+                  : '')}
+              </span>
+            ) : null}
           </span>
           {summary.measures.length > 0 ? (
             <span className="measures hidden w-28 shrink-0 sm:flex" role="img" aria-label={`${summary.succeeded} of ${summary.total} tasks done`}>
               {summary.measures.map((measure) => <span key={measure.id} data-state={measure.state} title={measure.title} />)}
             </span>
           ) : null}
-          <ChevronRightIcon size={13} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+          <ChevronRightIcon size={14} className={cn('shrink-0 text-muted-foreground/70 transition-transform', open && 'rotate-90')} />
         </button>
         {open ? (
           <div id="pinned-plan-tasks" className="max-h-[46dvh] overflow-y-auto border-t border-border px-3.5 pb-3.5">

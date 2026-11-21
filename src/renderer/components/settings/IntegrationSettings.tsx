@@ -27,7 +27,7 @@ export function IntegrationSettings(): React.JSX.Element {
     <div className="flex flex-col gap-8">
       <section aria-label="Stored credentials" className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">Stored credentials</h2>
+          <h2 className="text-base font-semibold text-foreground">Stored credentials</h2>
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         {secrets.length === 0 ? <EmptyState icon={<KeyIcon size={18} />} title="No stored credentials" /> : (
@@ -37,7 +37,7 @@ export function IntegrationSettings(): React.JSX.Element {
                 <KeyIcon size={13} className="shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="font-medium text-foreground">{secret.label}</span>
-                  <span className="block text-3xs text-muted-foreground">{secret.owner ?? 'Unassigned'} · added {relativeTime(secret.createdAt)}</span>
+                  <span className="block text-2xs text-muted-foreground">{secret.owner ?? 'Unassigned'} · added {relativeTime(secret.createdAt)}</span>
                 </span>
                 <Button size="xs" variant="destructive-outline" onClick={() => { void window.conductor.secrets.delete(secret.id).then(refresh); }}>Delete</Button>
               </li>
@@ -47,14 +47,14 @@ export function IntegrationSettings(): React.JSX.Element {
       </section>
       <section aria-label="Integration consents" className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">Integration consents</h2>
+          <h2 className="text-base font-semibold text-foreground">Integration consents</h2>
         </div>
         {consents.length === 0 ? <p className="text-xs text-muted-foreground">No integration consents.</p> : (
           <ul className="flex flex-col divide-y divide-border rounded-xl border border-border">
             {consents.map((consent) => (
               <li key={consent.id} className="flex items-center gap-3 px-3.5 py-2.5 text-xs">
                 <span className="min-w-0 flex-1 font-mono text-foreground">{consent.provider}</span>
-                <span className="text-3xs text-muted-foreground">since {relativeTime(consent.grantedAt)}</span>
+                <span className="text-2xs text-muted-foreground">since {relativeTime(consent.grantedAt)}</span>
                 <Button size="xs" variant="outline" onClick={() => { void window.conductor.dataControl.revokeConsent(consent.provider).then(refresh); }}>Revoke</Button>
               </li>
             ))}

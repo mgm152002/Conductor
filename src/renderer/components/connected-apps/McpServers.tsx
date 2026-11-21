@@ -98,7 +98,7 @@ function ToolRunner({ server, onClose }: { server: McpServer | null; onClose: ()
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         {result !== null ? (
-          <pre className="max-h-72 overflow-auto rounded-lg border border-border bg-code p-2.5 font-mono text-2xs whitespace-pre-wrap break-words">
+          <pre className="max-h-72 overflow-auto rounded-lg border border-border bg-code p-2.5 font-mono text-xs whitespace-pre-wrap break-words">
             {result.ok ? JSON.stringify(result.output, null, 2) : `${result.reason}: ${result.message}`}
           </pre>
         ) : null}
@@ -150,33 +150,33 @@ export function Marketplace({ servers, busy, onInstall, isInstalled, installLabe
           ))}
         </div>
       </form>
-      <p className="text-3xs text-muted-foreground">Live catalog from mcpservers.org. <VerifiedBadge size={11} /> marks servers mcpservers.org lists as official. {isInstalled !== undefined ? 'Install opens the add form with its settings filled in.' : 'Installing never starts a server — Approve does.'}</p>
+      <p className="text-2xs text-muted-foreground">Live catalog from mcpservers.org. <VerifiedBadge size={11} /> marks servers mcpservers.org lists as official. {isInstalled !== undefined ? 'Install opens the add form with its settings filled in.' : 'Installing never starts a server — Approve does.'}</p>
       {loadError !== null ? <p role="alert" className="text-xs text-destructive-foreground">Could not reach mcpservers.org: {loadError} <button type="button" className="underline" onClick={() => { void load(query); }}>Retry</button></p> : null}
-      {loading && catalog.length === 0 ? <p role="status" className="text-2xs text-muted-foreground">Loading the registry catalog…</p> : null}
-      {!loading && visible.length === 0 ? <p className="text-2xs text-muted-foreground">No registry servers match. Try another search.</p> : (
+      {loading && catalog.length === 0 ? <p role="status" className="text-xs text-muted-foreground">Loading the registry catalog…</p> : null}
+      {!loading && visible.length === 0 ? <p className="text-xs text-muted-foreground">No registry servers match. Try another search.</p> : (
         <>
-        <p className="text-3xs text-muted-foreground">{visible.length} server{visible.length === 1 ? '' : 's'}{category !== 'All' ? ` in ${category}` : ''} — scroll the catalog or search to narrow it down.</p>
+        <p className="text-2xs text-muted-foreground">{visible.length} server{visible.length === 1 ? '' : 's'}{category !== 'All' ? ` in ${category}` : ''} — scroll the catalog or search to narrow it down.</p>
         <ul className="grid max-h-[520px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((entry) => {
             const installed = isInstalled !== undefined
               ? isInstalled(entry)
               : (entry.endpoint !== '' && installedEndpoints.has(entry.endpoint)) || servers.some((s) => s.name === entry.name);
             return (
-              <li key={entry.id} className="flex gap-3 rounded-xl border border-border bg-card p-3.5">
+              <li key={entry.id} className="flex gap-3 rounded-xl border border-border/60 bg-card/40 shadow-xs/5 p-3.5">
                 <MarketplaceIcon entry={entry} />
                 <div className="min-w-0 flex-1">
                   <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
                     <span className="truncate">{entry.name}</span>
                     {entry.verified ? <VerifiedBadge /> : null}
                   </p>
-                  <p className="truncate text-3xs text-muted-foreground" title={entry.id}>{entry.publisher} · {entry.category}{entry.verified ? ' · Official' : ''}{entry.stars !== undefined ? ` · ★ ${entry.stars}` : ''}</p>
-                  <p className="mt-1 line-clamp-3 text-2xs leading-relaxed text-muted-foreground">{entry.description}</p>
-                  <p className="mt-1 text-3xs text-muted-foreground">{entry.authNote}</p>
+                  <p className="truncate text-2xs text-muted-foreground" title={entry.id}>{entry.publisher} · {entry.category}{entry.verified ? ' · Official' : ''}{entry.stars !== undefined ? ` · ★ ${entry.stars}` : ''}</p>
+                  <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{entry.description}</p>
+                  <p className="mt-1 text-2xs text-muted-foreground">{entry.authNote}</p>
                   <div className="mt-2 flex items-center gap-2">
                     {installed
                       ? <Badge tone="success">Installed</Badge>
                       : <Button size="xs" variant="primary" disabled={busy !== null || !entry.installable} title={entry.installable ? `Install ${entry.name}` : entry.authNote} onClick={() => { onInstall(entry); }}>{busy === `install:${entry.id}` || busy === `draft:${entry.id}` ? 'Opening…' : entry.installable ? (installLabel ?? 'Install') : 'Needs manual setup'}</Button>}
-                    <span className="truncate font-mono text-3xs text-muted-foreground" title={entry.websiteUrl}>{entry.id}</span>
+                    <span className="truncate font-mono text-2xs text-muted-foreground" title={entry.websiteUrl}>{entry.id}</span>
                   </div>
                 </div>
               </li>
@@ -278,7 +278,7 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
     <section aria-label={legacy ? 'Servers registered in Conductor' : 'MCP servers'} className="flex flex-col gap-3">
       <header className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />{legacy ? 'Servers registered in Conductor' : 'MCP servers'}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold text-foreground"><LayersIcon size={15} className="text-muted-foreground" />{legacy ? 'Servers registered in Conductor' : 'MCP servers'}</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{legacy
             ? 'Added before servers were installed into the CLIs. Conductor still hands approved ones to agents for each run; add them above to put them in the CLIs themselves.'
             : 'Approved servers are exposed to every agent — Codex, Claude Code, OpenCode, Kiro and Antigravity — in Work and Chat.'}</p>
@@ -299,10 +299,10 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
       {discovered !== null ? (
         <div className="rounded-xl border border-border p-3">
           <div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium">Found in other apps’ MCP configs</p><Button size="xs" variant="ghost" onClick={() => { setDiscovered(null); }}>Hide</Button></div>
-          {discovered.length === 0 ? <p className="text-2xs text-muted-foreground">No MCP servers found in Claude Desktop, Cursor, Kiro, VS Code or Codex configs. Servers with environment variables or headers are skipped because those usually hold credentials.</p> : (
+          {discovered.length === 0 ? <p className="text-xs text-muted-foreground">No MCP servers found in Claude Desktop, Cursor, Kiro, VS Code or Codex configs. Servers with environment variables or headers are skipped because those usually hold credentials.</p> : (
             <ul className="flex flex-col gap-1">
               {discovered.map((entry) => (
-                <li key={entry.id} className="flex items-center gap-2 text-2xs">
+                <li key={entry.id} className="flex items-center gap-2 text-xs">
                   <span className="min-w-0 flex-1"><span className="font-medium text-foreground">{entry.name}</span> <span className="font-mono text-muted-foreground">{entry.endpoint}</span></span>
                   {registered.has(entry.endpoint) ? <Badge>Added</Badge> : <Button size="xs" variant="outline" disabled={busy !== null} onClick={() => { void act(`add:${entry.id}`, () => window.conductor.mcp.add({ name: entry.name, endpoint: entry.endpoint })); }}>Add</Button>}
                 </li>
@@ -318,18 +318,18 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
           {servers.map((server) => {
             const entry = catalogEntries.find((e) => e.endpoint !== '' && e.endpoint === server.endpoint) ?? catalogEntries.find((e) => e.name === server.name);
             return (
-            <li key={server.id} className="rounded-xl border border-border bg-card p-3.5">
+            <li key={server.id} className="rounded-xl border border-border/60 bg-card/40 shadow-xs/5 p-3.5">
               <div className="flex items-start gap-3">
                 {entry !== undefined ? <MarketplaceIcon entry={entry} size={32} /> : null}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2"><p className="flex items-center gap-1.5 text-sm font-medium text-foreground">{server.name}{entry?.verified ? <VerifiedBadge size={13} /> : null}</p><ServerStatus server={server} /></div>
-                  <p className="mt-0.5 truncate font-mono text-2xs text-muted-foreground" title={server.endpoint}>{server.endpoint}</p>
-                  <p className="mt-1 text-2xs text-muted-foreground">
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground" title={server.endpoint}>{server.endpoint}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {server.capabilities.length > 0 ? `${server.capabilities.length} tool${server.capabilities.length === 1 ? '' : 's'}: ${server.capabilities.slice(0, 6).map((c) => c.id).join(', ')}${server.capabilities.length > 6 ? '…' : ''}` : 'Tools are listed after approval'}
                     {server.lastHealthCheckAt ? ` · checked ${relativeTime(server.lastHealthCheckAt)}` : ''}
                   </p>
                   {(server.secretSlots ?? []).map((slot) => (
-                    <p key={slot.name} className="mt-1 flex items-center gap-2 text-2xs text-muted-foreground">
+                    <p key={slot.name} className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                       <KeyIcon size={11} className="shrink-0" />
                       <span className="font-mono">{slot.name}</span>
                       <span>{slot.set ? 'saved in Keychain' : 'not set — the server will fail without it'}</span>
@@ -363,7 +363,7 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
           <div className="flex flex-col gap-1.5">
             <label htmlFor={endpointId} className="text-xs font-medium">Command or URL</label>
             <input id={endpointId} className={`${inputClassName} font-mono text-xs`} value={endpoint} onChange={(e) => { setEndpoint(e.target.value); }} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/notes" spellCheck={false} />
-            <p className="text-3xs text-muted-foreground">Command = local stdio. URL = Streamable HTTP. Leave credential placeholders like YOUR_API_KEY_HERE in place — Conductor detects them and asks for the value separately, storing it in your Keychain.</p>
+            <p className="text-2xs text-muted-foreground">Command = local stdio. URL = Streamable HTTP. Leave credential placeholders like YOUR_API_KEY_HERE in place — Conductor detects them and asks for the value separately, storing it in your Keychain.</p>
           </div>
           <div className="mt-2 flex justify-end gap-2"><Button size="md" variant="ghost" onClick={() => { setAdding(false); }}>Cancel</Button><Button size="md" variant="primary" type="submit" disabled={busy !== null || !name.trim() || !endpoint.trim()}>Add</Button></div>
         </form>
@@ -417,7 +417,7 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
           {oauthError === null
             ? <p role="status" className="text-xs text-muted-foreground">Waiting for approval in {oauth?.providerName ?? 'your browser'}…</p>
             : <p role="alert" className="text-xs text-destructive-foreground">{oauthError}</p>}
-          <p className="text-3xs text-muted-foreground">If the browser did not open, cancel and choose Sign in again.</p>
+          <p className="text-2xs text-muted-foreground">If the browser did not open, cancel and choose Sign in again.</p>
         </div>
       </Dialog>
       <Dialog
@@ -446,15 +446,15 @@ export function McpServers({ legacy = false }: { legacy?: boolean } = {}): React
         </>}
       >
         <div className="flex flex-col gap-3">
-          <p className="rounded-lg bg-code px-2.5 py-2 font-mono text-2xs break-all">{confirm?.endpoint}</p>
+          <p className="rounded-lg bg-code px-2.5 py-2 font-mono text-xs break-all">{confirm?.endpoint}</p>
           {(confirm?.secretSlots ?? []).map((slot) => (
             <div key={slot.name} className="flex flex-col gap-1.5">
               <label htmlFor={`approve-key-${slot.name}`} className="flex items-center gap-1.5 text-xs font-medium"><KeyIcon size={12} />{slot.name}</label>
               {slot.set
-                ? <p className="text-2xs text-muted-foreground">Saved in your macOS Keychain. It is substituted when the server starts — it never appears in this endpoint or in chat.</p>
+                ? <p className="text-xs text-muted-foreground">Saved in your macOS Keychain. It is substituted when the server starts — it never appears in this endpoint or in chat.</p>
                 : <>
                   <input id={`approve-key-${slot.name}`} type="password" autoComplete="off" className={inputClassName} value={approveKeys[slot.name] ?? ''} onChange={(e) => { setApproveKeys((k) => ({ ...k, [slot.name]: e.target.value })); }} placeholder={`Paste the ${slot.name} value`} />
-                  <p className="text-3xs text-muted-foreground">Stored in your macOS Keychain. Conductor substitutes it at start time for every agent; the placeholder in the endpoint above is never sent as-is.</p>
+                  <p className="text-2xs text-muted-foreground">Stored in your macOS Keychain. Conductor substitutes it at start time for every agent; the placeholder in the endpoint above is never sent as-is.</p>
                 </>}
             </div>
           ))}
