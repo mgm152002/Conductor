@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { CloudBrowserButton } from './CloudBrowserButton';
 import type { Task } from '@shared/domain';
 import type { RunChoice } from '@shared/agent-models';
 import type { AgentGroup, AgentGroupMessage, AgentGroupPlan, SandboxAgent } from '@shared/sandbox-agents';
@@ -375,12 +376,9 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
 
   return (
     <section aria-label={`Chat with ${agent.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-        <AgentAvatar agent={agent} size={34} mood={latest !== undefined && isWorkingState(latest.state) ? 'working' : 'idle'} />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">{agent.name}</h2>
-          <p className="truncate text-2xs text-muted-foreground">{agent.description || agent.clis.join(' → ')}</p>
-        </div>
+      <header className="window-header flex shrink-0 items-center gap-2 border-b border-border px-4">
+        <AgentAvatar agent={agent} size={22} mood={latest !== undefined && isWorkingState(latest.state) ? 'working' : 'idle'} />
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={agent.description || agent.clis.join(' → ')}>{agent.name}</h2>
         {chats.length > 1 || (fresh && chats.length > 0) ? (
           <MenuSelect
             label="Earlier chats"
@@ -394,6 +392,7 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
         {sandboxRunning ? (
           <Button size="sm" variant="ghost" title="Watch its browser live" onClick={() => { void window.conductor.sandbox.openViewer(agent.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
         ) : null}
+        <CloudBrowserButton scope={`agent:${agent.id}`} label={agent.name} />
         <Button size="icon" variant="ghost" aria-label="New chat" title="New chat" onClick={() => { setFresh(true); }}><SquarePenIcon size={15} /></Button>
         <Button size="icon" variant="ghost" aria-label={`Edit ${agent.name}`} title="Edit" onClick={onEdit}><PencilIcon size={14} /></Button>
         <Button size="icon" variant="ghost" aria-label={`Delete ${agent.name}`} title="Delete" onClick={onDelete} className="hover:text-destructive-foreground"><TrashIcon size={14} /></Button>
@@ -530,12 +529,9 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
 
   return (
     <section aria-label={`Group chat ${group.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-        <GroupAvatar members={members} size={34} />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-foreground">{group.name}</h2>
-          <p className="truncate text-2xs text-muted-foreground">{members.map((member) => member.name).join(', ')}</p>
-        </div>
+      <header className="window-header flex shrink-0 items-center gap-2 border-b border-border px-4">
+        <GroupAvatar members={members} size={22} />
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={members.map((member) => member.name).join(', ')}>{group.name}</h2>
         {sandboxRunning ? (
           <Button size="sm" variant="ghost" title="Watch the group’s browsers live" onClick={() => { void window.conductor.sandbox.openGroupViewer(group.id).catch(() => undefined); }}><GlobeIcon size={13} />Watch</Button>
         ) : null}

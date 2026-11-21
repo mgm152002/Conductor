@@ -104,7 +104,19 @@ export const INTEGRATION_SCHEMAS = {
   'sandbox.pull': z.void(),
   'sandbox.viewer': z.object({ agentId: uuid }),
   'sandbox.groupViewer': z.object({ groupId: uuid }),
-  'sandbox.stop': z.object({ agentId: uuid }),
+  'sandbox.flowViewer': z.object({ flowId: uuid }),
+  // A remote WebDriver browser (Selenium hub) for one agent or one flow.
+  'cloudBrowser.get': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i) }),
+  'cloudBrowser.save': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i), url: z.string().trim().min(1).max(2000), apiKey: z.string().trim().max(2000).optional() }),
+  'cloudBrowser.load': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i) }),
+  'cloudBrowser.remove': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i) }),
+  'cloudBrowser.test': z.object({ scope: z.string().regex(/^(agent|flow):[0-9a-f-]{36}$/i), url: z.string().trim().max(2000).optional(), apiKey: z.string().trim().max(2000).optional() }),
+  'deviceChrome.status': z.void(),
+  'deviceChrome.profiles': z.void(),
+  'deviceChrome.refresh': z.void(),
+  'deviceChrome.show': z.object({ url: z.string().url().max(2000).optional() }).optional(),
+  // An agent's id, or a group's or workflow's sandbox key (group-<id>, group-flow-<id>).
+  'sandbox.stop': z.object({ agentId: z.string().regex(/^(group-(flow-)?)?[0-9a-f-]{36}$/i) }),
   'sandbox.clearBrowser': z.object({ agentId: z.string().min(1) }),
 
   // MCP servers in each agent CLI's own configuration.
@@ -162,6 +174,10 @@ export const INTEGRATION_SCHEMAS = {
 
 export type IntegrationRequest<C extends keyof typeof INTEGRATION_SCHEMAS> = z.infer<(typeof INTEGRATION_SCHEMAS)[C]>;
 
+export interface CloudBrowserInfo { configured: boolean; host?: string }
+export interface CloudBrowserTest { ok: boolean; browser?: string; error?: string }
+export interface DeviceChromeStatus { available: boolean; browser?: string; running: boolean; visible?: boolean; profile?: { name: string; email?: string; copiedAt: string }; profileError?: string }
+export interface ChromeProfile { dir: string; name: string; email?: string; picture: boolean }
 export interface AgentOption { id: string; name: string; available: boolean; remote: boolean }
 export interface SecretInfo { id: string; label: string; owner?: string; createdAt: string }
 export interface RemoteHostView {
@@ -220,6 +236,26 @@ export interface IntegrationsBridge {
     connect(input: IntegrationRequest<'mail.connect'>): Promise<{ configured: boolean; inbox?: string; owner?: string; listening: boolean }>;
     disconnect(): Promise<void>;
   };
+  /** A remote WebDriver browser for an agent (`agent:<id>`) or a flow (`flow:<id>`); the key stays in the Keychain. */
+  /** Conductor's own Chrome on this Mac, which agents can browse with. */
+  deviceChrome: {
+    status(): Promise<DeviceChromeStatus>;
+    /** The user's own Chrome profiles; error when macOS blocks reading them. */
+    profiles(): Promise<{ profiles: ChromeProfile[]; error?: string }>;
+    /** Copy the chosen profile's logins again. */
+    refresh(): Promise<DeviceChromeStatus>;
+    /** Show it (to sign in to sites, or watch); a hidden one is restarted shown. */
+    show(url?: string): Promise<void>;
+  };
+  cloudBrowser: {
+    get(scope: string): Promise<CloudBrowserInfo>;
+    save(scope: string, url: string, apiKey?: string): Promise<CloudBrowserInfo>;
+    /** The saved URL and key, to fill the settings form; null when none is saved. */
+    load(scope: string): Promise<{ url: string; apiKey?: string } | null>;
+    remove(scope: string): Promise<void>;
+    /** Try a connection: the one given, or the saved one when url is omitted. */
+    test(scope: string, url?: string, apiKey?: string): Promise<CloudBrowserTest>;
+  };
   sandbox: {
     status(): Promise<SandboxStatus>;
     /** Start downloading the sandbox image; poll status for progress. */
@@ -231,6 +267,8 @@ export interface IntegrationsBridge {
     openViewer(agentId: string): Promise<void>;
     /** Open a window for each running sandbox of a group chat (the shared one, or its members' own). */
     openGroupViewer(groupId: string): Promise<void>;
+    /** Open a window on the sandbox a flow's steps share. */
+    openFlowViewer(flowId: string): Promise<void>;
   };
   mcp: {
     list(): Promise<McpServer[]>;

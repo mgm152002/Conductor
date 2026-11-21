@@ -217,7 +217,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           ))}
         </ul>
       ) : null}
-      <div className="relative rounded-2xl border border-border-strong bg-surface-raised shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-3 focus-within:ring-ring/15">
+      <div className="relative rounded-xl border border-border bg-card shadow-composer transition-[border-color] focus-within:border-border-strong">
         {planMode && subAgentsOpen ? (
           <div className="border-b border-border px-4 pt-3 pb-2.5">
             <p className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground"><LayersIcon size={12} /> Sub-agents</p>
@@ -252,7 +252,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           }}
           className={cn(
             'block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed',
-            variant === 'hero' ? 'min-h-24' : 'min-h-12',
+            variant === 'hero' ? 'min-h-16' : 'min-h-10',
           )}
         />
 

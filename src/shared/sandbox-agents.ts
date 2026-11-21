@@ -148,3 +148,20 @@ export const SANDBOX_ONLY_NOTICE = 'This agent works only inside its sandbox. Yo
   + `use the "${SANDBOX_MCP_KEY}" MCP tools (browser, terminal, files) instead, and do not retry the local tool.`;
 
 export const SANDBOX_AGENT_COLORS = ['#c9379a', '#4a6fe8', '#2a9763', '#c58c1c', '#e0602c', '#7c5ce0', '#1f9bb0'] as const;
+
+/**
+ * Which browser agents and flows browse the web with:
+ *  - device: Conductor's own Chrome on this Mac (separate profile, hidden or in the background).
+ *  - cloud: the agent's or flow's cloud browser (WebDriver hub); the sandbox browser when none is set up.
+ *  - sandbox: the sandbox's own browser.
+ * With device or cloud, the sandbox starts only when the agent needs its terminal or files.
+ */
+export type BrowserPreference = 'device' | 'cloud' | 'sandbox';
+export const BROWSER_PREFERENCE_KEY = 'sandbox.browserPreference';
+export const isBrowserPreference = (value: unknown): value is BrowserPreference => value === 'device' || value === 'cloud' || value === 'sandbox';
+/** The saved preference, reading the older "both" as cloud. */
+export const browserPreferenceOf = (value: unknown, fallback: BrowserPreference = 'cloud'): BrowserPreference => (value === 'both' ? 'cloud' : isBrowserPreference(value) ? value : fallback);
+/** Whether Conductor's Chrome shows its window (in the background) instead of running headless. */
+export const DEVICE_CHROME_VISIBLE_KEY = 'sandbox.deviceChromeVisible';
+/** Which of the user's own Chrome profiles agents start from: "auto" (the signed-in one with a picture) or its folder name. */
+export const DEVICE_CHROME_PROFILE_KEY = 'sandbox.deviceChromeProfile';

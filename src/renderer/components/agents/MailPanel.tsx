@@ -39,7 +39,6 @@ export function MailPanel({ onChange }: { onChange?: (status: Status) => void })
         </>
       ) : (
         <>
-          <p className="text-2xs text-muted-foreground">Lets steps email you and wait for your reply. The key is kept in a private file on this computer.</p>
           <input aria-label="AgentMail API key" type="password" autoComplete="off" className={inputClassName} placeholder="am_…" value={apiKey} onChange={(e) => { setApiKey(e.target.value); }} />
           <input aria-label="Your email address" type="email" className={inputClassName} placeholder="Your email (where reports go)" value={owner} onChange={(e) => { setOwner(e.target.value); }} />
           <Button size="sm" variant="outline" className="self-start" disabled={busy || apiKey.trim() === '' || owner.trim() === ''} onClick={() => { void connect(); }}>{busy ? <Spinner size={13} /> : null}Connect</Button>

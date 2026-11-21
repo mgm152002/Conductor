@@ -80,7 +80,6 @@ export function LearningPanel(): React.JSX.Element {
 
       <div className="flex flex-col gap-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground"><BrainIcon size={14} className="text-muted-foreground" />Learning LLM</h2>
-        <p className="text-xs text-muted-foreground">Runs read-only. It can only suggest routing.</p>
         <label className="flex flex-col gap-1 text-xs">
           <span className="font-medium text-foreground">Approved LLM (agent)</span>
           <MenuSelect variant="box" label="Approved learning LLM" value={agentId} onChange={(next) => { setAgentId(next); setModel(''); }} options={[
@@ -104,7 +103,6 @@ export function LearningPanel(): React.JSX.Element {
           </Button>
           {approvedAgent !== undefined ? <Badge tone="success">Approved: {approvedAgent}{config?.analyzerModel ? ` · ${config.analyzerModel}` : ''}</Badge> : <Badge tone="warning">No LLM approved — cron will skip</Badge>}
         </div>
-        <p className="text-2xs text-muted-foreground">Changing this clears old routing approvals.</p>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -194,7 +192,7 @@ export function LearningPanel(): React.JSX.Element {
 
       <div>
         <h3 className="text-xs font-semibold text-foreground">Auto-run suggestions</h3>
-        {rules.length === 0 ? <p className="mt-1 text-2xs text-muted-foreground">None. Choose “Always” on a suggestion to auto-run that kind of action when permissions allow.</p> : (
+        {rules.length === 0 ? <p className="mt-1 text-2xs text-muted-foreground">None.</p> : (
           <ul className="mt-1.5 flex flex-col gap-1">
             {rules.map((rule) => (
               <li key={rule.id} className="flex items-center gap-2 text-xs">

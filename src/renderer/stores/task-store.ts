@@ -32,14 +32,26 @@ export const useTaskStore = create<TaskState>((set) => ({
   setTasks: (tasks): void => {
     // Lists may be workspace-scoped and race live events. Merge snapshots
     // without losing other workspaces or rolling a running task back to CREATED.
+    // A refresh that brings nothing new keeps the same map, so the views
+    // subscribed to it (sidebar, thread, agents) don't re-render on every poll.
     set((state) => {
-      const next = { ...state.tasks };
-      for (const task of tasks) next[task.id] = newestTask(next[task.id], task, true);
-      return { tasks: next };
+      let next: Record<string, Task> | null = null;
+      for (const task of tasks) {
+        const previous = (next ?? state.tasks)[task.id];
+        const chosen = keepIfSame(previous, newestTask(previous, task, true));
+        if (chosen === previous) continue;
+        next ??= { ...state.tasks };
+        next[task.id] = chosen;
+      }
+      return next === null ? state : { tasks: next };
     });
   },
   upsert: (task): void => {
-    set((state) => ({ tasks: { ...state.tasks, [task.id]: newestTask(state.tasks[task.id], task) } }));
+    set((state) => {
+      const previous = state.tasks[task.id];
+      const chosen = keepIfSame(previous, newestTask(previous, task));
+      return chosen === previous ? state : { tasks: { ...state.tasks, [task.id]: chosen } };
+    });
   },
   remove: (id): void => {
     set((state) => {
@@ -72,6 +84,12 @@ export const useTaskStore = create<TaskState>((set) => ({
     set({ tasks: {}, focusedTaskId: null, detailsRevision: {} });
   },
 }));
+
+/** The stored task when the chosen one says the same thing, so unchanged data keeps its identity. */
+function keepIfSame(previous: Task | undefined, chosen: Task): Task {
+  if (previous === undefined || previous === chosen) return chosen;
+  return previous.updatedAt === chosen.updatedAt && previous.state === chosen.state && JSON.stringify(previous) === JSON.stringify(chosen) ? previous : chosen;
+}
 
 function newestTask(previous: Task | undefined, incoming: Task, snapshot = false): Task {
   if (previous === undefined) return incoming;

@@ -6,6 +6,8 @@ import { SandboxManager, SANDBOX_IMAGE, agentVolume, browserVolume, parseMemUsag
 import { SandboxAgentService, groupSandboxKey } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
+import type { BrowserDriver } from '@main/sandbox/cloud-browser';
+import type { BrowserPreference, SandboxToolGroup } from '@shared/sandbox-agents';
 
 // The container lifecycle with a fake Docker CLI, and the agent service that
 // ties a thread to an agent. No Docker or network is used.
@@ -526,6 +528,65 @@ describe('SandboxAgentService', () => {
     expect(run?.guidance).toContain('web browser');
     expect(await subject.prepareStep({ id: 'plain' } as never, 'step-1', 'assisted_execution')).toBeUndefined();
     subject.release({ id: 'thread-1', threadId: 'thread-1' });
+  });
+
+  it('browses with the preferred browser and starts the sandbox only when it is needed', async () => {
+    const closed: string[] = [];
+    const fakeDriver = (): BrowserDriver => ({
+      navigate: async (url) => `Now at ${url}`, where: async () => 'here', screenshot: async () => '', text: async () => 'text',
+      click: async () => 'clicked', type: async () => 'typed', execute: async () => null, back: async () => 'back',
+      upload: async () => 'attached', close: async () => { closed.push('tab'); },
+    });
+    const tools = async (preference: BrowserPreference, groups: SandboxToolGroup[] = ['browser', 'shell']) => {
+      const subject = new SandboxAgentService({
+        store, manager: manager(), gateway: new SandboxGateway(),
+        approver: async () => 'accept', autoApprove: () => false, deliverFile: () => undefined,
+        cliAvailable: () => true, log: () => {}, agentWorkspace: () => 'agent-space',
+        cloudBrowser: async () => ({ url: 'https://u:k@hub.example/wd/hub' }),
+        deviceBrowser: fakeDriver,
+        browserPreference: () => preference,
+      });
+      const agent = subject.create({ ...input, tools: groups });
+      const id = `t-${preference}-${groups.join('')}`;
+      subject.bindThread(id, agent.id);
+      const run = await subject.prepareStep({ id, threadId: id } as never, 'step-1', 'assisted_execution');
+      // With no sandbox in this test, only a run that does not start it can list tools.
+      let names: string[] = [];
+      if (preference !== 'sandbox') {
+        const client = new (await import('@modelcontextprotocol/sdk/client/index.js')).Client({ name: 't', version: '1' });
+        await client.connect(new (await import('@modelcontextprotocol/sdk/client/streamableHttp.js')).StreamableHTTPClientTransport(new URL(run!.server.url!)));
+        names = (await client.listTools()).tools.map((tool) => tool.name);
+        await client.close();
+      }
+      subject.release({ id, threadId: id });
+      return { names, guidance: run!.guidance };
+    };
+    const started = () => dockerCalls.some((args) => args[0] === 'run');
+
+    const device = await tools('device');
+    expect(device.names).toContain('chrome_browser_navigate');
+    expect(device.names).toContain('chrome_browser_upload_file');
+    // The sandbox browser is hidden, the sandbox's terminal is still offered — but nothing started yet.
+    expect(device.names.some((name) => name.startsWith('browser_'))).toBe(false);
+    expect(device.names.some((name) => /bash|shell|terminal/.test(name))).toBe(true);
+    expect(started()).toBe(false);
+    expect(device.guidance).toContain('Chrome on the user\'s Mac');
+    expect(device.guidance).toContain('starts only when you first call');
+
+    const cloud = await tools('cloud');
+    expect(cloud.names).toContain('cloud_browser_upload_file');
+    expect(cloud.names.some((name) => name.startsWith('browser_'))).toBe(false);
+    expect(cloud.names).toContain('return_file');
+    expect(started()).toBe(false);
+
+    // An agent that only browses never gets a sandbox at all.
+    const browseOnly = await tools('device', ['browser']);
+    expect(browseOnly.names).not.toContain('return_file');
+    expect(browseOnly.guidance).toContain('You have no sandbox computer');
+
+    const sandbox = await tools('sandbox');
+    expect(sandbox.guidance).not.toMatch(/cloud_browser|chrome_browser/);
+    expect(closed.length).toBeGreaterThan(0); // released runs close their Chrome tab
   });
 });
 

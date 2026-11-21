@@ -9,6 +9,8 @@ import type { SandboxManager } from '../sandbox/sandbox-manager';
 import type { SandboxAgentService } from '../sandbox/sandbox-agents';
 import { openSandboxViewer } from '../sandbox/sandbox-viewer';
 import { groupSandboxKey } from '../sandbox/sandbox-agents';
+import { flowSandboxKey } from '../sandbox/flow-service';
+import { testCloudBrowser, type CloudBrowserScope, type CloudBrowserSettings } from '../sandbox/cloud-browser';
 import type { McpService } from '../mcp/mcp-service';
 import type { RemoteHost, RemoteHostService } from '../adapters/remote-hosts';
 import type { ProactiveAssistant } from '../domain/proactive-assistant-service';
@@ -41,6 +43,8 @@ export interface IntegrationDeps {
   sandboxAgents: SandboxAgentService;
   flows: import('../sandbox/flow-service').AgentFlowService;
   mail: import('../sandbox/agentmail').AgentMail;
+  cloudBrowsers: CloudBrowserSettings;
+  deviceChrome: import('../sandbox/device-chrome').DeviceChrome;
   router: IpcRouter;
   registry: Registry;
   secrets: SecretStore;
@@ -91,7 +95,7 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('mcp.clearSecret', S['mcp.clearSecret'], (_e, input) => deps.mcp.clearSecret(input.id, input.name));
   router.handle('flows.list', S['flows.list'], () => deps.flows.list());
   router.handle('flows.save', S['flows.save'], (_e, input) => deps.flows.save(input));
-  router.handle('flows.remove', S['flows.remove'], (_e, input) => { deps.flows.remove(input.id); });
+  router.handle('flows.remove', S['flows.remove'], async (_e, input) => { deps.flows.remove(input.id); await deps.cloudBrowsers.remove(`flow:${input.id}`).catch(() => undefined); });
   router.handle('flows.run', S['flows.run'], (_e, input) => deps.flows.run(input.id, 'manual', input.input));
   router.handle('flows.runs', S['flows.runs'], (_e, input) => deps.flows.runs(input.flowId));
   router.handle('flows.stop', S['flows.stop'], (_e, input) => deps.flows.stopRun(input.runId));
@@ -103,7 +107,25 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
   router.handle('agents.sandbox.list', S['agents.sandbox.list'], () => deps.sandboxAgents.list());
   router.handle('agents.sandbox.create', S['agents.sandbox.create'], (_e, input) => deps.sandboxAgents.create(input));
   router.handle('agents.sandbox.update', S['agents.sandbox.update'], (_e, { id, ...input }) => deps.sandboxAgents.update(id, input));
-  router.handle('agents.sandbox.remove', S['agents.sandbox.remove'], (_e, input) => { deps.sandboxAgents.remove(input.id); });
+  router.handle('agents.sandbox.remove', S['agents.sandbox.remove'], async (_e, input) => { deps.sandboxAgents.remove(input.id); await deps.cloudBrowsers.remove(`agent:${input.id}`).catch(() => undefined); });
+  router.handle('deviceChrome.status', S['deviceChrome.status'], () => deps.deviceChrome.status());
+  router.handle('deviceChrome.profiles', S['deviceChrome.profiles'], () => {
+    try { return { profiles: deps.deviceChrome.profiles() }; } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      return { profiles: [], error: code === 'EPERM' || code === 'EACCES' ? 'macOS did not let Conductor read your Chrome profiles. Allow it in System Settings → Privacy & Security (App Management or Full Disk Access).' : code === 'ENOENT' ? 'Google Chrome has no profiles on this Mac yet.' : 'Your Chrome profiles could not be read.' };
+    }
+  });
+  router.handle('deviceChrome.refresh', S['deviceChrome.refresh'], () => deps.deviceChrome.refreshProfile());
+  router.handle('deviceChrome.show', S['deviceChrome.show'], (_e, input) => deps.deviceChrome.show(input?.url));
+  router.handle('cloudBrowser.get', S['cloudBrowser.get'], (_e, input) => deps.cloudBrowsers.info(input.scope as CloudBrowserScope));
+  router.handle('cloudBrowser.save', S['cloudBrowser.save'], (_e, input) => deps.cloudBrowsers.save(input.scope as CloudBrowserScope, { url: input.url, ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}) }));
+  router.handle('cloudBrowser.load', S['cloudBrowser.load'], async (_e, input) => (await deps.cloudBrowsers.config(input.scope as CloudBrowserScope)) ?? null);
+  router.handle('cloudBrowser.remove', S['cloudBrowser.remove'], (_e, input) => deps.cloudBrowsers.remove(input.scope as CloudBrowserScope));
+  router.handle('cloudBrowser.test', S['cloudBrowser.test'], async (_e, input) => {
+    const config = input.url !== undefined ? { url: input.url, ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}) } : await deps.cloudBrowsers.config(input.scope as CloudBrowserScope);
+    if (config === undefined) return { ok: false, error: 'No cloud browser is set up.' };
+    try { return await testCloudBrowser(config); } catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'unknown error' }; }
+  });
   router.handle('agents.sandbox.threads', S['agents.sandbox.threads'], () => deps.sandboxAgents.threadAgents());
   router.handle('agents.workspace', S['agents.workspace'], () => deps.sandboxAgents.agentWorkspaceId());
   router.handle('agents.group.list', S['agents.group.list'], () => ({ groups: deps.sandboxAgents.listGroups(), groupThreads: deps.sandboxAgents.groupThreadMap() }));
@@ -157,6 +179,13 @@ export function registerIntegrationHandlers(deps: IntegrationDeps): void {
       });
     if (open.length === 0) throw new Error('No sandbox of this group is running. They start when a member first uses a sandbox tool.');
     for (const view of open) openSandboxViewer(view.endpoint, view.title);
+  });
+  router.handle('sandbox.flowViewer', S['sandbox.flowViewer'], (_e, input) => {
+    const flow = deps.flows.get(input.flowId);
+    if (flow === undefined) throw new Error('That flow no longer exists.');
+    const endpoint = deps.sandboxes.endpoint(flowSandboxKey(flow.id));
+    if (endpoint === undefined) throw new Error('This flow’s sandbox isn’t running. It starts when a step first uses a sandbox tool.');
+    openSandboxViewer(endpoint, flow.name);
   });
   router.handle('mcp.cli.overview', S['mcp.cli.overview'], (_e, input) => deps.cliMcp.overview({ sync: input?.sync === true }));
   router.handle('mcp.cli.sync', S['mcp.cli.sync'], () => deps.cliMcp.sync());

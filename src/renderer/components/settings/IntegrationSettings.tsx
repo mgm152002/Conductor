@@ -28,7 +28,6 @@ export function IntegrationSettings(): React.JSX.Element {
       <section aria-label="Stored credentials" className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Stored credentials</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Stored in the macOS Keychain.</p>
         </div>
         {error !== null ? <p role="alert" className="text-xs text-destructive-foreground">{error}</p> : null}
         {secrets.length === 0 ? <EmptyState icon={<KeyIcon size={18} />} title="No stored credentials" /> : (
@@ -49,7 +48,6 @@ export function IntegrationSettings(): React.JSX.Element {
       <section aria-label="Integration consents" className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Integration consents</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Revoking stops syncing for that provider.</p>
         </div>
         {consents.length === 0 ? <p className="text-xs text-muted-foreground">No integration consents.</p> : (
           <ul className="flex flex-col divide-y divide-border rounded-xl border border-border">

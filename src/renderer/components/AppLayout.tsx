@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { TopBar } from './TopBar';
 import { CommandPalette } from './CommandPalette';
 import { AddProjectDialog } from './projects/AddProjectDialog';
 import { OnboardingWalkthrough } from './onboarding/OnboardingWalkthrough';
 import { Alert, Button } from './ui/primitives';
+import { PanelLeftIcon } from './ui/icons';
 import { useSystemAppearance } from '../hooks/useSystemAppearance';
 import { useTaskEvents } from '../hooks/useTaskEvents';
 import { useThreadNavigation } from '../hooks/useThreadNavigation';
@@ -14,10 +14,9 @@ import { useChatStore } from '../stores/chat-store';
 import { useChatEvents } from '../hooks/useChatEvents';
 import { useThreadLoaders } from '../hooks/useThreadLoaders';
 
-// App shell: the top bar on every screen and the routed surface filling the
-// window below it. On the two surfaces that have threads (Work and Chat) an
-// optional thread drawer can sit at the left.
-// ⌘K opens the command palette, ⌘B shows or hides the thread drawer,
+// App shell: the sidebar at the left (navigation and the current surface's
+// list) and the routed screen beside it, each screen with its own thin header.
+// ⌘K opens the command palette, ⌘B shows or hides the sidebar,
 // ⌘N starts a new thread or chat, ⌘, opens Settings. It owns the one app-wide data pump (task, approval
 // and workspace events) and the system-appearance subscription, so both stay
 // mounted across every screen (Requirement 22.1, 22.2).
@@ -33,7 +32,6 @@ export function AppLayout(): React.JSX.Element {
 
   const navigate = useNavigate();
   const panelCollapsed = useUiStore((s) => s.panelCollapsed);
-  const hasThreads = pathname === '/home' || pathname === '/work' || pathname.startsWith('/pr/');
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -61,10 +59,9 @@ export function AppLayout(): React.JSX.Element {
   }, [newThread, pathname, navigate]);
 
   return (
-    <div className="flex h-full w-full flex-col bg-background text-foreground">
-      <TopBar />
+    <div data-sidebar={panelCollapsed ? 'hidden' : 'shown'} className="flex h-full w-full flex-col bg-background text-foreground">
       <div className="flex min-h-0 flex-1">
-        {hasThreads && !panelCollapsed ? <Sidebar /> : null}
+        {panelCollapsed ? null : <Sidebar />}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {errors.length > 0 || notice !== null ? (
             <div className="absolute top-3 right-4 left-4 z-30 mx-auto flex max-w-(--chat-max) flex-col gap-2">
@@ -76,13 +73,18 @@ export function AppLayout(): React.JSX.Element {
               ) : null}
             </div>
           ) : null}
-          {/* One page-in per top-level navigation; deeper route changes (a
-              different PR, another thread) keep the same key and don't replay. */}
-          <div key={pathname.split('/')[1] ?? ''} className="animate-page-in min-h-0 flex-1">
+          <div className="min-h-0 flex-1">
             <Outlet />
           </div>
         </main>
       </div>
+      {/* Last in the page on purpose: the window's drag area is built in page
+          order, so a header that came after this button would swallow its clicks. */}
+      {panelCollapsed ? (
+        <button type="button" onClick={() => { useUiStore.getState().setPanelCollapsed(false); }} aria-label="Show sidebar" title="Show sidebar (⌘B)" className="side-icon fixed top-[10px] left-[80px] z-40 [-webkit-app-region:no-drag]">
+          <PanelLeftIcon size={14} />
+        </button>
+      ) : null}
       <AddProjectDialog />
       <CommandPalette />
       <OnboardingWalkthrough />

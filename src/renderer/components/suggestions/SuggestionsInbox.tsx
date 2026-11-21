@@ -68,7 +68,7 @@ function SuggestionCard({ suggestion, onDone, compact = false }: { suggestion: S
   );
 }
 
-export function SuggestionsInbox({ variant = 'inline' }: { /** `bar` renders as a top-bar icon whose panel opens under it, right-aligned. */ variant?: 'inline' | 'bar' } = {}): React.JSX.Element {
+export function SuggestionsInbox({ variant = 'inline' }: { /** `bar` opens under the icon, right-aligned; `footer` opens above it (sidebar foot). */ variant?: 'inline' | 'bar' | 'footer' } = {}): React.JSX.Element {
   const { pending, latest, refresh, clearLatest } = usePendingSuggestions();
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -103,13 +103,13 @@ export function SuggestionsInbox({ variant = 'inline' }: { /** `bar` renders as 
         aria-label={`Inbox${total > 0 ? ` (${total})` : ''}`}
         title="Inbox — suggestions and threads waiting on you"
         data-active={variant === 'bar' ? open : undefined}
-        className={variant === 'bar' ? 'bar-icon relative' : 'relative flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring'}
+        className={variant === 'bar' ? 'bar-icon relative' : variant === 'footer' ? 'side-icon relative size-7' : 'relative flex size-7 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-2 focus-visible:outline-ring'}
       >
-        <InboxIcon size={15} />
+        <InboxIcon size={variant === 'footer' ? 14 : 15} />
         {total > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold text-primary-foreground tabular-nums">{total}</span> : null}
       </button>
       {open ? (
-        <div role="dialog" aria-label="Inbox" className={cn('animate-pop-in absolute top-9 z-50 w-80 rounded-2xl border border-border bg-surface-raised p-3 text-left shadow-pop', variant === 'bar' ? 'right-0' : 'left-0')}>
+        <div role="dialog" aria-label="Inbox" className={cn('animate-pop-in absolute z-50 w-80 rounded-xl border border-border bg-surface-raised p-3 text-left shadow-pop', variant === 'bar' ? 'top-9 right-0' : variant === 'footer' ? 'bottom-9 left-0' : 'top-9 left-0')}>
           <p className="mb-2 text-xs font-semibold text-foreground">Inbox</p>
           {total === 0 ? <p className="py-4 text-center text-2xs text-muted-foreground">Nothing needs your attention.</p> : (
             <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">

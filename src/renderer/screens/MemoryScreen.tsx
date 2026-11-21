@@ -106,7 +106,6 @@ function CreateDialog({ view, open, busy, onClose, onCreate }: {
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><PlusIcon size={15} /></span>
             <div>
               <h2 className="text-sm font-semibold">New {view === 'memory' ? 'memory' : 'context item'}</h2>
-              <p className="text-xs text-muted-foreground">Saved with you as the source.</p>
             </div>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"><XIcon size={14} /></Button>
@@ -183,7 +182,6 @@ function Inspector({ entry, inspection, busy, onCorrect, onDelete, onClose }: {
         ) : null}
         <form className="space-y-2 border-t border-border pt-4" onSubmit={(e) => { e.preventDefault(); void onCorrect(content); }}>
           <label className="flex flex-col gap-1.5"><span className={label}>Corrected content</span><textarea className={textareaClassName} rows={4} required value={content} maxLength={100_000} onChange={(e) => setContent(e.target.value)} /></label>
-          <p className="text-2xs text-muted-foreground">Saved as an observed fact, with you as the source.</p>
           <Button variant="primary" size="md" type="submit" disabled={busy || !content.trim()} className="w-full"><PencilIcon size={13} />Save correction</Button>
         </form>
       </div>

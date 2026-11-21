@@ -1,4 +1,4 @@
-import { createContext, useContext, isValidElement, type ReactNode } from 'react';
+import { memo, createContext, useContext, isValidElement, type ReactNode } from 'react';
 import type { Element } from 'hast';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -285,7 +285,7 @@ export interface MarkdownProps {
  * renderer navigation remains locked to the app. Tables support horizontal
  * scrolling when wide. Usable for streaming assistant replies and attachment previews.
  */
-export function Markdown({ text, children, className, live = false }: MarkdownProps): React.JSX.Element {
+function MarkdownView({ text, children, className, live = false }: MarkdownProps): React.JSX.Element {
   const content = typeof text === 'string' ? text : typeof children === 'string' ? children : '';
   // ```html blocks (diagrams/charts the user asked for) become live visuals,
   // ```mermaid blocks become rendered diagrams, and ```artifact blocks
@@ -351,3 +351,6 @@ export function Markdown({ text, children, className, live = false }: MarkdownPr
     </div>
   );
 }
+
+/** Parsing is the costly part of a chat render, so a reply is only re-parsed when its text changes. */
+export const Markdown = memo(MarkdownView);

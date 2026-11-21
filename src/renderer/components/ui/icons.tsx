@@ -102,3 +102,4 @@ export const CommandIcon = (p: IconProps) => <Icon {...p}><path d="M9 9h6v6H9zM9
 export const ReturnIcon = (p: IconProps) => <Icon {...p}><path d="M20 5v7a3 3 0 0 1-3 3H5M9 11l-4 4 4 4" /></Icon>;
 export const FolderPlusIcon = (p: IconProps) => <Icon {...p}><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2h9A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M12 11v5M9.5 13.5h5" /></Icon>;
 export const UsersIcon = (p: IconProps) => <Icon {...p}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6" /><circle cx="17" cy="9" r="2.6" /><path d="M16.5 14.2c2.6.2 4.4 2.2 5 5" /></Icon>;
+export const CloudIcon = (p: IconProps) => <Icon {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.5a4.25 4.25 0 0 1-.25 8.5z" /></Icon>;

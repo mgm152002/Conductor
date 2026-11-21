@@ -140,6 +140,19 @@ const integrations: IntegrationsBridge = {
     signOut: () => invoke('phone.signOut'),
     stop: () => invoke('phone.stop'),
   },
+  deviceChrome: {
+    status: () => invoke('deviceChrome.status'),
+    profiles: () => invoke('deviceChrome.profiles'),
+    refresh: () => invoke('deviceChrome.refresh'),
+    show: (url) => invoke('deviceChrome.show', url !== undefined ? { url } : undefined),
+  },
+  cloudBrowser: {
+    get: (scope) => invoke('cloudBrowser.get', { scope }),
+    save: (scope, url, apiKey) => invoke('cloudBrowser.save', { scope, url, ...(apiKey !== undefined && apiKey !== '' ? { apiKey } : {}) }),
+    load: (scope) => invoke('cloudBrowser.load', { scope }),
+    remove: (scope) => invoke('cloudBrowser.remove', { scope }),
+    test: (scope, url, apiKey) => invoke('cloudBrowser.test', { scope, ...(url !== undefined && url !== '' ? { url } : {}), ...(apiKey !== undefined && apiKey !== '' ? { apiKey } : {}) }),
+  },
   sandbox: {
     status: () => invoke('sandbox.status'),
     pull: () => invoke('sandbox.pull'),
@@ -147,6 +160,7 @@ const integrations: IntegrationsBridge = {
     clearBrowser: (agentId) => invoke('sandbox.clearBrowser', { agentId }),
     openViewer: (agentId) => invoke('sandbox.viewer', { agentId }),
     openGroupViewer: (groupId) => invoke('sandbox.groupViewer', { groupId }),
+    openFlowViewer: (flowId) => invoke('sandbox.flowViewer', { flowId }),
   },
   mcp: {
     list: () => invoke('mcp.list'), discover: () => invoke('mcp.discover'), add: (input) => invoke('mcp.add', input),

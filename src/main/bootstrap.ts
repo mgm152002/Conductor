@@ -34,6 +34,9 @@ import { ContextEngine } from './domain/context-engine';
 import { MemoryEngine } from './domain/memory-engine';
 import { Mem0Client } from './domain/mem0-client';
 import { AgentMail } from './sandbox/agentmail';
+import { CloudBrowserSettings } from './sandbox/cloud-browser';
+import { BROWSER_PREFERENCE_KEY, DEVICE_CHROME_PROFILE_KEY, DEVICE_CHROME_VISIBLE_KEY, browserPreferenceOf } from '@shared/sandbox-agents';
+import { DeviceChrome } from './sandbox/device-chrome';
 import { AgentFlowService } from './sandbox/flow-service';
 import { SharedKnowledgeSync } from './sandbox/shared-knowledge';
 import { agentMemoryNamespace, SHARED_MEMORY_NAMESPACE } from './sandbox/agent-memory';
@@ -283,8 +286,15 @@ export async function bootstrap(): Promise<AppServices> {
   // Late-bound: the approval broker is created after the orchestrator.
   // eslint-disable-next-line prefer-const
   let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
+  const cloudBrowsers = new CloudBrowserSettings(secretStore, (id) => keychainResolver.resolve(id));
+  const deviceChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => settings.resolve(DEVICE_CHROME_VISIBLE_KEY) === true,
+    sourceProfile: () => { const value = settings.resolve(DEVICE_CHROME_PROFILE_KEY); return typeof value === 'string' && value !== '' ? value : 'auto'; } });
+  app.once('before-quit', () => { void deviceChrome.shutdown(); });
   const sandboxAgents = new SandboxAgentService({
     store, manager: sandboxes, gateway: sandboxGateway,
+    cloudBrowser: (agentId, flowId) => cloudBrowsers.forRun(agentId, flowId),
+    browserPreference: () => browserPreferenceOf(settings.resolve(BROWSER_PREFERENCE_KEY)),
+    deviceBrowser: () => (deviceChrome.available() ? deviceChrome.session() : undefined),
     approver: (request, signal) => (sandboxApprover !== undefined ? sandboxApprover(request, signal) : Promise.resolve('decline' as const)),
     autoApprove,
     cliAvailable: (id) => registry.has(id) && registry.resolve(id).record.available,
@@ -793,7 +803,7 @@ export async function bootstrap(): Promise<AppServices> {
     sandboxEndpoint: (agentId) => sandboxes.endpoint(agentId),
   });
   app.once('before-quit', () => { void phone.stop(); });
-  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,mail:agentMail,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
+  registerIntegrationHandlers({router,registry,secrets:secretStore,mcp,cliMcp,sandboxes,phone,tiers,sandboxAgents,flows,mail:agentMail,cloudBrowsers,deviceChrome,remote:remoteHosts,assistant,learning:selfLearning,learningLoop,learningCron,modelCatalogs});
   registerAutomationHandlers({router,store,workflows,skills,
     startWorkflow: async (input) => {
       const workflow = workflows.get(input.workflowId,input.version);

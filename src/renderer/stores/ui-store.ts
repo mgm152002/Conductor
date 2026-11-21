@@ -22,8 +22,11 @@ interface UiState {
   setOnboardingOpen: (open: boolean) => void;
   /** Composer plan mode: a planner agent splits the message across agents. */
   planMode: boolean;
-  /** The thread drawer at the left of Work and Chat is hidden. */
+  /** The app sidebar is hidden (⌘B). */
   panelCollapsed: boolean;
+  /** Where a screen can render its own list inside the sidebar (Agents does). */
+  sidebarSlot: HTMLElement | null;
+  setSidebarSlot: (slot: HTMLElement | null) => void;
   setPanelCollapsed: (collapsed: boolean) => void;
   /** The ⌘K command palette. */
   paletteOpen: boolean;
@@ -38,11 +41,10 @@ interface UiState {
   setPlanMode: (on: boolean) => void;
 }
 
-const PANEL_KEY = 'conductor.drawer.hidden';
+const PANEL_KEY = 'conductor.sidebar.hidden';
 
 function loadPanelCollapsed(): boolean {
-  // The boards are the default way in; the drawer is opt-in.
-  try { return window.localStorage.getItem(PANEL_KEY) !== '0'; } catch { return true; }
+  try { return window.localStorage.getItem(PANEL_KEY) === '1'; } catch { return false; }
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -51,6 +53,8 @@ export const useUiStore = create<UiState>((set) => ({
     try { window.localStorage.setItem(PANEL_KEY, panelCollapsed ? '1' : '0'); } catch { /* session-only */ }
     set({ panelCollapsed });
   },
+  sidebarSlot: null,
+  setSidebarSlot: (sidebarSlot): void => { set({ sidebarSlot }); },
   paletteOpen: false,
   setPaletteOpen: (paletteOpen): void => { set({ paletteOpen }); },
   draft: false,

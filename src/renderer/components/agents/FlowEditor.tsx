@@ -6,9 +6,10 @@ import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Switch, inputClassName, textareaClassName } from '../ui/primitives';
-import { ClockIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon, WorkflowIcon } from '../ui/icons';
+import { ClockIcon, GlobeIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon } from '../ui/icons';
 import { message } from './AgentDialog';
 import { MailPanel } from './MailPanel';
+import { CloudBrowserButton } from './CloudBrowserButton';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 import type { AgentOption } from '@shared/integrations-contract';
 import { FLOW_TEMPLATES, pickAgent, type FlowTemplate } from '@shared/flow-templates';
@@ -61,19 +62,20 @@ function SchedulePanel({ schedule, onChange, nextRunAt }: { schedule: FlowSchedu
           {preset.kind === 'hourly' ? <label className="flex items-center gap-2 text-xs text-muted-foreground">At minute<input type="number" min={0} max={59} aria-label="Minute" className={cn(inputClassName, 'w-20')} value={Number(preset.time.slice(3))} onChange={(e) => { set({ time: `09:${String(Number(e.target.value) || 0).padStart(2, '0')}` }); }} /></label> : null}
           {preset.kind === 'custom' ? <input aria-label="Cron expression" className={cn(inputClassName, 'font-mono')} placeholder="minute hour day month weekday" value={schedule.cron} onChange={(e) => { onChange({ cron: e.target.value, enabled: schedule.enabled }); }} /> : null}
           <p className="text-2xs text-muted-foreground">
-            {describeCron(schedule.cron)} · your computer’s time
+            {describeCron(schedule.cron)}
             {schedule.enabled && nextRunAt !== null ? ` · next ${new Date(nextRunAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
             {!schedule.enabled ? ' · paused' : ''}
           </p>
-          <p className="text-2xs text-muted-foreground">Conductor has to be open for a scheduled run to start; one that was missed runs when it opens.</p>
         </>
-      ) : <p className="text-2xs text-muted-foreground">Off. Use Run now to start it yourself.</p>}
+      ) : null}
     </section>
   );
 }
 
-export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: {
+export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDeleted, onOpenHistory }: {
   flow: AgentFlow | null;
+  /** The sandbox this flow's steps share is up, so its browser can be watched. */
+  sandboxRunning?: boolean;
   agents: SandboxAgent[];
   onSaved: (flow: AgentFlow) => void;
   onDeleted: () => void;
@@ -235,16 +237,17 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: 
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-        <WorkflowIcon size={16} className="text-muted-foreground" />
-        <input aria-label="Flow name" value={draft.name} maxLength={80} onChange={(e) => { update({ name: e.target.value }); }} className="min-w-0 flex-1 bg-transparent font-display text-[15px] font-semibold text-foreground outline-none" />
+      <header className="window-header flex shrink-0 items-center gap-1.5 border-b border-border px-4">
+        <input aria-label="Flow name" value={draft.name} maxLength={80} onChange={(e) => { update({ name: e.target.value }); }} className="min-w-0 flex-1 bg-transparent text-[13px] font-medium text-foreground outline-none" />
         {live ? <span className="flex items-center gap-1.5 text-2xs text-info"><Spinner size={12} />Running</span> : null}
-        {live && latest !== undefined ? <Button size="md" variant="outline" disabled={busy !== null} onClick={() => { void stopRun(latest.id); }}>Stop</Button> : null}
-        <Button size="md" variant="ghost" title="Every run of your flows" onClick={onOpenHistory}><ClockIcon size={13} />History</Button>
-        {flow !== null && latest !== undefined && !live ? <Button size="md" variant="outline" disabled={busy !== null || dirty} title={dirty ? 'Save your changes first' : 'Run again with the input of the last run'} onClick={() => { void runAgain(latest.input); }}><PlayIcon size={13} />Run again</Button> : null}
-        <Button size="md" variant="outline" disabled={busy !== null || !dirty || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void save(); }}>{busy === 'save' ? <Spinner size={13} /> : null}{dirty ? 'Save' : 'Saved'}</Button>
-        <Button size="md" variant="primary" disabled={busy !== null || live || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void runNow(); }}>{busy === 'run' ? <Spinner size={13} /> : <PlayIcon size={13} />}Run now</Button>
-        {flow !== null ? <Button size="icon" variant="ghost" aria-label="Delete flow" title="Delete flow" onClick={onDeleted}><TrashIcon size={15} /></Button> : null}
+        {live && latest !== undefined ? <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void stopRun(latest.id); }}>Stop</Button> : null}
+        {flow !== null && sandboxRunning ? <Button size="sm" variant="ghost" title="Watch the flow’s browser live" onClick={() => { window.conductor.sandbox.openFlowViewer(flow.id).catch((err: unknown) => { setError(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'Could not open the sandbox'); }); }}><GlobeIcon size={13} />Watch</Button> : null}
+        {flow !== null ? <CloudBrowserButton scope={`flow:${flow.id}`} label={flow.name} /> : null}
+        <Button size="sm" variant="ghost" title="Every run of your flows" onClick={onOpenHistory}><ClockIcon size={13} />History</Button>
+        {flow !== null && latest !== undefined && !live ? <Button size="sm" variant="outline" disabled={busy !== null || dirty} title={dirty ? 'Save your changes first' : 'Run again with the input of the last run'} onClick={() => { void runAgain(latest.input); }}><PlayIcon size={13} />Run again</Button> : null}
+        <Button size="sm" variant="outline" disabled={busy !== null || !dirty || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void save(); }}>{busy === 'save' ? <Spinner size={13} /> : null}{dirty ? 'Save' : 'Saved'}</Button>
+        <Button size="sm" variant="primary" disabled={busy !== null || live || draft.nodes.length === 0 || problem !== undefined} onClick={() => { void runNow(); }}>{busy === 'run' ? <Spinner size={13} /> : <PlayIcon size={13} />}Run now</Button>
+        {flow !== null ? <Button size="icon-sm" variant="ghost" aria-label="Delete flow" title="Delete flow" onClick={onDeleted}><TrashIcon size={13} /></Button> : null}
       </header>
       {error !== null ? <div className="px-4 pt-3"><Alert action={<Button size="xs" variant="ghost" onClick={() => { setError(null); }}>Dismiss</Button>}>{error}</Alert></div> : null}
       {problem !== undefined && draft.nodes.length > 0 ? <div className="px-4 pt-3"><Alert tone="warning">{problem}</Alert></div> : null}
@@ -303,18 +306,17 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: 
             })}
             {draft.nodes.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center" onPointerDown={(e) => { e.stopPropagation(); }}>
-                <p className="text-sm font-semibold text-foreground">Describe the flow you want</p>
+                <p className="text-sm font-medium text-foreground">Describe the flow you want</p>
                 <textarea aria-label="Describe the flow" rows={4} className={cn(textareaClassName, 'w-full max-w-md')} value={describe} onChange={(e) => { setDescribe(e.target.value); }}
                   placeholder="e.g. Every morning at 9, have the scraper find new Summer 2027 backend internships, the resume agent tailor a resume for each and email me the list, then apply to the ones I reply with." />
                 <Button size="md" variant="primary" disabled={drafting || describe.trim().length < 3 || agents.length === 0} onClick={() => { void buildFromText(); }}>{drafting ? <Spinner size={13} /> : <SparklesIcon size={13} />}{drafting ? 'Building…' : 'Build it'}</Button>
-                <p className="max-w-sm text-2xs text-muted-foreground">It lays out the steps for you to review and edit. Or add steps yourself below and draw arrows between them; steps with no arrow between them run at the same time.</p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {FLOW_TEMPLATES.map((template) => <Button key={template.id} size="sm" variant="outline" disabled={agents.length === 0} title={template.summary} onClick={() => { startFromTemplate(template); }}>Start from “{template.title}”</Button>)}
                 </div>
               </div>
             ) : null}
           </div>
-          <div className="sticky bottom-3 left-3 flex w-fit items-center gap-2 rounded-xl border border-border bg-card p-1.5 shadow-lift">
+          <div className="sticky bottom-3 left-3 flex w-fit items-center gap-2 rounded-lg border border-border bg-card p-1 shadow-pop">
             <PlusIcon size={14} className="ml-1 text-muted-foreground" />
             <select aria-label="Add a step" className={cn(inputClassName, 'w-44')} value="" disabled={agents.length === 0} onChange={(e) => { if (e.target.value !== '') addStep(e.target.value); }}>
               <option value="">{agents.length === 0 ? 'Create an agent first' : 'Add a step…'}</option>
@@ -330,7 +332,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: 
               <h3 className="text-xs font-semibold text-foreground">Step</h3>
               {node.kind === 'reply' ? (
                 <>
-                  <p className="text-2xs text-muted-foreground">The flow pauses here until you reply to the email a step before sent you. What you wrote is handed to the steps after this one (for example “apply to all”).</p>
+                  <p className="text-2xs text-muted-foreground">Waits for your email reply, then passes it on.</p>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">Give up after<input type="number" min={1} max={336} aria-label="Hours to wait" className={cn(inputClassName, 'w-20')} value={node.waitHours ?? DEFAULT_REPLY_HOURS} onChange={(e) => { patchNode(node.id, { waitHours: Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_REPLY_HOURS) }); }} />hours</label>
                   {!mailReady ? (
                     <>
@@ -358,7 +360,6 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: 
                     <p className="text-2xs text-muted-foreground">{node.model === undefined && node.effort === undefined ? 'Model and effort: Auto (or what the agent set for that CLI).' : 'This step overrides the agent’s model.'}</p>
                   </div>
                   <textarea aria-label="What this step does" rows={9} className={textareaClassName} value={node.prompt} placeholder="What should this agent do? Use {{input}} for the flow's input." onChange={(e) => { patchNode(node.id, { prompt: e.target.value }); }} />
-                  <p className="text-2xs text-muted-foreground">It also gets what the steps before it said.</p>
                 </>
               )}
               {statusOf(node.id) !== undefined ? <StepOutput run={latest} nodeId={node.id} /> : null}
@@ -390,7 +391,7 @@ export function FlowEditor({ flow, agents, onSaved, onDeleted, onOpenHistory }: 
                 </p>
               ))}
             </section>
-          ) : <p className="text-2xs text-muted-foreground">Save the flow to run it or schedule it.</p>}
+          ) : null}
         </aside>
       </div>
     </div>
