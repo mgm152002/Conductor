@@ -1,0 +1,58 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so new queries catch issues in code that has not changed.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      # Upload results to the repository's code scanning alerts.
+      security-events: write
+      contents: read
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # The app (main, preload, renderer) and the CI workflows themselves.
+        language: [javascript-typescript, actions]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # TypeScript is analysed from source; nothing needs building.
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - out
+              - dist
+              - node_modules
+              - test
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
