@@ -190,7 +190,7 @@ describe('standalone casual chat', () => {
     expect(service.get(renamed.thread.id).thread.title).toBe('My own name');
   });
 
-  it('persists attachments, materializes only the current turn, and omits prior attachment metadata from agent history', async () => {
+  it('persists attachments, materializes only the current turn, and keeps earlier attachment turns in agent history', async () => {
     const { service, attachments, adapter, updates, root, path } = await setup({ script: {
       events: [{ kind: 'stdout', data: 'first answer' }],
       streamDelayMs: 20,
@@ -222,7 +222,13 @@ describe('standalone casual chat', () => {
     await settled(service, second.thread.id);
     const secondInput = adapter.calls.started[1] as ObjectiveInput;
     expect(secondInput).not.toHaveProperty('attachments');
-    expect(secondInput.conversation).toEqual([]);
+    expect(secondInput.conversation).toEqual([
+      expect.objectContaining({
+        objective: 'Summarize this',
+        reply: 'first answer',
+        attachments: [expect.objectContaining({ id: attachment.id, name: 'notes.md' })],
+      }),
+    ]);
 
     const reopened = new SqliteStore(path);
     stores.push(reopened);
