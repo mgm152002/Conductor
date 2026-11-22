@@ -411,12 +411,30 @@ export class PhoneServer {
     return headers;
   }
 
+  /**
+   * The upstream request for a watch path. Scheme, host and port always come
+   * from the sandbox's own base URL; the phone only picks the path and query.
+   * Resolving the phone's path against the base (`new URL(rest, base)`) would
+   * let `//other.host/…` redirect the request, API key included, off the Mac.
+   */
+  private sandboxTarget(endpoint: SandboxEndpointLike, rest: string, search: string): URL {
+    const base = new URL(endpoint.baseUrl);
+    const target = new URL(base.origin);
+    const prefix = base.pathname.replace(/\/+$/, '');
+    target.pathname = `${prefix}/${rest.replace(/^\/+/, '')}`;
+    target.search = search;
+    if (target.origin !== base.origin) throw new Error('Sandbox target escaped its origin.');
+    return target;
+  }
+
   private proxy(req: IncomingMessage, res: ServerResponse, url: URL): void {
     const found = this.watchFor(url.pathname);
     if (found === undefined || req.method !== 'GET') { res.writeHead(404).end(); return; }
-    const target = new URL(found.rest, found.endpoint.baseUrl);
-    target.search = url.search;
-    const upstream = httpRequest(target, { method: 'GET', headers: this.proxyHeaders(req, found.endpoint) }, (reply) => {
+    const target = this.sandboxTarget(found.endpoint, found.rest, url.search);
+    const upstream = httpRequest({
+      protocol: target.protocol, hostname: target.hostname, port: target.port, path: `${target.pathname}${target.search}`,
+      method: 'GET', headers: this.proxyHeaders(req, found.endpoint),
+    }, (reply) => {
       const headers = { ...reply.headers };
       delete headers['x-frame-options']; delete headers['content-security-policy']; delete headers['set-cookie'];
       headers['cache-control'] = 'no-store';
@@ -431,10 +449,12 @@ export class PhoneServer {
     const url = new URL(req.url ?? '/', 'http://local');
     const found = this.watchFor(url.pathname);
     if (found === undefined) { socket.write('HTTP/1.1 404 Not Found\r\n\r\n'); socket.destroy(); return; }
-    const target = new URL(found.rest, found.endpoint.baseUrl);
-    target.search = url.search;
+    const target = this.sandboxTarget(found.endpoint, found.rest, url.search);
     target.searchParams.set('api_key', found.endpoint.apiKey);
-    const upstream = httpRequest(target, { method: 'GET', headers: this.proxyHeaders(req, found.endpoint) });
+    const upstream = httpRequest({
+      protocol: target.protocol, hostname: target.hostname, port: target.port, path: `${target.pathname}${target.search}`,
+      method: 'GET', headers: this.proxyHeaders(req, found.endpoint),
+    });
     upstream.on('upgrade', (reply, remote, remoteHead) => {
       const lines = [`HTTP/1.1 ${reply.statusCode} ${reply.statusMessage}`];
       for (let i = 0; i < reply.rawHeaders.length; i += 2) lines.push(`${reply.rawHeaders[i]}: ${reply.rawHeaders[i + 1]}`);
