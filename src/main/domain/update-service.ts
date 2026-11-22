@@ -71,6 +71,8 @@ export interface UpdateServiceDeps {
   isPackaged: boolean;
   execPath: string;
   arch: string;
+  /** Defaults to the running platform; injectable for tests. */
+  platform?: NodeJS.Platform;
   pid: number;
   /** Quit the app so the install script can replace it. */
   quit: () => void;
@@ -90,7 +92,7 @@ export class UpdateService {
 
   private blockedReason(): string | undefined {
     if (!this.deps.isPackaged) return 'Updates install only in the packaged app.';
-    if (process.platform !== 'darwin') return 'In-app updates are only available on macOS.';
+    if ((this.deps.platform ?? process.platform) !== 'darwin') return 'In-app updates are only available on macOS.';
     const bundle = appBundlePath(this.deps.execPath);
     if (bundle === undefined) return 'Conductor is not running from an app bundle.';
     try { accessSync(dirname(bundle), constants.W_OK); } catch {
