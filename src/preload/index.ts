@@ -210,6 +210,7 @@ const chat: ChatBridge = {
   cancel: (threadId) => invoke('chat.cancel', { threadId }),
   delete: (threadId) => invoke('chat.delete', { threadId }),
   rename: (threadId, title) => invoke('chat.rename', { threadId, title }),
+  fork: (threadId, messageId) => invoke('chat.fork', { threadId, messageId }),
   listSpaces: () => invoke('chat.listSpaces'),
   createSpace: (name) => invoke('chat.createSpace', { name }),
   renameSpace: (spaceId, name) => invoke('chat.renameSpace', { spaceId, name }),
@@ -256,6 +257,10 @@ const github: GitHubBridge = {
   refreshPrs: (workspaceId) => invoke('github.refreshPrs', { workspaceId }),
   createPr: (input) => invoke('github.createPr', input),
   openPr: (url) => invoke('github.openPr', { url }),
+  listIssues: (input) => invoke('github.listIssues', input),
+  issueContext: (input) => invoke('github.issueContext', input),
+  linkIssue: (input) => invoke('github.linkIssue', input),
+  openIssue: (input) => invoke('github.openIssue', input),
   getPr: (input) => invoke('github.getPr', input),
   mergePr: (input) => invoke('github.mergePr', input),
   commentPr: (input) => invoke('github.commentPr', input),
@@ -288,6 +293,8 @@ const conductor = {
     changes: (workspaceId: string, taskId?: string): Promise<WorkspaceChanges> => invoke('workspace.changes', { workspaceId, ...(taskId ? { taskId } : {}) }),
     /** Unified diff for one changed file, capped and redacted by the main process. */
     fileDiff: (input: { workspaceId: string; path: string; taskId?: string }): Promise<ChangedFileDiff> => invoke('workspace.fileDiff', input),
+    /** The project's files (relative paths), for @-mentions. */
+    files: (workspaceId: string): Promise<string[]> => invoke('workspace.files', { workspaceId }),
   },
   usage: {
     /**
@@ -323,6 +330,8 @@ const conductor = {
     artifactFile: (input:{taskId:string;artifactId:string}):Promise<FileBytes> => invoke('task.artifactFile',input),
     retry: (id:string):Promise<void> => invoke('task.retry',{id}),
     thread: (threadId:string):Promise<Task[]> => invoke('task.thread',{threadId}),
+    /** A thread as Markdown, to reference it from another conversation. */
+    transcript: (threadId:string):Promise<{title:string;markdown:string}> => invoke('task.transcript',{threadId}),
     /** Delete a thread and everything stored for its messages (not project files). */
     deleteThread: (threadId:string):Promise<ThreadDeletionResult> => invoke('task.deleteThread',{threadId,confirmed:true}),
     /** Rename a thread; resolves to its root task carrying the new title. */
@@ -332,6 +341,8 @@ const conductor = {
       objective: string;
       acceptanceCriteria?: string[];
       parentTaskId?: string;
+      /** Start a new thread forked from this task: it carries the turns up to and including it. */
+      forkFromTaskId?: string;
       agentId?: string;
       /** Plan mode: `agentId` plans, and the plan's tasks run on their agents. */
       plan?: boolean;

@@ -110,6 +110,33 @@ describe('conversation threads', () => {
     expect(replyFor(s, second.id)).toBe('Text reply to summarize it with 1 earlier turns: Reply to plan the launch | resumed=none | history=0');
   });
 
+  it('forks a thread: a new thread that carries the turns up to the fork point, without resuming the source session', async () => {
+    const { s, runner, machine, workspace, queries } = await setup();
+    const first = await runner.create({ workspaceId: workspace.id, objective: 'first question', agentId: 'codex' });
+    await runner.waitForIdle(first.id);
+    const second = await runner.create({ workspaceId: workspace.id, objective: 'second question', parentTaskId: first.id });
+    await runner.waitForIdle(second.id);
+
+    // Fork from the first message: the second turn is not carried over.
+    const fork = await runner.create({ workspaceId: workspace.id, objective: 'other direction', parentTaskId: first.id, fork: true });
+    await runner.waitForIdle(fork.id);
+    const done = machine.getTask(fork.id)!;
+    expect(done.state).toBe('COMPLETED');
+    expect(done.threadId).toBe(fork.id);
+    expect(done.parentTaskId).toBe(first.id);
+    expect(threadHistory(s, done).map((turn) => turn.objective)).toEqual(['first question']);
+    expect(replyFor(s, fork.id)).toBe('Reply to other direction | resumed=none | history=1');
+    // The source thread is untouched; the fork is its own thread.
+    expect(queries.thread(first.id).map((t) => t.id)).toEqual([first.id, second.id]);
+    expect(queries.thread(fork.id).map((t) => t.id)).toEqual([fork.id]);
+
+    // A follow-up in the fork sees the source turn and the fork's own turn.
+    const next = await runner.create({ workspaceId: workspace.id, objective: 'and then', parentTaskId: fork.id, agentId: 'claude-code' });
+    await runner.waitForIdle(next.id);
+    expect(machine.getTask(next.id)?.threadId).toBe(fork.id);
+    expect(threadHistory(s, machine.getTask(next.id)!).map((turn) => turn.objective)).toEqual(['first question', 'other direction']);
+  });
+
   it('rejects a parent from another project and an unavailable agent', async () => {
     const { runner, workspace, other } = await setup();
     const first = await runner.create({ workspaceId: workspace.id, objective: 'hello', agentId: 'codex' });

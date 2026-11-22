@@ -16,7 +16,7 @@ import { prNumberFromUrl, prPath } from '../lib/pull-request';
 import { cn } from '../lib/cn';
 import {
   BrainIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ClockIcon, FolderIcon, FolderPlusIcon, GradCapIcon, ImageIcon, ListChecksIcon,
-  ArrowLeftIcon, ArrowRightIcon, MessageIcon, PanelLeftIcon, PencilIcon, PhoneIcon, PlugIcon, PlusIcon, PullRequestIcon, RotateIcon, SearchIcon,
+  ArrowLeftIcon, ArrowRightIcon, MessageIcon, PanelLeftIcon, PencilIcon, PhoneIcon, PlugIcon, PlusIcon, PullRequestIcon, IssueIcon, RotateIcon, SearchIcon,
   SettingsIcon, SparklesIcon, SquarePenIcon, TerminalIcon, TrashIcon, UsageIcon, XIcon,
 } from './ui/icons';
 import { isTerminalTask } from '../stores/task-store';
@@ -243,6 +243,7 @@ function WorkThreads({ project, projects, active, tasks, focusedKey, pendingTask
   const [deleting, setDeleting] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
   const [prsOpen, setPrsOpen] = useState(false);
+  const [githubTab, setGithubTab] = useState<'pulls' | 'issues'>('pulls');
   const [prCount, setPrCount] = useState(0);
   const [deletingThread, setDeletingThread] = useState<ThreadView | null>(null);
   const [renamingThread, setRenamingThread] = useState<ThreadView | null>(null);
@@ -347,13 +348,22 @@ function WorkThreads({ project, projects, active, tasks, focusedKey, pendingTask
         </span>
         <button
           type="button"
-          onClick={() => { setPrsOpen(true); }}
+          onClick={() => { setGithubTab('pulls'); setPrsOpen(true); }}
           aria-label={`Pull requests for ${project.name}`}
           title={`Pull requests for ${project.name}`}
           className={cn('h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1 text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:flex focus-visible:outline-2 focus-visible:outline-ring', prCount > 0 ? 'flex' : 'hidden group-focus-within:flex group-hover:flex')}
         >
           <PullRequestIcon size={13} />
           {prCount > 0 ? <span className="text-xs font-medium tabular-nums">{prCount}</span> : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setGithubTab('issues'); setPrsOpen(true); }}
+          aria-label={`Issues for ${project.name}`}
+          title={`Issues for ${project.name} — start threads from them`}
+          className="hidden h-6 shrink-0 cursor-pointer items-center rounded-md px-1 text-sidebar-muted-foreground group-focus-within:flex group-hover:flex hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:flex focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <IssueIcon size={13} />
         </button>
         <button
           type="button"
@@ -395,7 +405,7 @@ function WorkThreads({ project, projects, active, tasks, focusedKey, pendingTask
       ) : null}
       {project !== null ? <DeleteProjectDialog project={project} open={deleting} onClose={() => { setDeleting(false); onClearProject(); }} /> : null}
       {project !== null && iconOpen ? <IconPickerDialog target={{ kind: 'project', id: project.id, name: project.name, icon: project.icon ?? null }} open onClose={() => { setIconOpen(false); }} /> : null}
-      {project !== null && prsOpen ? <ProjectPullRequestsDialog project={project} open onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
+      {project !== null && prsOpen ? <ProjectPullRequestsDialog project={project} open initialTab={githubTab} onClose={() => { setPrsOpen(false); void window.conductor.github.listPrs(project.id).then((list) => { setPrCount(list.filter((pr) => pr.state === 'open').length); }).catch(() => undefined); }} /> : null}
       {deletingThread !== null ? <DeleteThreadDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameThreadDialog key={renamingThread.key} threadId={renamingThread.key} currentTitle={threadTitle(renamingThread.root)} open onClose={() => { setRenamingThread(null); }} /> : null}
       {snoozingThread !== null ? (

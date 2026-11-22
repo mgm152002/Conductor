@@ -18,6 +18,10 @@ import {
   ChevronRightIcon as LucideChevronRight,
   CircleAlertIcon as LucideCircleAlert,
   ClockIcon as LucideClock,
+  CopyIcon as LucideCopy,
+  CircleDotIcon as LucideCircleDot,
+  CircleCheckIcon as LucideCircleCheck,
+  GitForkIcon as LucideGitFork,
   BotIcon as LucideBot,
   HistoryIcon as LucideHistory,
   CloudIcon as LucideCloud,
@@ -124,6 +128,10 @@ export const ImageIcon = make(LucideImage);
 export const TerminalIcon = make(LucideTerminal);
 export const SearchIcon = make(LucideSearch);
 export const ClockIcon = make(LucideClock);
+export const CopyIcon = make(LucideCopy);
+export const IssueIcon = make(LucideCircleDot);
+export const IssueClosedIcon = make(LucideCircleCheck);
+export const ForkIcon = make(LucideGitFork);
 export const BotIcon = make(LucideBot);
 export const HistoryIcon = make(LucideHistory);
 export const DatabaseIcon = make(LucideDatabase);

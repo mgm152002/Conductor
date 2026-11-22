@@ -66,7 +66,7 @@ export function AgentSetupNotice({ onFixed }: { onFixed?: () => void }): React.J
   if (needsConsent.length > 0) steps.push(`allow sending tasks and context to ${needsConsent.map((a) => a.name).join(', ')}`);
 
   return (
-    <div role="status" className="mx-auto mb-2 flex w-full max-w-(--chat-max) items-start gap-2.5 rounded-2xl border border-warning/30 bg-warning/6 px-3.5 py-3 text-xs">
+    <div role="status" className="mx-auto mb-2 flex w-full max-w-(--chat-max) items-start gap-2.5 rounded-2xl border border-warning/30 bg-[color-mix(in_srgb,var(--warning)_7%,var(--popover))] px-3.5 py-3 text-xs">
       <AlertTriangleIcon size={15} className="mt-px shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         {noAgent ? (

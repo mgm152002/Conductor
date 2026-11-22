@@ -500,6 +500,41 @@ export class ChatService {
     }
   }
 
+  /**
+   * Fork a chat: a new chat with the same agent and space holding a copy of
+   * every message up to and including `messageId`. Replies still streaming
+   * are left out; attachments are shared (never their on-disk copies). The source chat is
+   * untouched.
+   */
+  fork(threadId: string, messageId: string): ChatConversation {
+    const source = this.get(threadId);
+    const index = source.messages.findIndex((m) => m.id === messageId);
+    if (index === -1) throw new Error('That message is not in this chat');
+    // A user message forks with its reply, so the new chat never starts mid-turn.
+    const end = source.messages[index]!.role === 'user' && source.messages[index + 1]?.role === 'assistant' ? index + 1 : index;
+    const copied = source.messages.slice(0, end + 1).filter((m) => m.status !== 'streaming');
+    if (copied.length === 0) throw new Error('There is nothing to fork yet');
+    const forkId = randomUUID();
+    const now = new Date().toISOString();
+    const title = source.thread.title.length > 112 ? `${source.thread.title.slice(0, 111)}…` : source.thread.title;
+    this.store.transaction(({ db }) => {
+      db.prepare('INSERT INTO chat_threads(id,title,agent_id,created_at,updated_at,space_id) VALUES(?,?,?,?,?,?)')
+        .run(forkId, `Fork: ${title}`, source.thread.agentId, now, now, source.thread.spaceId ?? null);
+      const insert = db.prepare('INSERT INTO chat_messages(id,thread_id,role,content,status,created_at,error,activity_json,agent_id,model) VALUES(?,?,?,?,?,?,?,?,?,?)');
+      const link = db.prepare(`INSERT INTO chat_message_attachments(message_id,attachment_id,ordinal,materialized_path,created_at)
+        SELECT ?, attachment_id, ordinal, NULL, ? FROM chat_message_attachments WHERE message_id=?`);
+      for (const message of copied) {
+        const id = randomUUID();
+        insert.run(id, forkId, message.role, message.content, message.status, message.createdAt, message.error ?? null,
+          JSON.stringify(message.activity ?? []), message.agentId ?? null, message.model ?? null);
+        link.run(id, now, message.id);
+      }
+    });
+    if (source.thread.spaceId) this.store.db.prepare('UPDATE chat_spaces SET updated_at=? WHERE id=?').run(now, source.thread.spaceId);
+    this.emit(forkId);
+    return this.get(forkId);
+  }
+
   /** Rename a chat thread. The original first message is never touched. */
   rename(threadId: string, title: string): ChatThread {
     const clean = title.trim().replace(/\s+/g, ' ');

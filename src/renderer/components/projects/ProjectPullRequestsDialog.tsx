@@ -8,7 +8,8 @@ import { prPath } from '../../lib/pull-request';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { Button, Dialog } from '../ui/primitives';
-import { ExternalLinkIcon, PullRequestIcon } from '../ui/icons';
+import { ExternalLinkIcon, IssueIcon, PullRequestIcon } from '../ui/icons';
+import { ProjectIssues } from './ProjectIssues';
 
 // Every pull request on a project's GitHub repository — synced from GitHub,
 // not just the ones Conductor filed — with the Work thread each one belongs
@@ -24,7 +25,11 @@ const STATE_CLASS: Record<PullRequestState, string> = {
 
 type Filter = 'all' | PullRequestState;
 
-export function ProjectPullRequestsDialog({ project, open, onClose }: { project: Workspace; open: boolean; onClose: () => void }): React.JSX.Element {
+export type ProjectGitHubTab = 'pulls' | 'issues';
+
+export function ProjectPullRequestsDialog({ project, open, onClose, initialTab = 'pulls' }: { project: Workspace; open: boolean; onClose: () => void; initialTab?: ProjectGitHubTab }): React.JSX.Element {
+  const [tab, setTab] = useState<ProjectGitHubTab>(initialTab);
+  useEffect(() => { if (open) setTab(initialTab); }, [open, initialTab]);
   const tasks = useTaskStore((s) => s.tasks);
   const navigate = useNavigate();
   const { openThread } = useThreadNavigation();
@@ -45,7 +50,7 @@ export function ProjectPullRequestsDialog({ project, open, onClose }: { project:
         : await window.conductor.github.listPrs(project.id));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   }, [project.id]);
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  useEffect(() => { if (open && tab === 'pulls') void load(); }, [open, load, tab]);
 
   const refresh = async (): Promise<void> => {
     setBusy(true); setError(null);
@@ -66,16 +71,34 @@ export function ProjectPullRequestsDialog({ project, open, onClose }: { project:
     <Dialog
       open={open}
       onClose={onClose}
-      title={`Pull requests · ${project.name}`}
-      description={connected === false
-        ? 'GitHub is not connected for this project. Connect it in Settings → GitHub to sync its pull requests.'
-        : 'Every pull request on this project’s GitHub repository, with the thread each one belongs to.'}
-      width="max-w-xl"
+      title={`GitHub · ${project.name}`}
+      description={tab === 'issues'
+        ? 'Issues on this project’s repository. Start a thread from one to work on it with the issue attached.'
+        : connected === false
+          ? 'GitHub is not connected for this project. Connect it in Settings → GitHub to sync its pull requests.'
+          : 'Every pull request on this project’s GitHub repository, with the thread each one belongs to.'}
+      width="max-w-2xl"
       footer={<>
-        {connected === true ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void refresh(); }}>{busy ? 'Syncing…' : 'Sync from GitHub'}</Button> : null}
+        {tab === 'pulls' && connected === true ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void refresh(); }}>{busy ? 'Syncing…' : 'Sync from GitHub'}</Button> : null}
         <Button size="sm" variant="primary" onClick={onClose}>Done</Button>
       </>}
     >
+      <div role="tablist" aria-label="GitHub" className="mb-3 flex gap-4 border-b border-border">
+        {([['pulls', 'Pull requests', PullRequestIcon], ['issues', 'Issues', IssueIcon]] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => { setTab(id); }}
+            className={cn('-mb-px flex h-8 cursor-pointer items-center gap-1.5 border-b-2 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+              tab === id ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            <Icon size={13} />{label}
+          </button>
+        ))}
+      </div>
+      {tab === 'issues' ? <ProjectIssues project={project} onClose={onClose} /> : <>
       {prs.length > 0 ? (
         <div role="tablist" aria-label="Filter pull requests" className="mb-3 flex gap-1">
           {(['all', 'open', 'merged', 'closed'] as Filter[]).map((state) => (
@@ -141,6 +164,7 @@ export function ProjectPullRequestsDialog({ project, open, onClose }: { project:
           })}
         </ul>
       )}
+      </>}
     </Dialog>
   );
 }

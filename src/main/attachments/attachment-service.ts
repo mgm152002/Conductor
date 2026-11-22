@@ -43,6 +43,12 @@ const location = (owner: Owner) => 'taskId' in owner
   : { table: 'chat_message_attachments', key: 'message_id', id: owner.messageId };
 
 /** Main-process byte authority. No public preview API accepts a filesystem path. */
+/** Valid UTF-8 with no NUL bytes: text, not a binary file with a .md or .txt name. */
+function isUtf8Text(bytes: Buffer): boolean {
+  if (bytes.includes(0)) return false;
+  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return true; } catch { return false; }
+}
+
 export class AttachmentService {
   constructor(private readonly store: Store, private readonly storage: ManagedStorage) {}
 
@@ -109,9 +115,13 @@ export class AttachmentService {
     const sizeError = attachmentSizeError(bytes.byteLength) ?? attachmentBatchError(1, bytes.byteLength);
     if (sizeError) return { attachments: [], rejected: [{ fileName: name, code: bytes.byteLength === 0 ? 'empty' : bytes.byteLength > MAX_ATTACHMENT_BYTES ? 'too_large' : 'limit_exceeded', message: sizeError }] };
     const format = detectDocumentFormat(name, bytes);
-    // Clipboard byte ingress is intentionally image-only. The claimed MIME
-    // type is renderer metadata; signature detection remains authoritative.
-    if (format.kind !== 'image' || !hasImageSignature(bytes)) return { attachments: [], rejected: [{ fileName: name, code: 'unsupported', message: 'Only image data can be pasted directly. Use Attach files for documents.' }] };
+    // Byte ingress takes images (pasted screenshots) and UTF-8 text or
+    // Markdown (a referenced thread, issue or skill written out by the app).
+    // The claimed MIME type is renderer metadata; signature and content
+    // checks remain authoritative.
+    const image = format.kind === 'image' && hasImageSignature(bytes);
+    const text = (format.kind === 'markdown' || format.kind === 'text') && isUtf8Text(bytes);
+    if (!image && !text) return { attachments: [], rejected: [{ fileName: name, code: 'unsupported', message: 'Only images and text can be added this way. Use Attach files for other documents.' }] };
     try {
       const sha256 = createHash('sha256').update(bytes).digest('hex');
       const existing = this.store.db.prepare('SELECT * FROM attachments WHERE sha256=? LIMIT 1').get(sha256) as Row | undefined;
@@ -123,7 +133,7 @@ export class AttachmentService {
       } catch (error) { if (!existing) this.storage.delete(blobId); throw error; }
       return { attachments: [summary(this.row(id))], rejected: [] };
     } catch {
-      return { attachments: [], rejected: [{ fileName: name, code: 'unreadable', message: 'The pasted image could not be stored. Please try again.' }] };
+      return { attachments: [], rejected: [{ fileName: name, code: 'unreadable', message: 'The file could not be stored. Please try again.' }] };
     }
   }
 

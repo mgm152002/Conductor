@@ -89,7 +89,8 @@ export interface ThreadTitleDeps {
 
 /** Whether this task is a thread root (follow-ups never retitle a thread). */
 export function isThreadRoot(task: Task): boolean {
-  return task.parentTaskId === undefined && (task.threadId ?? task.id) === task.id;
+  // A fork's first message has a parent in another thread but names its own.
+  return (task.threadId ?? task.id) === task.id && (task.parentTaskId === undefined || task.threadId === task.id);
 }
 
 export class ThreadTitleService {
@@ -171,7 +172,7 @@ export class ThreadTitleService {
    */
   scheduleRecent(limit = 10): void {
     const rows = this.deps.store.db.prepare(
-      `SELECT id FROM tasks WHERE (title IS NULL OR trim(title) = '') AND parent_task_id IS NULL
+      `SELECT id FROM tasks WHERE (title IS NULL OR trim(title) = '') AND (parent_task_id IS NULL OR thread_id = id)
        ORDER BY updated_at DESC, rowid DESC LIMIT ?`,
     ).all(limit) as { id: string }[];
     for (const row of rows) {

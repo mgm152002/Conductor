@@ -47,6 +47,38 @@ export interface PullRequestRecord {
   updatedAt: string;
 }
 
+export type IssueState = 'open' | 'closed';
+
+/** A GitHub issue on a project's repository, with the Work threads started from it. */
+export interface IssueRecord {
+  number: number;
+  title: string;
+  state: IssueState;
+  url: string;
+  author: string;
+  labels: { name: string; color: string }[];
+  comments: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Threads started from this issue (thread keys), newest first. */
+  threadKeys: string[];
+}
+
+export interface IssueList {
+  repo: GitHubRepoRef | null;
+  /** Whether a token is stored; without one, public repositories are read anonymously. */
+  connected: boolean;
+  issues: IssueRecord[];
+}
+
+/** An issue written out as Markdown (body and comments), to give a thread as context. */
+export interface IssueContext {
+  number: number;
+  title: string;
+  url: string;
+  markdown: string;
+}
+
 export type CreatePrResult =
   | { status: 'created' | 'existing'; pr: PullRequestRecord }
   | { status: 'no-changes'; branch: string };
@@ -138,6 +170,10 @@ export const GITHUB_SCHEMAS = {
   'github.createPr': z.object({ workspaceId: WorkspaceId, threadId: z.string().trim().min(1).max(200) }).strict(),
   // Only URLs persisted by Conductor itself may be opened (validated in main).
   'github.openPr': z.object({ url: z.string().url().max(2048) }).strict(),
+  'github.listIssues': z.object({ workspaceId: WorkspaceId, state: z.enum(['open', 'closed', 'all']) }).strict(),
+  'github.issueContext': z.object({ workspaceId: WorkspaceId, number: z.number().int().positive().max(10_000_000) }).strict(),
+  'github.linkIssue': z.object({ workspaceId: WorkspaceId, number: z.number().int().positive().max(10_000_000), threadKey: z.string().uuid() }).strict(),
+  'github.openIssue': z.object({ workspaceId: WorkspaceId, number: z.number().int().positive().max(10_000_000) }).strict(),
   'github.getPr': z.object({ workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000) }).strict(),
   'github.mergePr': z.object({
     workspaceId: WorkspaceId, number: z.number().int().positive().max(1_000_000),
@@ -167,6 +203,14 @@ export interface GitHubBridge {
   refreshPrs(workspaceId: string): Promise<PullRequestRecord[]>;
   createPr(input: { workspaceId: string; threadId: string }): Promise<CreatePrResult>;
   openPr(url: string): Promise<void>;
+  /** Issues on the project's repository (pull requests left out). */
+  listIssues(input: { workspaceId: string; state: 'open' | 'closed' | 'all' }): Promise<IssueList>;
+  /** One issue with its comments, as Markdown for a thread to work from. */
+  issueContext(input: { workspaceId: string; number: number }): Promise<IssueContext>;
+  /** Record that a Work thread was started from an issue. */
+  linkIssue(input: { workspaceId: string; number: number; threadKey: string }): Promise<void>;
+  /** Open an issue of the project's repository on github.com. */
+  openIssue(input: { workspaceId: string; number: number }): Promise<void>;
   getPr(input: { workspaceId: string; number: number }): Promise<PullRequestBundle>;
   mergePr(input: { workspaceId: string; number: number; method: PrMergeMethod; commitTitle?: string }): Promise<PullRequestBundle>;
   commentPr(input: { workspaceId: string; number: number; body: string }): Promise<PullRequestBundle>;

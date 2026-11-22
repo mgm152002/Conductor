@@ -12,6 +12,10 @@ export function registerGitHubHandlers(router: IpcRouter, github: GitHubService)
   router.handle('github.refreshPrs', GITHUB_SCHEMAS['github.refreshPrs'], (_event, { workspaceId }) => github.refreshPrs(workspaceId));
   router.handle('github.createPr', GITHUB_SCHEMAS['github.createPr'], (_event, { workspaceId, threadId }) => github.createPrForThread(workspaceId, threadId));
   router.handle('github.openPr', GITHUB_SCHEMAS['github.openPr'], (_event, { url }) => github.openPr(url));
+  router.handle('github.listIssues', GITHUB_SCHEMAS['github.listIssues'], (_event, { workspaceId, state }) => github.listIssues(workspaceId, state));
+  router.handle('github.issueContext', GITHUB_SCHEMAS['github.issueContext'], (_event, { workspaceId, number }) => github.issueContext(workspaceId, number));
+  router.handle('github.linkIssue', GITHUB_SCHEMAS['github.linkIssue'], (_event, { workspaceId, number, threadKey }) => { github.linkIssue(workspaceId, number, threadKey); });
+  router.handle('github.openIssue', GITHUB_SCHEMAS['github.openIssue'], (_event, { workspaceId, number }) => github.openIssue(workspaceId, number));
   router.handle('github.getPr', GITHUB_SCHEMAS['github.getPr'], (_event, { workspaceId, number }) => github.getPr(workspaceId, number));
   router.handle('github.mergePr', GITHUB_SCHEMAS['github.mergePr'], (_event, { workspaceId, number, method, commitTitle }) => github.mergePr(workspaceId, number, method, commitTitle));
   router.handle('github.commentPr', GITHUB_SCHEMAS['github.commentPr'], (_event, { workspaceId, number, body }) => github.commentPr(workspaceId, number, body));

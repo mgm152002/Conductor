@@ -52,6 +52,26 @@ async function settled(service: ChatService, id: string) {
 }
 
 describe('standalone casual chat', () => {
+  it('forks a chat into a new chat holding the messages up to the chosen one', async () => {
+    const { service } = await setup({ script: { events: [{ kind: 'stdout', data: 'a reply' }] } });
+    const started = await service.send({ content: 'first', agentId: 'chat-agent' });
+    const id = started.thread.id;
+    await settled(service, id);
+    await service.send({ threadId: id, content: 'second', agentId: 'chat-agent' });
+    const source = await settled(service, id);
+    expect(source.messages).toHaveLength(4);
+
+    // Forking the first user message takes its reply along, nothing after.
+    const forked = service.fork(id, source.messages[0]!.id);
+    expect(forked.thread.id).not.toBe(id);
+    expect(forked.thread.title).toMatch(/^Fork: /);
+    expect(forked.messages.map((m) => [m.role, m.content])).toEqual([['user', 'first'], ['assistant', source.messages[1]!.content]]);
+    expect(forked.messages.every((m) => !source.messages.some((s) => s.id === m.id))).toBe(true);
+    expect(service.get(id).messages).toHaveLength(4);
+    expect(service.list().map((t) => t.id)).toContain(forked.thread.id);
+    expect(() => service.fork(id, randomUUID())).toThrow(/not in this chat/);
+  });
+
   it('switches CLI mid-thread and hands the new agent the conversation history', async () => {
     const { service, registry, adapter } = await setup({ script: { events: [{ kind: 'stdout', data: 'first reply' }] } });
     const second = new FakeAdapter({ script: { events: [{ kind: 'stdout', data: 'second reply' }] }, record: {

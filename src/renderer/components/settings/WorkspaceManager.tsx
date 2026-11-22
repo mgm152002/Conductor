@@ -3,7 +3,8 @@ import type { Workspace } from '@shared/domain';
 import { useWorkspaces } from '../../hooks/useWorkspaces';
 import { DeleteProjectDialog } from '../projects/DeleteProjectDialog';
 import { Badge, Button, inputClassName } from '../ui/primitives';
-import { ChevronRightIcon, ImageIcon, PlusIcon, TrashIcon } from '../ui/icons';
+import { ChevronRightIcon, ImageIcon, IssueIcon, PlusIcon, PullRequestIcon, TrashIcon } from '../ui/icons';
+import { ProjectPullRequestsDialog, type ProjectGitHubTab } from '../projects/ProjectPullRequestsDialog';
 import { SettingsGroup, SettingsRow, SettingsSection } from './SettingsLayout';
 import { EntityIcon } from '../ui/EntityIcon';
 import { cn } from '../../lib/cn';
@@ -24,6 +25,7 @@ export function WorkspaceManager(): React.JSX.Element {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState<Workspace | null>(null);
   const [iconProject, setIconProject] = useState<Workspace | null>(null);
+  const [github, setGithub] = useState<{ project: Workspace; tab: ProjectGitHubTab } | null>(null);
 
   const canCreate =
     name.trim().length > 0 && rootPath.trim().length > 0 && !submitting;
@@ -52,6 +54,7 @@ export function WorkspaceManager(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-8">
       {deleting !== null ? <DeleteProjectDialog project={deleting} open onClose={() => { setDeleting(null); }} /> : null}
+      {github !== null ? <ProjectPullRequestsDialog key={`${github.project.id}:${github.tab}`} project={github.project} initialTab={github.tab} open onClose={() => { setGithub(null); }} /> : null}
       {iconProject !== null ? <IconPickerDialog key={iconProject.id} target={{ kind: 'project', id: iconProject.id, name: iconProject.name, icon: iconProject.icon ?? null }} open onClose={() => { setIconProject(null); }} /> : null}
       <section className="space-y-2.5">
         <p className="px-3 text-sm text-muted-foreground sm:px-4">Choose a project to make it the active one, change its icon or remove it.</p>
@@ -76,11 +79,13 @@ export function WorkspaceManager(): React.JSX.Element {
                         <span className="truncate text-sm font-medium text-foreground">{workspace.name}</span>
                         {isActive ? <Badge tone="success">Active</Badge> : null}
                       </span>
-                      <span className="truncate pe-20 text-xs text-muted-foreground" title={workspace.rootPath}>{workspace.rootPath}</span>
+                      <span className="truncate pe-36 text-xs text-muted-foreground" title={workspace.rootPath}>{workspace.rootPath}</span>
                     </span>
                     <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
                   </button>
                   <span className="absolute top-1/2 right-10 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-focus-within/project:opacity-100 group-hover/project:opacity-100">
+                    <Button variant="ghost" size="icon-sm" title="Issues — start threads from them" aria-label={`Issues for ${workspace.name}`} onClick={() => { setGithub({ project: workspace, tab: 'issues' }); }}><IssueIcon /></Button>
+                    <Button variant="ghost" size="icon-sm" title="Pull requests" aria-label={`Pull requests for ${workspace.name}`} onClick={() => { setGithub({ project: workspace, tab: 'pulls' }); }}><PullRequestIcon /></Button>
                     <Button variant="ghost" size="icon-sm" title="Change icon" aria-label={`Icon for ${workspace.name}`} onClick={() => { setIconProject(workspace); }}><ImageIcon /></Button>
                     <Button variant="ghost" size="icon-sm" title="Delete project" className="hover:text-destructive-foreground" aria-label={`Delete ${workspace.name}`} onClick={() => { setDeleting(workspace); }}><TrashIcon /></Button>
                   </span>

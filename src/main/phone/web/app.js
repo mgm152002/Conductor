@@ -571,7 +571,7 @@ function paintProjectShell() {
 }
 async function refreshProject() {
   const tasks = await rpc('task.list', { workspaceId: S.view.id, limit: 100 });
-  const roots = tasks.filter((t) => !t.parentTaskId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const roots = tasks.filter((t) => !t.parentTaskId || t.threadId === t.id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   setList(roots.length ? '<div class="group">' + roots.map((t) => '<div class="row" data-act="thread" data-k="' + esc(t.threadId || t.id) + '"><span class="dot ' + tone(t.state) + '"></span><div class="grow"><div class="t">' + esc((t.title || t.objective || '').split('\n')[0].slice(0, 100)) + '</div><div class="m">' + ago(t.updatedAt) + '</div></div></div>').join('') + '</div>' : '<div class="empty"><b>No tasks in this project</b>Start one with the + button.</div>', JSON.stringify(roots));
 }
 async function newTask(projectId) {

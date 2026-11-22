@@ -127,6 +127,7 @@ export const CHAT_SCHEMAS = {
   'chat.cancel': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.delete': z.object({ threadId: z.string().uuid() }).strict(),
   'chat.rename': z.object({ threadId: z.string().uuid(), title: ThreadTitle }).strict(),
+  'chat.fork': z.object({ threadId: z.string().uuid(), messageId: z.string().uuid() }).strict(),
   'chat.listSpaces': z.void(),
   'chat.createSpace': z.object({ name: SpaceName }).strict(),
   'chat.renameSpace': z.object({ spaceId: z.string().uuid(), name: SpaceName }).strict(),
@@ -146,6 +147,8 @@ export interface ChatBridge {
   delete(threadId: string): Promise<void>;
   /** Rename a chat thread; resolves to the updated thread. */
   rename(threadId: string, title: string): Promise<ChatThread>;
+  /** Copy a chat up to and including one of its messages into a new chat; resolves to the new chat. */
+  fork(threadId: string, messageId: string): Promise<ChatConversation>;
   /** Spaces (groups of personal chats that share context), most recently updated first. */
   listSpaces(): Promise<ChatSpace[]>;
   createSpace(name: string): Promise<ChatSpace>;

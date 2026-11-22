@@ -5,11 +5,13 @@ import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { threadKey, threadTasks } from '../../lib/threads';
 import { useFocusedTask } from '../workspace/useFocusedTask';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
-import { betweenTurnHandoff, buildTimeline, latestActivity, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
+import { betweenTurnHandoff, buildTimeline, turnRun, type TimelineItem, type TurnRun } from '../../lib/timeline';
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { Alert, Button } from '../ui/primitives';
-import { FolderIcon, PlusIcon } from '../ui/icons';
+import { FolderIcon, ForkIcon, PlusIcon } from '../ui/icons';
+import { useThreadNavigation } from '../../hooks/useThreadNavigation';
+import { threadTitle } from '../../lib/thread-status';
 import { ArtifactRow, DeliveredFiles } from '../workspace/ArtifactsRegion';
 import { requestsArtifact } from '../../lib/artifacts';
 import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
@@ -25,6 +27,8 @@ import { Mem0OfflineNotice } from './Mem0OfflineNotice';
 import { PlanResults, runLabel } from './PlanCard';
 import { cn } from '../../lib/cn';
 import { ThreadDetailsFloat } from './ThreadDetailsCard';
+import { MessageActions } from './MessageActions';
+import { useElementHeight } from '../../hooks/useElementHeight';
 import { WorkBoard } from './WorkBoard';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
 
@@ -47,25 +51,18 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
   const working = isWorkingState(task.state);
   const now = useNow(working);
   if (working) {
-    // Show what the agent is actually doing right now, not a static label.
-    const current = latestActivity(items);
-    const label = task.state === 'VERIFYING' ? 'Verifying results'
-      : current !== undefined ? current.label
-        : task.state === 'RUNNING' ? 'Working' : 'Preparing';
+    // One quiet row while the agent works: three pulsing dots and the elapsed
+    // time. What it is doing is already listed in the steps above.
+    const label = task.state === 'VERIFYING' ? 'Verifying' : 'Working';
     const runningSteps = details?.steps.filter((step) => step.status === 'running') ?? [];
-    const source = runningSteps.length > 1
-      ? `${runningSteps.length} agents`
-      : runningSteps[0]?.assignedAdapterId !== undefined
-        ? agentLabel(runningSteps[0].assignedAdapterId)
-        : undefined;
+    const source = runningSteps.length > 1 ? `${runningSteps.length} agents` : undefined;
+    const elapsed = Math.max(0, now - Date.parse(task.createdAt));
     return (
-      <div className="flex min-w-0 items-center gap-2 px-1 text-[13px]" role="status">
-        <span aria-hidden="true" className="eq-bars shrink-0 text-primary"><span /><span /><span /></span>
-        <span className="min-w-0 truncate text-shimmer font-medium" title={label}>
-          {label}…
-        </span>
-        {source !== undefined ? <span className="shrink-0 rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-foreground/80">{source}</span> : null}
-        <span className="ml-auto shrink-0 text-2xs text-muted-foreground tabular-nums">{formatDuration(now - Date.parse(task.createdAt))}</span>
+      <div className="flex min-w-0 items-center gap-2 px-1 text-[13px] text-muted-foreground" role="status">
+        <span className="sr-only">{label}</span>
+        <span aria-hidden="true" className="working-dots"><span /><span /><span /></span>
+        <span aria-hidden="true" className="tabular-nums">{label} for {formatDuration(elapsed)}</span>
+        {source !== undefined ? <span className="text-muted-foreground/70">· {source}</span> : null}
       </div>
     );
   }
@@ -87,8 +84,10 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
 }
 
 /** One message in the thread: the user's request, the agent's work and reply, and its status. */
-function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
-  task: Task; isLatest: boolean; onDetails: () => void; onLoaded: () => void;
+function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun, onFork }: {
+  task: Task; isLatest: boolean; onDetails?: (() => void) | undefined; onLoaded: () => void;
+  /** Start a new thread from this message; absent for read-only history. */
+  onFork?: (() => void) | undefined;
   /** The previous turn's CLI/model, so a switch between turns shows a handoff divider like chat. */
   previousRun?: TurnRun | undefined;
   onRun?: ((taskId: string, run: TurnRun) => void) | undefined;
@@ -141,7 +140,7 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
         </ul>
       ) : null}
       {details !== null && planned ? <PlanResults task={task} details={details} /> : null}
-      {loading && details === null ? <p role="status" className="px-1 text-xs text-muted-foreground">Loading task details…</p> : null}
+      {loading && details === null && !live ? <p role="status" className="px-1 text-xs text-muted-foreground">Loading task details…</p> : null}
       <StatusLine task={task} details={details} items={items} />
       {total != null && !live ? (
         <p
@@ -158,9 +157,12 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun }: {
           {!planned && details?.steps.length === 1 && runLabel(details.steps[0]) !== undefined ? ` · ${runLabel(details.steps[0])}` : ''}
         </p>
       ) : null}
-      {!isLatest ? (
-        <div className="flex justify-end">
-          <button type="button" onClick={onDetails} className="cursor-pointer text-3xs text-muted-foreground opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100">Inspect this message</button>
+      {!live ? (
+        <div className="-mt-3 flex items-center">
+          <MessageActions text={replyText} at={task.updatedAt} onFork={onFork} className="group-hover/turn:opacity-100" />
+          {!isLatest && onDetails !== undefined ? (
+            <button type="button" onClick={onDetails} className="ms-auto cursor-pointer text-3xs text-muted-foreground opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100">Inspect this message</button>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -207,6 +209,10 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
     const element = scroller.current;
     if (element !== null && stick.current) element.scrollTop = element.scrollHeight;
   }, []);
+  const [dock, dockHeight] = useElementHeight<HTMLDivElement>();
+  useLayoutEffect(() => { follow(); }, [dockHeight, follow]);
+  const root = turns[0] ?? latest;
+  const forkedFrom = isForkRoot(root) ? root.parentTaskId : undefined;
 
   return (
     <div className="thread-layout relative flex min-h-0 min-w-0 flex-1">
@@ -218,6 +224,7 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
         {/* Wide windows: Floating details card (environment and
             subagents). Narrow ones keep the in-flow strip and the plan dock. */}
         {!detailsOpen ? <ThreadDetailsFloat task={latest} project={project} details={latestDetails} /> : null}
+        <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={scroller}
           onScroll={(event) => {
@@ -227,7 +234,9 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
           // Room on the right for the floating details card, so it never covers the chat.
           className={cn('min-h-0 flex-1 overflow-y-auto', !detailsOpen && '@min-[60rem]:pr-[300px]')}
         >
-          <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-8 px-5 pt-6 pb-8">
+          {/* Bottom padding keeps the last message clear of the floating composer. */}
+          <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-8 px-5 pt-6" style={{ paddingBottom: dockHeight + 24 }}>
+            {forkedFrom !== undefined ? <ForkedHistory sourceId={forkedFrom} onLoaded={follow} depth={0} /> : null}
             {turns.map((turn, index) => (
               <Turn
                 key={turn.id}
@@ -235,18 +244,22 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
                 isLatest={index === turns.length - 1}
                 onLoaded={follow}
                 onDetails={() => { useTaskStore.getState().focus(turn.id); openDetails('files'); }}
+                onFork={() => { useUiStore.getState().setForkFrom(turn.id); }}
                 previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined}
                 onRun={reportRun}
               />
             ))}
           </div>
         </div>
-        <div className={cn('shrink-0 px-5', !detailsOpen && '@min-[60rem]:pr-[320px]')}>
+        {/* The composer floats over the end of the conversation; messages
+            scroll underneath it, blurred by its glass. */}
+        <div ref={dock} className={cn('pointer-events-none absolute inset-x-0 bottom-0 px-5 [&>*]:pointer-events-auto', !detailsOpen && '@min-[60rem]:pr-[320px]')}>
           <AgentSetupNotice />
           <Mem0OfflineNotice />
           <PendingApprovalPanel task={latest} />
           <PendingQuestionPanel scopeId={latest.id} />
           <Composer task={latest} currentAgentId={[...(latestDetails?.steps ?? [])].reverse().find((s) => s.assignedAdapterId !== undefined)?.assignedAdapterId} />
+        </div>
         </div>
       </div>
       {detailsOpen ? (
@@ -254,6 +267,95 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
           ? <DetailsPanel task={latest} details={latestDetails} />
           : <InspectedDetailsPanel task={inspected} />
       ) : null}
+    </div>
+  );
+}
+
+/** A fork's first message follows on from a message in another thread. */
+function isForkRoot(task: Task): boolean {
+  return task.parentTaskId !== undefined && task.threadId === task.id;
+}
+
+/** The source thread's messages up to and including `sourceId`, loading them if needed. */
+function useConversationUpTo(sourceId: string): { source: Task | undefined; turns: Task[] } {
+  const tasks = useTaskStore((s) => s.tasks);
+  const source = tasks[sourceId];
+  const key = source !== undefined ? threadKey(source) : null;
+  useEffect(() => {
+    if (source !== undefined) return;
+    void window.conductor.task.get(sourceId).then((task) => { useTaskStore.getState().upsert(task); }).catch(() => undefined);
+  }, [source, sourceId]);
+  useEffect(() => {
+    if (key === null) return;
+    let active = true;
+    void window.conductor.task.thread(key).then((list) => { if (active) useTaskStore.getState().setTasks(list); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [key]);
+  const turns = useMemo(() => (source === undefined || key === null ? [] : threadTasks(tasks, key)
+    .filter((t) => t.createdAt < source.createdAt || t.id === source.id)), [tasks, key, source]);
+  return { source, turns };
+}
+
+/** What a fork carries over: the source conversation, then a divider naming it. */
+function ForkedHistory({ sourceId, onLoaded, depth }: { sourceId: string; onLoaded: () => void; depth: number }): React.JSX.Element | null {
+  const { source, turns } = useConversationUpTo(sourceId);
+  const navigate = useThreadNavigation();
+  if (source === undefined) return null;
+  const root = turns[0];
+  const sourceRoot = root !== undefined && isForkRoot(root) && depth < 4 ? root.parentTaskId : undefined;
+  return (
+    <>
+      {sourceRoot !== undefined ? <ForkedHistory sourceId={sourceRoot} onLoaded={onLoaded} depth={depth + 1} /> : null}
+      {turns.map((turn) => <Turn key={turn.id} task={turn} isLatest={false} onLoaded={onLoaded} />)}
+      {depth === 0 ? (
+        <div className="flex items-center gap-3 text-xs text-muted-foreground" role="separator">
+          <span className="h-px flex-1 bg-border" />
+          <button type="button" onClick={() => { void navigate.openThread(source); }} className="flex cursor-pointer items-center gap-1.5 hover:text-foreground">
+            <ForkIcon size={12} />Forked from {threadTitle(root ?? source)}
+          </button>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Forking a message: the conversation so far, and a composer that starts the new thread. */
+function ForkDraft({ sourceId, project }: { sourceId: string; project: Workspace | undefined }): React.JSX.Element {
+  const { source, turns } = useConversationUpTo(sourceId);
+  const scroller = useRef<HTMLDivElement>(null);
+  const [dock, dockHeight] = useElementHeight<HTMLDivElement>();
+  const toBottom = useCallback(() => {
+    const element = scroller.current;
+    if (element !== null) element.scrollTop = element.scrollHeight;
+  }, []);
+  useLayoutEffect(() => { toBottom(); }, [dockHeight, turns.length, toBottom]);
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="window-header flex shrink-0 items-center gap-2 px-4">
+        <ForkIcon size={14} className="shrink-0 text-muted-foreground" />
+        <h1 className="min-w-0 truncate text-[13px] font-medium text-foreground">
+          Fork of {turns[0] !== undefined ? threadTitle(turns[0]) : 'thread'}
+        </h1>
+        {project !== undefined ? <span className="shrink-0 text-xs text-muted-foreground">· {project.name}</span> : null}
+        <Button size="sm" variant="ghost" className="ms-auto" onClick={() => { useUiStore.getState().setForkFrom(null); }}>Cancel</Button>
+      </header>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-8 px-5 pt-6" style={{ paddingBottom: dockHeight + 24 }}>
+            {turns[0] !== undefined && isForkRoot(turns[0]) ? <ForkedHistory sourceId={turns[0].parentTaskId!} onLoaded={toBottom} depth={1} /> : null}
+            {turns.map((turn) => <Turn key={turn.id} task={turn} isLatest={false} onLoaded={toBottom} />)}
+            <p className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              <span className="flex items-center gap-1.5"><ForkIcon size={12} />Your next message starts a new thread from here</span>
+              <span className="h-px flex-1 bg-border" />
+            </p>
+          </div>
+        </div>
+        <div ref={dock} className="pointer-events-none absolute inset-x-0 bottom-0 px-5 [&>*]:pointer-events-auto">
+          {source !== undefined ? <Composer task={null} fork={source} autoFocus /> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -278,11 +380,14 @@ export function ChatView(): React.JSX.Element {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const project = workspaces.find((w) => w.id === (task?.workspaceId ?? activeWorkspaceId));
   const showThread = task !== null && !draft;
+  const forkFrom = useUiStore((s) => s.forkFrom);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       {workspaces.length === 0 ? (
         <NoProjects />
+      ) : forkFrom !== null ? (
+        <ForkDraft key={forkFrom} sourceId={forkFrom} project={workspaces.find((w) => w.id === useTaskStore.getState().tasks[forkFrom]?.workspaceId) ?? project} />
       ) : showThread ? (
         <Thread key={threadKey(task)} focused={task} project={project} />
       ) : (

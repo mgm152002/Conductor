@@ -8,19 +8,21 @@ import { useSandboxAgentStore } from '../../stores/sandbox-agent-store';
 import { threadKey } from '../../lib/threads';
 import type { TurnRun } from '../../lib/timeline';
 import { isWorkingState, threadTitle } from '../../lib/thread-status';
-import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { MenuSelect } from '../ui/MenuSelect';
 import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
 import { Alert, Button } from '../ui/primitives';
-import { ArrowUpIcon, CheckIcon, ClockIcon, FolderIcon, GlobeIcon, HistoryIcon, PencilIcon, Spinner, SquarePenIcon, StopIcon, TrashIcon, XIcon } from '../ui/icons';
+import { ArrowUpIcon, CheckIcon, ClockIcon, FolderIcon, ForkIcon, GlobeIcon, HistoryIcon, PencilIcon, Spinner, SquarePenIcon, StopIcon, TrashIcon, XIcon } from '../ui/icons';
 import { AgentReply } from './AgentReply';
 import { AgentMark } from '../chat/AgentMark';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
 import { useAgents } from '../../hooks/useAgents';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
 import { message } from './AgentDialog';
+import { MessageActions } from '../chat/MessageActions';
+import { useElementHeight } from '../../hooks/useElementHeight';
+import { useMentions, type MentionCommand } from '../mentions/useMentions';
 
 // The two conversation panes of the Agents screen: a 1:1 chat with one agent
 // (its own thread, continued message by message) and a group chat, where a
@@ -32,16 +34,26 @@ function UserBubble({ text, at, task }: { text: string; at: string; task?: Task 
   const { details } = useTaskDetails(task ?? null);
   const files = details?.attachments ?? [];
   return (
-    <div className="flex flex-col items-end gap-1">
-      {files.length > 0 ? <div className="max-w-[78%]"><AttachmentTray attachments={files} /></div> : null}
-      <div className="max-w-[80%] min-w-0 rounded-2xl bg-message px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words text-message-foreground">{text}</div>
-      <time dateTime={at} className="pr-1 text-3xs text-muted-foreground">{relativeTime(at)}</time>
+    <div className="group/msg flex flex-col items-end gap-1">
+      <div className="max-w-[80%] min-w-0 rounded-2xl bg-message px-4 py-2.5 text-sm leading-relaxed break-words text-message-foreground">
+        {files.length > 0 ? <div className="mb-2"><AttachmentTray attachments={files} /></div> : null}
+        <p className="whitespace-pre-wrap">{text}</p>
+      </div>
+      <MessageActions text={text} at={at} align="end" />
     </div>
   );
 }
 
 /** Message box shared by both panes, with attachments (picked, pasted or dropped). */
-function ChatComposer({ placeholder, disabled, working = false, workingName, onSend, onStop, children }: {
+function ChatComposer({ placeholder, disabled, working = false, workingName, onSend, onStop, onHeight, workspaceId, commands, currentThreadKey, children }: {
+  /** Project whose files @ lists. */
+  workspaceId?: string | null | undefined;
+  /** What / offers besides skills. */
+  commands?: readonly MentionCommand[] | undefined;
+  /** This conversation, left out of @. */
+  currentThreadKey?: string | null | undefined;
+  /** The composer floats over the conversation; its height lets the messages scroll clear of it. */
+  onHeight?: ((height: number) => void) | undefined;
   placeholder: string;
   disabled?: string | undefined;
   /** The agent is still working: the message is steered or queued, as the user picks. */
@@ -61,6 +73,10 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
   const [error, setError] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const draft = useAttachmentDraft();
+  const [dock, dockHeight] = useElementHeight<HTMLDivElement>();
+  const box = useRef<HTMLFormElement>(null);
+  const mentions = useMentions({ text, setText, textarea: area, anchor: box, attachments: draft, workspaceId, commands, currentThreadKey });
+  useLayoutEffect(() => { onHeight?.(dockHeight); }, [dockHeight, onHeight]);
   useLayoutEffect(() => {
     const element = area.current;
     if (element === null) return;
@@ -84,12 +100,12 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
     finally { setStopping(false); }
   };
   return (
-    <div className="mx-auto w-full max-w-3xl shrink-0 px-5 pt-3 pb-4">
-      {error !== null ? <div className="mb-2"><Alert>{error}</Alert></div> : null}
-      {disabled !== undefined ? <p className="mb-2 text-xs text-muted-foreground">{disabled}</p> : null}
-      {children}
+    <div ref={dock} className="pointer-events-none absolute inset-x-0 bottom-0 mx-auto w-full max-w-3xl px-5 pt-3 pb-4 [&>*]:pointer-events-auto">
+      {error !== null ? <div className="composer-glass mb-2 rounded-xl"><Alert>{error}</Alert></div> : null}
+      {mentions.menu}
       <form
-        className="flex flex-col gap-1 rounded-2xl border border-border-strong bg-surface-raised px-3 py-2 focus-within:border-ring/60"
+        ref={box}
+        className="composer-glass flex flex-col gap-1 rounded-2xl border border-border-strong px-3 py-2 shadow-composer focus-within:border-ring/60"
         onSubmit={(event) => { event.preventDefault(); void send(); }}
         onDragOver={draft.onDragOver}
         onDrop={draft.onDrop}
@@ -120,7 +136,8 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
           placeholder={placeholder}
           onChange={(event) => { setText(event.target.value); }}
           onPaste={draft.onPaste}
-          onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }}
+          {...mentions.textareaProps}
+          onKeyDown={(event) => { if (mentions.onKeyDown(event)) return; if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }}
           className="max-h-50 min-h-6 flex-1 resize-none bg-transparent py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
         />
         {working ? (
@@ -149,6 +166,10 @@ function ChatComposer({ placeholder, disabled, working = false, workingName, onS
         </button>
         )}
         </div>
+        {/* Pickers and held messages live inside the box, under the text,
+            so nothing floats loose over the conversation. */}
+        {children !== undefined ? <div className="flex flex-col gap-1.5 border-t border-border/60 pt-2 pb-0.5">{children}</div> : null}
+        {disabled !== undefined ? <p className="pb-0.5 text-xs text-muted-foreground">{disabled}</p> : null}
       </form>
     </div>
   );
@@ -317,6 +338,14 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
   }, [current]);
   const turns = useMemo(() => (current === null ? [] : Object.values(tasks).filter((task) => threadKey(task) === current)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))), [tasks, current]);
+  // Forking: the chat up to this message, and the next message starts a new chat from it.
+  const [forkFrom, setForkFrom] = useState<Task | null>(null);
+  useEffect(() => { setForkFrom(null); }, [current, agent.id]);
+  const shownTurns = forkFrom === null ? turns : turns.filter((task) => task.createdAt < forkFrom.createdAt || task.id === forkFrom.id);
+  const [dockHeight, setDockHeight] = useState(0);
+  const agentCommands = useMemo((): MentionCommand[] => [
+    { name: 'new', description: `Start a new chat with ${agent.name}`, run: () => { setFresh(true); } },
+  ], [agent.name]);
   const scroll = useStickToBottom(current);
   const latest = turns[turns.length - 1];
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -343,6 +372,20 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
   }
 
   async function send(text: string, attachmentIds: string[], mode: QueuedMessageMode): Promise<void> {
+    if (forkFrom !== null) {
+      const created = await window.conductor.task.create({
+        workspaceId: forkFrom.workspaceId, objective: text, forkFromTaskId: forkFrom.id,
+        ...(cli !== '' ? { agentId: cli } : {}),
+        ...(cli !== '' && Object.keys(choice).length > 0 ? { runOptions: { main: choice } } : {}),
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+      });
+      useTaskStore.getState().upsert(created);
+      await useSandboxAgentStore.getState().refresh();
+      setThreadId(threadKey(created));
+      setFresh(false);
+      setForkFrom(null);
+      return;
+    }
     if (latest !== undefined && busy) {
       await window.conductor.task.enqueue({
         taskId: latest.id, objective: text, mode,
@@ -374,7 +417,7 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
   };
 
   return (
-    <section aria-label={`Chat with ${agent.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label={`Chat with ${agent.name}`} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="window-header flex shrink-0 items-center gap-2 border-b border-border px-4">
         <AgentAvatar agent={agent} size={22} mood={latest !== undefined && isWorkingState(latest.state) ? 'working' : 'idle'} />
         <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={agent.description || agent.clis.join(' → ')}>{agent.name}</h2>
@@ -404,25 +447,35 @@ export function AgentChat({ agent, onEdit, onDelete, sandboxRunning }: {
             {agent.description !== '' ? <p className="max-w-sm text-xs text-muted-foreground">{agent.description}</p> : null}
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-6">
-            {turns.map((task, index) => (
+          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 pt-6" style={{ paddingBottom: dockHeight + 24 }}>
+            {shownTurns.map((task, index) => (
               <div key={task.id} className="flex flex-col gap-4">
                 <UserBubble text={task.objective} at={task.createdAt} task={task} />
-                <AgentReply agent={agent} task={task} previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined} onRun={reportRun} />
+                <AgentReply agent={agent} task={task} previousRun={index > 0 ? turnRuns.get(shownTurns[index - 1]!.id) : undefined} onRun={reportRun}
+                  {...(forkFrom === null && !isWorkingState(task.state) ? { onFork: () => { setForkFrom(task); } } : {})} />
               </div>
             ))}
+            {forkFrom !== null ? (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <span className="flex items-center gap-1.5"><ForkIcon size={12} />Your next message starts a new chat from here</span>
+                <button type="button" onClick={() => { setForkFrom(null); }} className="cursor-pointer underline hover:text-foreground">Cancel</button>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
-      <ChatComposer placeholder={busy ? `Steer ${agent.name}, or queue a follow-up` : `Message ${agent.name}`} working={busy} workingName={agent.name} onSend={send} onStop={stopWork}>
+      <ChatComposer placeholder={forkFrom !== null ? `Message ${agent.name} in a new chat` : busy ? `Steer ${agent.name}, or queue a follow-up` : `Message ${agent.name}`} working={busy && forkFrom === null} workingName={agent.name} onSend={send} onStop={stopWork} onHeight={setDockHeight}
+        workspaceId={chatProject} currentThreadKey={current} commands={agentCommands}>
         {queued.length > 0 ? (
-          <ul aria-label="Waiting messages" className="mb-2 flex flex-col gap-1.5">
+          <ul aria-label="Waiting messages" className="flex flex-col gap-1.5">
             {queued.map((item) => (
               <HeldMessage key={item.id} mode={item.mode} label={item.objective} starting={item.status === 'dispatching'} onCancel={() => { cancelQueued(item.id); }} />
             ))}
           </ul>
         ) : null}
-        <div className="mb-2 flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectPicker value={chatProject} onChange={setProjectId} locked={turns.length > 0} />
           <MenuSelect
             label="CLI"
@@ -459,6 +512,7 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
   const { projectId, setProjectId } = useConversationProject(`group:${group.id}`);
   const [messages, setMessages] = useState<AgentGroupMessage[]>([]);
   const [targets, setTargets] = useState<string[]>([]);
+  const [groupDockHeight, setGroupDockHeight] = useState(0);
   // The CLI and model for the next message, remembered per group. '' is Auto:
   // each member runs on its own first CLI. Otherwise members that have the
   // chosen CLI run on it; the rest keep their own. A CLI that runs out of
@@ -527,7 +581,7 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
   }
 
   return (
-    <section aria-label={`Group chat ${group.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section aria-label={`Group chat ${group.name}`} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="window-header flex shrink-0 items-center gap-2 border-b border-border px-4">
         <GroupAvatar members={members} size={22} />
         <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground" title={members.map((member) => member.name).join(', ')}>{group.name}</h2>
@@ -543,7 +597,7 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
             <p className="text-sm font-semibold text-foreground">{group.name}</p>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 py-6">
+          <div className="mx-auto flex max-w-3xl flex-col gap-6 px-5 pt-6" style={{ paddingBottom: groupDockHeight + 24 }}>
             {messages.map((item) => (
               <div key={item.id} className="flex flex-col gap-4">
                 <UserBubble text={item.text} at={item.createdAt} task={tasks[Object.values(item.replies)[0] ?? '']} />
@@ -571,8 +625,8 @@ export function GroupChat({ group, agents, sandboxRunning, onDelete }: {
         )}
       </div>
       <ChatComposer placeholder={targets.length === 0 ? `Message everyone in ${group.name}` : `Message ${targets.map((id) => members.find((member) => member.id === id)?.name).join(', ')}`}
-        working={busyMembers.length > 0 || working} workingName={busyMembers.length === 1 ? busyMembers[0]!.name : 'the members still working'} onSend={send} onStop={stopGroup}>
-        <div className="mb-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Send to">
+        working={busyMembers.length > 0 || working} workingName={busyMembers.length === 1 ? busyMembers[0]!.name : 'the members still working'} onSend={send} onStop={stopGroup} onHeight={setGroupDockHeight} workspaceId={projectId}>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Send to">
           <ProjectPicker value={projectId} onChange={setProjectId} locked={messages.length > 0} />
           <MenuSelect
             label="CLI"

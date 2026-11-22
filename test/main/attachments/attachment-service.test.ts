@@ -48,6 +48,19 @@ describe('clipboard attachment ingestion', () => {
   });
 });
 
+describe('text attachment ingestion', () => {
+  it('stores app-written Markdown bytes but rejects binary data with a text name', async () => {
+    const service = await setup();
+    const ok = await service.ingestBytes({ name: 'thread-fix-login.md', mimeType: 'text/markdown', bytes: new TextEncoder().encode('# Thread: Fix login\n\n## User\n\nhi') });
+    expect(ok.rejected).toEqual([]);
+    expect(ok.attachments).toEqual([expect.objectContaining({ name: 'thread-fix-login.md', kind: 'markdown' })]);
+
+    const binary = await service.ingestBytes({ name: 'notes.md', mimeType: 'text/markdown', bytes: new Uint8Array([0x66, 0x00, 0xff, 0xfe]) });
+    expect(binary.attachments).toEqual([]);
+    expect(binary.rejected[0]).toMatchObject({ fileName: 'notes.md', code: 'unsupported' });
+  });
+});
+
 describe('zip attachments', () => {
   it('accepts a zip, keeps it as an archive, and delivers its contents as text with the file itself', async () => {
     const service = await setup();

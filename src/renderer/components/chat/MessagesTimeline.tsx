@@ -5,7 +5,11 @@ import { cn } from '../../lib/cn';
 // The markdown engine is the heaviest renderer dependency and no first
 // paint needs it: replies stream in as plain text, then swap to rendered
 // markdown when the chunk arrives (and it is cached for the session).
-const Markdown = lazy(() => import('./Markdown').then((m) => ({ default: m.Markdown })));
+const loadMarkdown = (): Promise<typeof import('./Markdown')> => import('./Markdown');
+const Markdown = lazy(() => loadMarkdown().then((m) => ({ default: m.Markdown })));
+// Fetch it as soon as a thread opens, so the first streamed reply does not
+// jump from plain text to formatted markdown mid-stream.
+void loadMarkdown();
 
 function MarkdownText({ text, live = false }: { text: string; live?: boolean }): React.JSX.Element {
   return (
@@ -16,10 +20,11 @@ function MarkdownText({ text, live = false }: { text: string; live?: boolean }):
 }
 import { WorkIcon } from './WorkIcon';
 import {
-  AlertCircleIcon, CheckIcon, ChevronRightIcon, ListChecksIcon, SparklesIcon, Spinner, TerminalIcon, XIcon,
+  AlertCircleIcon, CheckIcon, ChevronRightIcon, ListChecksIcon, SparklesIcon, TerminalIcon, XIcon,
 } from '../ui/icons';
 import { AttachmentTray } from '../attachments';
 import { HandoffDivider } from './AgentMark';
+import { MessageActions } from './MessageActions';
 
 // Renders the chat timeline built by lib/timeline: right-aligned user bubble,
 // collapsible "work log" groups, assistant prose, errors, and diagnostics.
@@ -27,14 +32,14 @@ import { HandoffDivider } from './AgentMark';
 function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }): React.JSX.Element {
   const checks = item.criteria.filter((criterion) => criterion !== 'response: nonempty');
   return (
-    <div className="group flex flex-col items-end gap-1">
+    <div className="group/msg flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] min-w-0 rounded-2xl bg-message px-4 py-2.5 text-message-foreground">
-        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{item.text}</p>
         {item.attachments.length > 0 ? (
-          <div className="mt-3">
+          <div className="mb-2">
             <AttachmentTray attachments={item.attachments} />
           </div>
         ) : null}
+        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap">{item.text}</p>
         {checks.length > 0 ? (
           <ul className="mt-2 flex flex-wrap gap-1" aria-label="Acceptance criteria">
             {checks.map((criterion, index) => (
@@ -46,23 +51,19 @@ function UserMessage({ item }: { item: Extract<TimelineItem, { kind: 'user' }> }
           </ul>
         ) : null}
       </div>
-      <time dateTime={item.at} className="pe-1 text-3xs text-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100">
-        {new Date(item.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-      </time>
+      <MessageActions text={item.text} at={item.at} align="end" />
     </div>
   );
 }
 
-function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JSX.Element {
+function WorkRow({ entry }: { entry: WorkEntry }): React.JSX.Element {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const expandable = entry.detail !== undefined && entry.detail !== '';
-  // A running command/tool shows its output or arguments without a click, so
-  // live threads explain what the agent is actually doing.
-  const open = manualOpen ?? (live && entry.tone === 'running');
-  // Only the live part of a thread animates. A step still marked running in a
-  // finished or interrupted turn (or in an earlier group of a live one) is stale.
+  // Rows stay still while the agent works: no auto-expanding output, no
+  // spinners. The single "Working for…" row under the turn shows progress.
+  const open = manualOpen ?? false;
   const toneIcon = entry.tone === 'running'
-    ? (live ? <Spinner size={12} className="text-info" /> : null)
+    ? null
     : entry.tone === 'error'
       ? <XIcon size={12} className="text-destructive" />
       : entry.tone === 'success' && (entry.icon === 'terminal' || entry.icon === 'tool')
@@ -72,7 +73,7 @@ function WorkRow({ entry, live }: { entry: WorkEntry; live: boolean }): React.JS
     <>
       <WorkIcon icon={entry.icon} size={14} className="shrink-0 text-muted-foreground" />
       {entry.source !== undefined ? <span className="shrink-0 rounded-full bg-accent px-1.5 py-px text-3xs font-medium text-foreground/80">{entry.source}</span> : null}
-      <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'running' && live ? 'text-shimmer' : entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
+      <span className={cn('min-w-0 flex-1 truncate text-left', entry.icon === 'terminal' ? 'font-mono text-xs' : 'text-[13px]', entry.tone === 'error' ? 'text-destructive-foreground' : 'text-foreground/80')}>{entry.label}</span>
       {toneIcon}
       {expandable ? <ChevronRightIcon size={12} className={cn('shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} /> : null}
     </>
@@ -123,7 +124,7 @@ function WorkGroup({ item, live }: { item: Extract<TimelineItem, { kind: 'work' 
           {!expanded ? <span className="ms-auto min-w-0 truncate ps-4 text-xs text-muted-foreground/70">{entries.length} steps · {last.label}</span> : null}
         </button>
       ) : null}
-      {expanded ? <ul className="flex flex-col py-1">{entries.map((entry) => <WorkRow key={entry.id} entry={entry} live={live} />)}</ul> : null}
+      {expanded ? <ul className="flex flex-col py-1">{entries.map((entry) => <WorkRow key={entry.id} entry={entry} />)}</ul> : null}
     </div>
   );
 }
@@ -171,7 +172,6 @@ export function MessagesTimeline({ items, live }: { items: TimelineItem[]; live:
           {item.kind === 'assistant' ? (
             <div className="px-1">
               <MarkdownText text={item.text} live={live && index === items.length - 1} />
-              {live && index === items.length - 1 ? <span aria-hidden="true" className="animate-status-pulse ml-0.5 inline-block h-3.5 w-[7px] translate-y-0.5 rounded-[2px] bg-primary/70" /> : null}
             </div>
           ) : null}
           {item.kind === 'error' && item.stale === true ? (

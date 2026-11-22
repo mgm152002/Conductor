@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import type { Store } from '../db/types';
 import type { Task } from '@shared/domain';
 import type {
-  CreatePrResult, GitHubConnectionStatus, GitHubRepoRef, PrMergeMethod, PrReviewEvent,
+  CreatePrResult, GitHubConnectionStatus, GitHubRepoRef, IssueContext, IssueList, IssueRecord, PrMergeMethod, PrReviewEvent,
   PullRequestBundle, PullRequestRecord, PullRequestState,
 } from '@shared/github-contract';
 import type { WorkspaceService } from './workspace-service';
@@ -219,12 +219,12 @@ export class GitHubService {
     };
   }
 
-  private async api<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+  private async api<T>(token: string | undefined, path: string, init?: RequestInit): Promise<T> {
     const response = await this.fetchFn(`${API}${path}`, {
       ...init,
       headers: {
         accept: 'application/vnd.github+json',
-        authorization: `Bearer ${token}`,
+        ...(token !== undefined ? { authorization: `Bearer ${token}` } : {}),
         'x-github-api-version': '2022-11-28',
         ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}),
       },
@@ -234,7 +234,8 @@ export class GitHubService {
     try { body = text === '' ? null : JSON.parse(text); } catch { body = null; }
     if (!response.ok) {
       const message = (body as { message?: string } | null)?.message ?? text.slice(0, 200);
-      throw new Error(`GitHub API ${response.status}: ${message}`.replaceAll(token, '***'));
+      const error = `GitHub API ${response.status}: ${message}`;
+      throw new Error(token !== undefined ? error.replaceAll(token, '***') : error);
     }
     return body as T;
   }
@@ -603,6 +604,89 @@ export class GitHubService {
     ).get(url, url) as { id: string } | undefined;
     if (known === undefined) throw new Error('Unknown pull request link');
     await this.deps.openExternal(url);
+  }
+
+  // -- issues -----------------------------------------------------------------
+
+  /** The repo and token for reading issues; public repositories work without a token. */
+  private async issueAccess(workspaceId: string): Promise<{ repo: GitHubRepoRef; token: string | undefined }> {
+    const workspace = this.deps.workspaces.get(workspaceId);
+    if (workspace === undefined) throw new Error('Project not found');
+    const repo = await this.repoFor(workspace.rootPath);
+    if (repo === null) throw new Error('This project has no GitHub `origin` remote, so it has no issues to show.');
+    return { repo, token: await this.token(workspaceId) };
+  }
+
+  private issueThreads(workspaceId: string): Map<number, string[]> {
+    const rows = this.deps.store.db.prepare(
+      `SELECT l.number, l.thread_key FROM github_issue_threads l
+        WHERE l.workspace_id = ? AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = l.thread_key)
+        ORDER BY l.created_at DESC`,
+    ).all(workspaceId) as { number: number; thread_key: string }[];
+    const byIssue = new Map<number, string[]>();
+    for (const row of rows) byIssue.set(row.number, [...(byIssue.get(row.number) ?? []), row.thread_key]);
+    return byIssue;
+  }
+
+  async listIssues(workspaceId: string, state: 'open' | 'closed' | 'all'): Promise<IssueList> {
+    const workspace = this.deps.workspaces.get(workspaceId);
+    if (workspace === undefined) throw new Error('Project not found');
+    const repo = await this.repoFor(workspace.rootPath);
+    const token = await this.token(workspaceId);
+    if (repo === null) return { repo: null, connected: token !== undefined, issues: [] };
+    interface ApiIssue {
+      number: number; title: string; state: string; html_url: string; comments?: number;
+      created_at: string; updated_at: string; user?: { login?: string };
+      labels?: ({ name?: string; color?: string } | string)[]; pull_request?: unknown;
+    }
+    const raw = await this.api<ApiIssue[]>(token, `/repos/${repo.fullName}/issues?state=${state}&sort=updated&direction=desc&per_page=100`);
+    const threads = this.issueThreads(workspaceId);
+    const issues = raw.filter((issue) => issue.pull_request === undefined).map((issue): IssueRecord => ({
+      number: issue.number,
+      title: issue.title,
+      state: issue.state === 'closed' ? 'closed' : 'open',
+      url: issue.html_url,
+      author: issue.user?.login ?? 'unknown',
+      labels: (issue.labels ?? []).map((label) => typeof label === 'string' ? { name: label, color: '' } : { name: label.name ?? '', color: label.color ?? '' }).filter((label) => label.name !== ''),
+      comments: issue.comments ?? 0,
+      createdAt: issue.created_at,
+      updatedAt: issue.updated_at,
+      threadKeys: threads.get(issue.number) ?? [],
+    }));
+    return { repo, connected: token !== undefined, issues };
+  }
+
+  async issueContext(workspaceId: string, number: number): Promise<IssueContext> {
+    const { repo, token } = await this.issueAccess(workspaceId);
+    interface ApiUser { login?: string }
+    const issue = await this.api<{ number: number; title: string; body?: string | null; html_url: string; state: string; user?: ApiUser; labels?: ({ name?: string } | string)[]; pull_request?: unknown }>(
+      token, `/repos/${repo.fullName}/issues/${number}`,
+    );
+    if (issue.pull_request !== undefined) throw new Error(`#${number} is a pull request, not an issue`);
+    const comments = await this.api<{ body?: string | null; created_at: string; user?: ApiUser }[]>(
+      token, `/repos/${repo.fullName}/issues/${number}/comments?per_page=100`,
+    ).catch(() => []);
+    const labels = (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name ?? '').filter((name) => name !== '');
+    const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max)}… (truncated)` : text);
+    const parts = [
+      `# Issue #${issue.number}: ${issue.title}`,
+      `${repo.fullName} · ${issue.state} · opened by @${issue.user?.login ?? 'unknown'}${labels.length > 0 ? ` · labels: ${labels.join(', ')}` : ''}\n${issue.html_url}`,
+      `## Description\n\n${clip((issue.body ?? '').trim() || '(no description)', 20_000)}`,
+      ...(comments.length > 0 ? [`## Comments\n\n${comments.map((c) => `### @${c.user?.login ?? 'unknown'} · ${c.created_at.slice(0, 10)}\n\n${clip((c.body ?? '').trim(), 4_000)}`).join('\n\n')}`] : []),
+    ];
+    return { number: issue.number, title: issue.title, url: issue.html_url, markdown: `${clip(parts.join('\n\n'), 60_000)}\n` };
+  }
+
+  linkIssue(workspaceId: string, number: number, threadKey: string): void {
+    const task = this.deps.getTask(threadKey);
+    if (task === undefined || task.workspaceId !== workspaceId) throw new Error('That thread is not in this project');
+    this.deps.store.db.prepare('INSERT OR IGNORE INTO github_issue_threads (workspace_id, number, thread_key, created_at) VALUES (?, ?, ?, ?)')
+      .run(workspaceId, number, task.threadId ?? task.id, new Date().toISOString());
+  }
+
+  async openIssue(workspaceId: string, number: number): Promise<void> {
+    const { repo } = await this.issueAccess(workspaceId);
+    await this.deps.openExternal(`https://github.com/${repo.fullName}/issues/${number}`);
   }
 
   /** Fire-and-forget hook for task completion; failures stay visible in Settings. */
