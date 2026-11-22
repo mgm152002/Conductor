@@ -19,7 +19,7 @@ function setup(rel: unknown, dl: Response = new Response(bytes)) {
   const launched: string[][] = []; const quit = vi.fn();
   const fetchMock = vi.fn(async (url: string | URL) => String(url).includes('api.github.com') ? Response.json(rel) : dl);
   const service = new UpdateService({
-    currentVersion: '0.6.1', isPackaged: true, arch: 'arm64', pid: 42, quit,
+    currentVersion: '0.6.1', isPackaged: true, arch: 'arm64', platform: 'darwin', pid: 42, quit,
     execPath: join(apps, 'Conductor.app/Contents/MacOS/Conductor'), fetch: fetchMock as unknown as typeof fetch,
     launchInstaller: (a) => launched.push(a), tempRoot: root,
   });
