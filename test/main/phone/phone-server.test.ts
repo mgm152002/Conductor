@@ -197,4 +197,31 @@ describe('phone work list, uploads and live watch', () => {
     expect(calls.at(-1)!.payload).toMatchObject({ name: 'a b.png', mimeType: 'image/png' });
     expect((await fetch(`${base}/api/upload`, { method: 'POST', body: 'x' })).status).toBe(401);
   });
+
+  it('keeps watch requests, and the sandbox API key, on the sandbox host', async () => {
+    const { createServer, request } = await import('node:http');
+    const hits: Array<{ who: string; url: string; key: unknown }> = [];
+    const listen = (who: string) => new Promise<{ port: number; close: () => void }>((resolve) => {
+      const srv = createServer((req, res) => { hits.push({ who, url: req.url ?? '', key: req.headers['x-aio-api-key'] }); res.end('ok'); });
+      srv.listen(0, '127.0.0.1', () => resolve({ port: (srv.address() as { port: number }).port, close: () => srv.close() }));
+    });
+    const sandbox = await listen('sandbox');
+    const outsider = await listen('outsider');
+    try {
+      const s = new PhoneServer({ invoke: async () => ({ ok: true, value: null }), sandboxEndpoint: () => ({ baseUrl: `http://127.0.0.1:${sandbox.port}`, apiKey: 'sk-sandbox' }) });
+      base = `http://127.0.0.1:${await s.listen()}`; server = s;
+      const token = await pair(s);
+      const { src } = ((await (await post('/api/watch', { agentId: 'agent-1' }, token)).json()) as { value: { src: string } }).value;
+      const prefix = src.split('/vnc/')[0]!;
+      // Raw request so nothing normalises the double slash before the server sees it.
+      const get = (path: string) => new Promise<number>((resolve, reject) => {
+        request(`${base}${path}`, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); }).on('error', reject).end();
+      });
+      expect(await get(`${prefix}/vnc/index.html?a=1`)).toBe(200);
+      expect(await get(`${prefix}//127.0.0.1:${outsider.port}/steal`)).toBe(200);
+      expect(hits.filter((h) => h.who === 'outsider')).toEqual([]);
+      expect(hits.map((h) => h.url)).toEqual(['/vnc/index.html?a=1', `/127.0.0.1:${outsider.port}/steal`]);
+      expect(hits.every((h) => h.key === 'sk-sandbox')).toBe(true);
+    } finally { sandbox.close(); outsider.close(); }
+  });
 });
