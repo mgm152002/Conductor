@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentType } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import {
-  BotIcon, CodeXmlIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, PaletteIcon, PlugIcon, SearchIcon, ShieldIcon, XIcon,
+  BotIcon, CodeXmlIcon, GitBranchIcon, GlobeIcon, KeyRoundIcon, PaletteIcon, PlugIcon, RefreshCwIcon, SearchIcon, ShieldIcon, XIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { AgentModels } from '../components/settings/AgentModels';
@@ -9,6 +9,7 @@ import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 import { BrowserSettings } from '../components/settings/BrowserSettings';
 import { ExecutionSettings } from '../components/settings/ExecutionSettings';
 import { GitHubSettings } from '../components/settings/GitHubSettings';
+import { UpdateSettings } from '../components/settings/UpdateSettings';
 import { IntegrationSettings } from '../components/settings/IntegrationSettings';
 import { SettingsGroup, SettingsPage, SettingsSection } from '../components/settings/SettingsLayout';
 import { WorkspaceManager } from '../components/settings/WorkspaceManager';
@@ -39,6 +40,7 @@ const GROUPS: Array<{ heading?: string; pages: SettingsPageDef[] }> = [
     pages: [
       { id: 'appearance', label: 'Appearance', Icon: PaletteIcon, keywords: 'theme dark light color scheme', Component: AppearanceSettings },
       { id: 'execution', label: 'Execution & data', Icon: ShieldIcon, keywords: 'permissions consent data delete privacy', Component: ExecutionSettings },
+      { id: 'updates', label: 'Updates', Icon: RefreshCwIcon, keywords: 'update upgrade version release download install', Component: UpdateSettings },
     ],
   },
   {
