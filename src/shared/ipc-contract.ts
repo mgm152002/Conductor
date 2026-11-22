@@ -7,6 +7,7 @@ import { INTEGRATION_SCHEMAS } from './integrations-contract';
 import { CHAT_SCHEMAS } from './chat-contract';
 import { ICON_SCHEMAS, IconDataUrl } from './icon-contract';
 import { GITHUB_SCHEMAS } from './github-contract';
+import { UPDATE_SCHEMAS } from './update-contract';
 import { AttachmentIdsSchema } from './attachments';
 
 // The single source of truth for the IPC surface. Every invoke channel has a
@@ -201,6 +202,7 @@ export type Appearance = z.infer<typeof AppearanceSchema>;
 
 export const INVOKE_SCHEMAS = {
   ...GITHUB_SCHEMAS,
+  ...UPDATE_SCHEMAS,
   ...CHAT_SCHEMAS,
   ...KNOWLEDGE_SCHEMAS,
   ...AUTOMATION_SCHEMAS,

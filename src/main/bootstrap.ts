@@ -53,6 +53,8 @@ import { evidenceEvaluator } from './orchestrator/evidence-evaluator';
 import { registerKnowledgeHandlers } from './ipc/register-knowledge';
 import { GitHubService } from './domain/github-service';
 import { registerGitHubHandlers } from './ipc/register-github';
+import { registerUpdateHandlers } from './ipc/register-update';
+import { UpdateService } from './domain/update-service';
 import { registerAutomationHandlers } from './ipc/register-automation';
 import { SelfLearningEngine } from './domain/self-learning-service';
 import { LearningLoop } from './domain/learning-loop';
@@ -797,6 +799,10 @@ export async function bootstrap(): Promise<AppServices> {
   });
 
   registerGitHubHandlers(router, github);
+  registerUpdateHandlers(router, new UpdateService({
+    currentVersion: app.getVersion(), isPackaged: app.isPackaged, execPath: app.getPath('exe'),
+    arch: process.arch, pid: process.pid, quit: () => { app.quit(); },
+  }));
   registerKnowledgeHandlers({router,store,context,memory});
   registerConnectorHandlers({router,runtime:connectorRuntime});
   // Control from a phone (ngrok tunnel + mobile page): off until the user turns it on.

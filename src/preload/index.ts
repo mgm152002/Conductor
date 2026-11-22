@@ -37,6 +37,7 @@ import type { ChatBridge, ChatConversation } from '@shared/chat-contract';
 import type { QueuedMessage, QueuedMessageMode } from '@shared/message-queue';
 import type { IconBridge } from '@shared/icon-contract';
 import type { GitHubBridge } from '@shared/github-contract';
+import type { UpdateBridge } from '@shared/update-contract';
 import type { ArtifactImageData, GeneratedArtifactSpec, GeneratedFile } from '@shared/generated-artifacts';
 import type { FileBytes, FilePreview } from '@shared/file-preview';
 
@@ -268,8 +269,14 @@ const github: GitHubBridge = {
   setPrState: (input) => invoke('github.setPrState', input),
 };
 
+const updates: UpdateBridge = {
+  check: () => invoke('update.check'),
+  install: () => invoke('update.install'),
+};
+
 const conductor = {
   github,
+  updates,
   chat,
   icon,
   attachment,

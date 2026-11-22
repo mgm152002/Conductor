@@ -419,16 +419,17 @@ export class ChatService {
       const user = history[i];
       const reply = history[i + 1];
       if (user?.role === 'user' && reply?.role === 'assistant') {
-        // Attachment-bearing exchanges stay visible in the UI, but do not
-        // enter later agent prompts. Their text can refer to files that are no
-        // longer current and otherwise distract from the new attachment.
-        if (user.attachments.length === 0) {
-          conversation.push({
-            objective: user.content,
-            reply: reply.content,
-            state: reply.status,
-          });
-        }
+        // Attachment-bearing exchanges stay in the history too: the agent's
+        // earlier reply (e.g. a score for an uploaded assignment) is the only
+        // record of the file it can no longer read. Only the file's metadata is
+        // carried, never its on-disk copy, so the agent does not mistake an old
+        // file for the current turn's attachment.
+        conversation.push({
+          objective: user.content,
+          reply: reply.content,
+          state: reply.status,
+          ...(user.attachments.length > 0 ? { attachments: user.attachments } : {}),
+        });
         i += 1;
       }
     }

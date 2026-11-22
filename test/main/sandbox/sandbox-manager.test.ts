@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SandboxManager, SANDBOX_IMAGE, agentVolume, browserVolume, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
+import { SandboxManager, SANDBOX_IMAGE, agentVolume, browserVolume, dockerSearchDirs, parseMemUsage, type DockerRunner } from '@main/sandbox/sandbox-manager';
 import { SandboxAgentService, groupSandboxKey } from '@main/sandbox/sandbox-agents';
 import { SandboxGateway } from '@main/sandbox/sandbox-gateway';
 import { SqliteStore } from '@main/db/store';
@@ -602,5 +602,13 @@ describe('hidden agent workspace', () => {
     expect(workspaces.get(id)?.rootPath).toBe(join(dir, 'agent-space'));
     store.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('dockerSearchDirs', () => {
+  it('finds the docker CLI of OrbStack, Rancher Desktop and Colima outside the Finder PATH', () => {
+    expect(dockerSearchDirs('/Users/me')).toEqual(expect.arrayContaining([
+      '/Users/me/.orbstack/bin', '/Applications/OrbStack.app/Contents/MacOS/xbin', '/Users/me/.rd/bin', '/Users/me/.colima/bin',
+    ]));
   });
 });
