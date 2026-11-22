@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { ATTACHMENT_KIND_LABELS, formatAttachmentSize, type AttachmentPreview, type AttachmentSummary } from '@shared/attachments';
 import { cn } from '../../lib/cn';
 import { DocumentIcon, ImageIcon, XIcon } from '../ui/icons';
-import { Button } from '../ui/primitives';
 
 export interface AttachmentCardProps {
   attachment: AttachmentSummary;
@@ -47,16 +46,33 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
   const image = thumbnail?.id === attachment.id ? thumbnail.url : null;
   const isImage = attachment.kind === 'image';
 
-  if (display === 'history' && isImage) {
+  const remove = onRemove !== undefined ? (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => { onRemove(attachment.id); }}
+      aria-label={`Remove ${attachment.name}`}
+      className="absolute top-1 right-1 flex size-5 cursor-pointer items-center justify-center rounded-full bg-background/90 text-foreground opacity-0 shadow-sm transition-opacity group-hover/att:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed"
+    >
+      <XIcon size={11} />
+    </button>
+  ) : null;
+
+  // Images: a plain thumbnail. In the composer it is a small square; in a
+  // sent message it is a larger preview inside the bubble.
+  if (isImage) {
+    const history = display === 'history';
     return (
-      <figure className="group/image w-fit min-w-0 max-w-full">
-        {/* A plain button, not the shared Button: its size classes carry
-            rounded-full, which wrapped the image in a pill-shaped frame. */}
+      <div className="group/att relative w-fit">
         <button
           type="button"
-          className={cn('flex h-auto w-fit max-w-full min-w-0 cursor-pointer items-start justify-start overflow-hidden rounded-xl border border-border bg-card p-1 text-left transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring', image === null && 'gap-2 px-2.5 py-2')}
           onClick={() => { onPreview(attachment); }}
           aria-label={`Preview ${attachment.name}`}
+          title={`${attachment.name} · ${formatAttachmentSize(attachment.sizeBytes)}`}
+          className={cn(
+            'block cursor-pointer overflow-hidden rounded-lg border border-border/70 bg-muted/40 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
+            history ? 'max-w-[min(16rem,100%)]' : 'size-16',
+          )}
         >
           {image !== null
             ? <img
@@ -65,39 +81,37 @@ export function AttachmentCard({ attachment, onPreview, onRemove, disabled, disp
                 loading="lazy"
                 decoding="async"
                 draggable={false}
-                className="block h-auto max-h-48 w-auto min-w-0 max-w-[min(18rem,100%)] rounded-md object-contain"
+                className={history ? 'block h-auto max-h-56 w-auto max-w-full object-contain' : 'size-full object-cover'}
                 onError={() => { setThumbnail(null); setFailed(true); }}
               />
-            : failed
-              ? <ImageIcon size={24} className="shrink-0 text-muted-foreground" />
-              : <span className="flex size-16 items-center justify-center rounded-md bg-muted/50"><ImageIcon size={20} className="text-muted-foreground" /></span>}
-          {image === null ? (
-            <span className="min-w-0">
-              <span className="block max-w-52 truncate text-xs text-foreground" title={attachment.name}>{attachment.name}</span>
-              <span className="block text-2xs text-muted-foreground">{failed ? 'Preview unavailable' : 'Loading preview…'}</span>
-            </span>
-          ) : null}
+            : <span className={cn('flex items-center justify-center text-muted-foreground', history ? 'size-24' : 'size-full')}>
+                <ImageIcon size={18} className={failed ? undefined : 'opacity-60'} />
+              </span>}
         </button>
-        {image !== null ? (
-          <figcaption className="mt-1 flex max-w-full items-center gap-1 px-0.5 text-2xs text-muted-foreground">
-            <ImageIcon size={10} className="shrink-0" />
-            <span className="min-w-0 truncate" title={attachment.name}>{attachment.name}</span>
-            <span className="shrink-0 text-muted-foreground/70">· {formatAttachmentSize(attachment.sizeBytes)}</span>
-          </figcaption>
-        ) : null}
-        {onRemove !== undefined ? <Button variant="ghost" size="icon-sm" disabled={disabled} onClick={() => { onRemove(attachment.id); }} aria-label={`Remove ${attachment.name}`}><XIcon size={14} /></Button> : null}
-      </figure>
+        {remove}
+      </div>
     );
   }
 
-  return <div className="flex max-w-full items-center gap-1 rounded-lg border border-border bg-card p-1">
-    <Button variant="ghost" className="h-auto min-w-0 justify-start gap-2 px-2 py-1.5 text-left" onClick={() => { onPreview(attachment); }} aria-label={`Preview ${attachment.name}`}>
-      {image !== null
-        ? <img src={image} alt={`${attachment.name} thumbnail`} loading="lazy" decoding="async" draggable={false} className="size-9 shrink-0 rounded object-cover" onError={() => { setThumbnail(null); setFailed(true); }} />
-        : isImage ? <ImageIcon size={24} /> : <DocumentIcon size={24} />}
-      <span className="min-w-0"><span className="block max-w-52 truncate text-xs text-foreground" title={attachment.name}>{attachment.name}</span>
-        <span className="block text-2xs text-muted-foreground">{ATTACHMENT_KIND_LABELS[attachment.kind]} · {formatAttachmentSize(attachment.sizeBytes)}</span></span>
-    </Button>
-    {onRemove && <Button variant="ghost" size="icon-sm" disabled={disabled} onClick={() => { onRemove(attachment.id); }} aria-label={`Remove ${attachment.name}`}><XIcon size={14} /></Button>}
-  </div>;
+  // Other files: a slim chip with the name and size.
+  return (
+    <div className="group/att relative w-fit max-w-full">
+      <button
+        type="button"
+        onClick={() => { onPreview(attachment); }}
+        aria-label={`Preview ${attachment.name}`}
+        className={cn(
+          'flex max-w-64 min-w-0 cursor-pointer items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2.5 text-left hover:bg-accent focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
+          display === 'history' ? 'h-10' : 'h-16',
+        )}
+      >
+        <DocumentIcon size={16} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0">
+          <span className="block truncate text-xs text-foreground" title={attachment.name}>{attachment.name}</span>
+          <span className="block text-3xs text-muted-foreground">{ATTACHMENT_KIND_LABELS[attachment.kind]} · {formatAttachmentSize(attachment.sizeBytes)}</span>
+        </span>
+      </button>
+      {remove}
+    </div>
+  );
 }

@@ -123,11 +123,7 @@ export function codexSessionId(store: Store, taskId: string): string | undefined
 export function threadHistory(store: Store, task: Task): ThreadTurn[] {
   if (task.parentTaskId === undefined) return [];
   const threadId = task.threadId ?? task.parentTaskId;
-  const rows = store.db.prepare(
-    `SELECT id, objective, state FROM tasks
-      WHERE (thread_id = ? OR id = ?) AND id != ? AND created_at <= ?
-      ORDER BY created_at ASC, rowid ASC`,
-  ).all(threadId, threadId, task.id, task.createdAt) as { id: string; objective: string; state: Task['state'] }[];
+  const rows = conversationRows(store, threadId, task.id, task.createdAt, 0);
   return rows.slice(-MAX_THREAD_TURNS).map((row) => {
     const reply = replyFor(store, row.id);
     return {
@@ -138,12 +134,47 @@ export function threadHistory(store: Store, task: Task): ThreadTurn[] {
   });
 }
 
+type TurnRow = { id: string; objective: string; state: Task['state'] };
+/** How many forks deep the history follows back. */
+const MAX_FORK_DEPTH = 8;
+
+/**
+ * A thread's turns up to `before` (excluding `excludeId`), oldest first. A
+ * forked thread's root follows on from a task in another thread, so that
+ * thread's turns up to and including the fork point come first.
+ */
+function conversationRows(store: Store, threadId: string, excludeId: string, before: string, depth: number): TurnRow[] {
+  const own = store.db.prepare(
+    `SELECT id, objective, state FROM tasks
+      WHERE (thread_id = ? OR id = ?) AND id != ? AND created_at <= ?
+      ORDER BY created_at ASC, rowid ASC`,
+  ).all(threadId, threadId, excludeId, before) as TurnRow[];
+  const source = forkSource(store, threadId);
+  if (source === undefined || depth >= MAX_FORK_DEPTH) return own;
+  return [...conversationRows(store, source.threadId, '', source.createdAt, depth + 1), ...own];
+}
+
+/** For a forked thread: the task it was forked from, and that task's thread. */
+export function forkSource(store: Store, threadId: string): { taskId: string; threadId: string; createdAt: string } | undefined {
+  const root = store.db.prepare('SELECT thread_id, parent_task_id FROM tasks WHERE id = ?').get(threadId) as { thread_id: string | null; parent_task_id: string | null } | undefined;
+  // A fork root names its own thread and has a parent; a plain follow-up's
+  // parent is in the same thread.
+  if (root?.parent_task_id == null || root.thread_id !== threadId) return undefined;
+  const parent = store.db.prepare('SELECT id, thread_id, created_at FROM tasks WHERE id = ?').get(root.parent_task_id) as { id: string; thread_id: string | null; created_at: string } | undefined;
+  if (parent === undefined) return undefined;
+  const parentThread = parent.thread_id ?? parent.id;
+  return parentThread === threadId ? undefined : { taskId: parent.id, threadId: parentThread, createdAt: parent.created_at };
+}
+
 /**
  * The provider session a follow-up should resume, when its step is pinned to
  * the same agent that ran the previous turn and that agent recorded a session.
  */
 export function resumeTargetFor(store: Store, task: Task, requiredCapability: string): { adapterId: string; sessionId: string } | undefined {
   if (task.parentTaskId === undefined) return undefined;
+  // Never resume across a fork: the provider would append the fork's turns to
+  // the source thread's own session. The fork gets the history as text instead.
+  if (task.threadId === task.id) return undefined;
   const adapterId = lastAdapterFor(store, task.parentTaskId);
   if (adapterId === undefined || requiredCapability !== `objective.fulfill.${adapterId}` || !isCodexProtocol(adapterId)) return undefined;
   const sessionId = codexSessionId(store, task.parentTaskId);

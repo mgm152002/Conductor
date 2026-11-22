@@ -1668,6 +1668,25 @@ const migration044: Migration = {
   },
 };
 
+// Migration 45 — GitHub issues a Work thread was started from, so the Issues
+// tab can show (and open) the thread working on each issue.
+const migration045: Migration = {
+  version: 45,
+  name: 'github_issue_threads',
+  up({ db }: Tx): void {
+    db.exec(`
+      CREATE TABLE github_issue_threads (
+        workspace_id TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        thread_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, number, thread_key)
+      );
+      CREATE INDEX idx_github_issue_threads_thread ON github_issue_threads (thread_key);
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1714,4 +1733,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration042,
   migration043,
   migration044,
+  migration045,
 ];

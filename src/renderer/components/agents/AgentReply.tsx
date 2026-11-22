@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { MessageActions } from '../chat/MessageActions';
 import type { Task } from '@shared/domain';
 import type { SandboxAgent } from '@shared/sandbox-agents';
 import { useTaskDetails } from '../../hooks/useTaskDetails';
@@ -11,7 +12,6 @@ import { DeliveredFiles } from '../workspace/ArtifactsRegion';
 import { PendingApprovalPanel } from '../chat/PendingApprovalPanel';
 import { AgentAvatar, type AgentMood } from '../ui/AgentAvatar';
 import { Alert } from '../ui/primitives';
-import { Spinner } from '../ui/icons';
 
 // One agent's answer in a chat: its avatar and name, then what it did and
 // said (the same timeline Work threads use), its approval requests inline,
@@ -27,7 +27,9 @@ export function moodFor(task: Task, waiting: boolean): AgentMood {
   return 'idle';
 }
 
-export function AgentReply({ agent, task, onText, previousRun, onRun, named = false }: {
+export function AgentReply({ agent, task, onText, previousRun, onRun, onFork, named = false }: {
+  /** Start a new chat from this message; no Fork button when absent. */
+  onFork?: (() => void) | undefined;
   agent: SandboxAgent;
   task: Task;
   /** Group chats label each reply with its speaker; a 1:1 chat needs no label. */
@@ -64,7 +66,7 @@ export function AgentReply({ agent, task, onText, previousRun, onRun, named = fa
   const visible = capacity !== undefined ? items.filter((item) => item.kind !== 'work' || !item.entries.some((entry) => CAPACITY.test(entry.label))) : items;
 
   return (
-    <div className="min-w-0">
+    <div className="group/msg min-w-0">
       {named ? (
         <p className="mb-1.5 flex items-center gap-1.5 px-1 text-xs">
           <AgentAvatar agent={agent} size={16} mood={moodFor(task, false)} />
@@ -77,13 +79,14 @@ export function AgentReply({ agent, task, onText, previousRun, onRun, named = fa
         {visible.length > 0 ? <MessagesTimeline items={visible} live={live} /> : null}
         {details !== null ? <div className="mt-3 empty:hidden"><DeliveredFiles taskId={task.id} artifacts={details.artifacts} /></div> : null}
         {live ? (
-          <p role="status" className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <Spinner size={11} />
-            <span className="truncate">{current?.label ?? 'Thinking'}…</span>
+          <p role="status" className="mt-1 flex items-center gap-2 px-1 text-[13px] text-muted-foreground">
+            <span aria-hidden="true" className="working-dots"><span /><span /><span /></span>
+            <span className="truncate">{current !== undefined ? 'Working' : 'Thinking'}</span>
           </p>
         ) : null}
         {!live && visible.length === 0 && capacity === undefined && details !== null && !details.artifacts.some((artifact) => artifact.delivered === true) ? <p className="text-xs text-muted-foreground">No reply.</p> : null}
         <div className="mt-2 empty:hidden"><PendingApprovalPanel task={task} /></div>
+        {!live ? <MessageActions className="mt-1" text={reply} at={task.updatedAt} onFork={onFork} forkLabel="Fork into a new chat" /> : null}
       </div>
     </div>
   );

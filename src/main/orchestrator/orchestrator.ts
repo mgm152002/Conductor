@@ -150,6 +150,12 @@ export interface CreateTaskInput {
    * thread; it must belong to the same workspace.
    */
   parentTaskId?: string;
+  /**
+   * With `parentTaskId`: start a new thread (a fork) instead of joining the
+   * parent's. The fork still follows on from the parent, so its history is
+   * the parent's conversation up to and including the parent.
+   */
+  fork?: boolean;
 }
 
 export interface OrchestratorOptions {
@@ -389,7 +395,7 @@ export class Orchestrator {
       if (parent === undefined || parent.workspaceId !== input.workspaceId) {
         throw new TaskValidationError('parentTaskId', 'The thread being continued was not found in this project');
       }
-      threadId = parent.threadId ?? parent.id;
+      if (input.fork !== true) threadId = parent.threadId ?? parent.id;
     }
 
     const id = randomUUID();

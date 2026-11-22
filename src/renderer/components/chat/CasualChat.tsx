@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import type { RunChoice } from '@shared/agent-models';
 import type { ChatSpace, ChatThread } from '@shared/chat-contract';
@@ -23,6 +23,9 @@ import { cn } from '../../lib/cn';
 import { buildChatMessageTimeline, messageShowsCurrentHandoff } from '../../lib/timeline';
 import { hasArtifactBlock, hasDeliveredFileLink, requestedArtifactKind, synthesizeSpec } from '@shared/generated-artifacts';
 import { GeneratedArtifact } from './GeneratedArtifact';
+import { MessageActions } from './MessageActions';
+import { useElementHeight } from '../../hooks/useElementHeight';
+import { useMentions, type MentionCommand } from '../mentions/useMentions';
 
 /** Project-free conversation: no plans, project context or task workflow. */
 export function CasualChat(): React.JSX.Element {
@@ -57,6 +60,16 @@ export function CasualChat(): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const stick = useRef(true);
+  const [dock, dockHeight] = useElementHeight<HTMLDivElement>();
+  const box = useRef<HTMLFormElement>(null);
+  const chatCommands = useMemo((): MentionCommand[] => [
+    { name: 'new', description: 'Start a new chat', run: () => { useChatStore.getState().select(null); } },
+  ], []);
+  const mentions = useMentions({
+    text, setText: (value) => { useChatStore.getState().setDraft(draftKey, value); }, textarea, anchor: box, attachments: attachmentDraft,
+    // Quick chats have no project, so @ offers other conversations, not files.
+    workspaceId: null, commands: chatCommands, currentChatId: selectedId,
+  });
   const currentSelection = useRef(selectedId);
   currentSelection.current = selectedId;
   const busy = submitting || conversation?.messages.some((message) => message.status === 'streaming') === true;
@@ -98,7 +111,7 @@ export function CasualChat(): React.JSX.Element {
   useEffect(() => {
     const element = scroller.current;
     if (element && stick.current) element.scrollTop = element.scrollHeight;
-  }, [conversation]);
+  }, [conversation, dockHeight]);
 
   useEffect(() => {
     const element = textarea.current;
@@ -128,6 +141,18 @@ export function CasualChat(): React.JSX.Element {
       stick.current = true;
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not send message'); }
     finally { setSubmitting(false); textarea.current?.focus(); }
+  }
+
+  /** Copy this chat up to `messageId` into a new chat and open it. */
+  async function fork(messageId: string): Promise<void> {
+    if (selectedId === null) return;
+    setError(null); setLoadFailed(false);
+    try {
+      const forked = await window.conductor.chat.fork(selectedId, messageId);
+      const store = useChatStore.getState();
+      store.receive(forked);
+      store.select(forked.thread.id);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not fork the chat'); }
   }
 
   async function stop(): Promise<void> {
@@ -194,9 +219,10 @@ export function CasualChat(): React.JSX.Element {
       ) : null}
       {deletingThread !== null ? <DeleteChatDialog thread={deletingThread} open onClose={() => { setDeletingThread(null); }} /> : null}
       {renamingThread !== null ? <RenameChatDialog key={renamingThread.id} thread={renamingThread} open onClose={() => { setRenamingThread(null); }} /> : null}
+      <div className={hasMessages ? 'relative flex min-h-0 flex-1 flex-col' : 'contents'}>
       <div ref={scroller} onScroll={(event) => { const el = event.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className={hasMessages ? 'min-h-0 flex-1 overflow-y-auto' : 'shrink-0 pt-[22vh]'}>
         {hasMessages ? (
-          <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 py-8" aria-label="Chat messages">
+          <div className="mx-auto flex w-full max-w-(--chat-max) flex-col gap-7 px-6 pt-8" style={{ paddingBottom: dockHeight + 24 }} aria-label="Chat messages">
             {conversation?.messages.map((message, index) => {
               // A handoff divider wherever the replying CLI or model changed
               // from the previous reply: the switch is visible in the answer
@@ -211,7 +237,7 @@ export function CasualChat(): React.JSX.Element {
                 // same switch as an inline handoff activity.
                 && !messageShowsCurrentHandoff(message);
               return (
-              <div key={message.id} className="flex flex-col gap-7">
+              <div key={message.id} className="group/msg flex flex-col gap-7">
                 {showHandoff ? (
                   <HandoffDivider
                     fromAgent={agentName(previousAssistant!.agentId!)}
@@ -223,11 +249,20 @@ export function CasualChat(): React.JSX.Element {
                   />
                 ) : null}
               <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[80%] rounded-2xl bg-message px-4 py-2.5 text-message-foreground')}>
-                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="text-shimmer text-sm">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Thinking…'}</p> : null}
-                {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 px-1 text-xs text-muted-foreground"><span className="text-shimmer">{[...(message.activity ?? [])].reverse().find((a) => a.status === 'running')?.label ?? 'Working…'}</span></p> : null}
-                {message.role === 'user' && message.attachments.length > 0 ? <div className="mt-3"><AttachmentTray attachments={message.attachments} /></div> : null}
+                {message.role === 'user' && message.attachments.length > 0 ? <div className="mb-2"><AttachmentTray attachments={message.attachments} /></div> : null}
+                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="flex items-center gap-2 px-1 text-[13px] text-muted-foreground"><span aria-hidden="true" className="working-dots"><span /><span /><span /></span>Thinking</p> : null}
+                {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 flex items-center gap-2 px-1 text-[13px] text-muted-foreground"><span aria-hidden="true" className="working-dots"><span /><span /><span /></span>Working</p> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
+              {message.status !== 'streaming' ? (
+                <MessageActions
+                  className="-mt-6"
+                  align={message.role === 'user' ? 'end' : 'start'}
+                  text={message.content}
+                  at={message.createdAt}
+                  {...(message.role === 'assistant' && !busy ? { onFork: () => { void fork(message.id); } } : {})}
+                />
+              ) : null}
               {(() => {
                 // Fallback: the user asked for a file but this agent (any CLI)
                 // replied in plain text — Conductor still builds the file.
@@ -246,18 +281,21 @@ export function CasualChat(): React.JSX.Element {
           </div>
         )}
       </div>
-      <div className={cn('mx-auto w-full max-w-(--chat-max) px-5 pb-5', hasMessages ? 'shrink-0' : 'min-h-0 flex-1 overflow-y-auto pt-1')}>
-        {loading ? <p role="status" className="mb-2 text-xs text-muted-foreground">Loading conversation…</p> : null}
-        {error ? <p role="alert" className="mb-2 text-xs text-destructive-foreground [overflow-wrap:anywhere]">{error} {loadFailed ? <button type="button" onClick={() => { setRevision((value) => value + 1); }} className="underline">Retry loading</button> : null}</p> : null}
-        {!agents.length ? <p className="mb-3 text-xs text-muted-foreground">Connect a local agent in <NavLink to="/connected-apps" className="underline">Connections</NavLink> to start chatting. No project is needed.</p> : null}
+      {/* With messages, the composer floats over the conversation's end. */}
+      <div ref={dock} className={cn('mx-auto w-full max-w-(--chat-max) px-5 pb-5', hasMessages ? 'pointer-events-none absolute inset-x-0 bottom-0 [&>*]:pointer-events-auto' : 'min-h-0 flex-1 overflow-y-auto pt-1')}>
+        {loading ? <p role="status" className="composer-glass mb-2 w-fit rounded-lg px-2.5 py-1 text-xs text-muted-foreground">Loading conversation…</p> : null}
+        {error ? <p role="alert" className="composer-glass mb-2 w-fit rounded-lg px-2.5 py-1 text-xs text-destructive-foreground [overflow-wrap:anywhere]">{error} {loadFailed ? <button type="button" onClick={() => { setRevision((value) => value + 1); }} className="underline">Retry loading</button> : null}</p> : null}
+        {!agents.length ? <p className="composer-glass mb-3 w-fit rounded-lg px-2.5 py-1 text-xs text-muted-foreground">Connect a local agent in <NavLink to="/connected-apps" className="underline">Connections</NavLink> to start chatting. No project is needed.</p> : null}
         <Mem0OfflineNotice />
         {selectedId !== null ? <PendingQuestionPanel scopeId={selectedId} /> : null}
         {selectedId !== null ? <ChatPendingApprovals threadId={selectedId} /> : null}
-        <form onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="rounded-2xl border border-input bg-popover p-2.5 shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 dark:bg-card">
+        {mentions.menu}
+        <form ref={box} onSubmit={(event) => { event.preventDefault(); void send(); }} onDragOver={attachmentDraft.onDragOver} onDrop={attachmentDraft.onDrop} className="composer-glass rounded-2xl border border-input p-2.5 shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60">
           <label htmlFor="casual-message" className="sr-only">Message</label>
-          <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} onKeyDown={(event) => {
+          <textarea ref={textarea} id="casual-message" value={text} maxLength={10000} onChange={(event) => { useChatStore.getState().setDraft(draftKey, event.target.value); }} onPaste={attachmentDraft.onPaste} {...mentions.textareaProps} onKeyDown={(event) => {
+            if (mentions.onKeyDown(event)) return;
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); }
-          }} placeholder="Ask anything…" rows={2} className="block max-h-45 min-h-14 w-full resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60" />
+          }} placeholder="Ask anything. @ other chats, / commands" rows={2} className="block max-h-45 min-h-14 w-full resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60" />
           <div className="px-1 pt-1">
             <AttachmentTray
               attachments={attachmentDraft.attachments}
@@ -296,8 +334,9 @@ export function CasualChat(): React.JSX.Element {
             </div>
             {busy && selectedId !== null ? <button type="button" onClick={() => { void stop(); }} aria-label="Stop reply" className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-foreground text-background"><StopIcon size={14} /></button> : <button type="submit" aria-label="Send message" disabled={!text.trim() || busy || loading || !selectedAgent || attachmentDraft.busy || attachmentDraft.errors.length > 0} className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-[filter,transform,background-color] duration-150 hover:brightness-110 active:scale-90 disabled:cursor-default disabled:bg-muted disabled:text-muted-foreground/60"><ArrowUpIcon size={16} /></button>}
           </div>
+          {currentSpace !== null ? <p className="mt-1.5 px-1.5 text-3xs text-muted-foreground">Sharing context with {spaceSiblingCount} other {spaceSiblingCount === 1 ? 'chat' : 'chats'} in {currentSpace.name}</p> : null}
         </form>
-        {currentSpace !== null ? <p className="mt-2 text-center text-3xs text-muted-foreground">Sharing context with {spaceSiblingCount} other {spaceSiblingCount === 1 ? 'chat' : 'chats'} in {currentSpace.name}</p> : null}
+      </div>
       </div>
     </div>
   );

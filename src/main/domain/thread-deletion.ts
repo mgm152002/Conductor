@@ -73,6 +73,7 @@ export async function deleteThread(deps: ThreadDeletionDeps, threadId: string): 
     db.exec('DELETE FROM approval_requests WHERE task_id IN (SELECT id FROM deleting_tasks)');
     db.exec('DELETE FROM task_outcomes WHERE task_id IN (SELECT id FROM deleting_tasks)');
     db.exec('DELETE FROM suggestions WHERE source_id IN (SELECT id FROM deleting_tasks)');
+    db.exec('DELETE FROM github_issue_threads WHERE thread_key IN (SELECT id FROM deleting_tasks)');
     // Task-scoped knowledge.
     for (const table of ['context_items', 'memories']) {
       db.exec(`DELETE FROM ${table} WHERE scope_level = 'task' AND scope_ref_id IN (SELECT id FROM deleting_tasks)`);

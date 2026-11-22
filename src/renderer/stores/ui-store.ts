@@ -5,11 +5,25 @@ import { create } from 'zustand';
 // panel, and which sidebar project groups are collapsed. Nothing here is
 // durable domain state.
 
+/** A prefilled new-thread message: text, an attached Markdown document, and the issue it is for. */
+export interface ComposerSeed {
+  workspaceId: string;
+  text: string;
+  attachment?: { name: string; markdown: string };
+  issue?: { number: number };
+}
+
 export type DetailsTab = 'plan' | 'checks' | 'files' | 'context' | 'activity';
 
 interface UiState {
   /** True while composing a new thread; the chat view shows the draft hero. */
   draft: boolean;
+  /** A message being forked: the chat view shows the conversation up to it and a composer that starts the fork. */
+  forkFrom: string | null;
+  setForkFrom: (taskId: string | null) => void;
+  /** What the next new-thread composer starts with (e.g. a GitHub issue to work on). */
+  composerSeed: ComposerSeed | null;
+  setComposerSeed: (seed: ComposerSeed | null) => void;
   detailsOpen: boolean;
   detailsTab: DetailsTab;
   collapsedProjects: Record<string, boolean>;
@@ -66,6 +80,10 @@ export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (paletteOpen): void => { set({ paletteOpen }); },
   draft: false,
+  forkFrom: null,
+  composerSeed: null,
+  setComposerSeed: (composerSeed): void => { set({ composerSeed }); },
+  setForkFrom: (forkFrom): void => { set({ forkFrom, draft: false }); },
   detailsOpen: false,
   detailsTab: 'files',
   collapsedProjects: {},
@@ -79,7 +97,8 @@ export const useUiStore = create<UiState>((set) => ({
   planMode: false,
   notice: null,
   setNotice: (notice): void => { set({ notice }); },
-  setDraft: (draft): void => { set({ draft }); },
+  // Opening a new thread or another thread leaves a pending fork.
+  setDraft: (draft): void => { set({ draft, forkFrom: null }); },
   setDetailsOpen: (detailsOpen): void => { set({ detailsOpen }); },
   openDetails: (detailsTab): void => { set({ detailsOpen: true, detailsTab }); },
   toggleProject: (id): void => {

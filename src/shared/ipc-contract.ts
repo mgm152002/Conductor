@@ -77,6 +77,8 @@ export const TaskCreateRequest = z.object({
   acceptanceCriteria: z.array(z.string().trim().min(1).max(1000)).max(50).optional(),
   /** Continue an existing conversation thread from this task. */
   parentTaskId: z.string().uuid().optional(),
+  /** Start a new thread that forks a conversation: it carries the turns up to and including this task. */
+  forkFromTaskId: z.string().uuid().optional(),
   /** Run on this agent (adapter id) instead of automatic routing. */
   agentId: z.string().trim().regex(/^[\w:.-]{1,200}$/).optional(),
   /** Plan mode: `agentId` writes a plan and the plan's tasks run on their agents. */

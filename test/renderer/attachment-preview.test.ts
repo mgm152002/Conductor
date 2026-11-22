@@ -40,7 +40,7 @@ describe('attachment preview', () => {
     const attachment = { id: 'img-1', name: 'photo.png', kind: 'image' as const, mimeType: 'image/png', sizeBytes: 1234 };
     const html = renderToStaticMarkup(createElement(AttachmentCard, { attachment, display: 'history', onPreview: () => undefined }));
     expect(html).toContain('aria-label="Preview photo.png"');
-    expect(html).toContain('rounded-xl');
+    expect(html).toContain('rounded-lg');
     expect(html).not.toContain('rounded-full');
   });
 

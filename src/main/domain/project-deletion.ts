@@ -85,6 +85,7 @@ export async function deleteProject(deps: ProjectDeletionDeps, workspaceId: stri
     }
     db.prepare(`DELETE FROM skills WHERE scope = 'project' AND scope_ref = ?`).run(workspaceId);
     db.prepare(`DELETE FROM preferences WHERE scope = 'workspace' AND workspace_id = ?`).run(workspaceId);
+    db.prepare('DELETE FROM github_issue_threads WHERE workspace_id = ?').run(workspaceId);
     // Cascades to tasks → steps, events, checkpoints, sessions, plans, usage,
     // workflow links; clears the active-workspace pointer.
     db.prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId);

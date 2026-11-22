@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Task } from '@shared/domain';
 import { useComposerStore, useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { isWorkingState } from '../../lib/thread-status';
@@ -15,6 +15,8 @@ import type { RunOptions } from '@shared/agent-models';
 import { preferredAgent } from '@shared/agent-preference';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments';
+import { useMentions, type MentionCommand } from '../mentions/useMentions';
+import { markdownDraftFile } from '../../lib/mentions';
 
 // The chat composer: a raised surface with an auto-growing prompt, a footer
 // with the project and agent controls, and the one accent-coloured button on
@@ -28,7 +30,12 @@ import { AttachButton, AttachmentTray, useAttachmentDraft } from '../attachments
 
 const MAX_OBJECTIVE = 10_000;
 
-export function Composer({ task, autoFocus = false, variant = 'docked', currentAgentId }: { task: Task | null; autoFocus?: boolean; variant?: 'docked' | 'hero'; /** Agent that ran the previous turn, for same-thread model/CLI switching. */ currentAgentId?: string | undefined }): React.JSX.Element {
+export function Composer({ task, autoFocus = false, variant = 'docked', currentAgentId, fork }: {
+  task: Task | null; autoFocus?: boolean; variant?: 'docked' | 'hero';
+  /** Agent that ran the previous turn, for same-thread model/CLI switching. */ currentAgentId?: string | undefined;
+  /** Start a fork: a new thread that follows on from this message of another thread. */
+  fork?: Task | undefined;
+}): React.JSX.Element {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const { selectProject } = useThreadNavigation();
@@ -40,6 +47,20 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   const [error, setError] = useState<string | null>(null);
   const attachmentDraft = useAttachmentDraft();
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  // A prefilled new thread (e.g. started from a GitHub issue): fill the box,
+  // attach the context, and link the thread to the issue once it exists.
+  const seed = useUiStore((s) => s.composerSeed);
+  const seededIssue = useRef<{ workspaceId: string; number: number } | null>(null);
+  useEffect(() => {
+    if (seed === null || (task !== null && variant === 'docked') || fork !== undefined) return;
+    useUiStore.getState().setComposerSeed(null);
+    setObjective(seed.text);
+    seededIssue.current = seed.issue !== undefined ? { workspaceId: seed.workspaceId, number: seed.issue.number } : null;
+    if (seed.attachment !== undefined) void attachmentDraft.addFiles([markdownDraftFile(seed.attachment.name, seed.attachment.markdown)]);
+    requestAnimationFrame(() => { textarea.current?.focus(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per seed
+  }, [seed]);
   const agents = useAgents();
   const agentId = useComposerStore((s) => s.agentId);
   const setAgentId = useComposerStore((s) => s.setAgentId);
@@ -49,9 +70,9 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   // the agent it was started with). Their composer value is prefixed.
   const sandboxAgents = useSandboxAgentStore((s) => s.agents);
   const newThreadDraft = !(task !== null && variant === 'docked');
-  const sandboxAgent = newThreadDraft ? sandboxAgents.find((agent) => agent.id === sandboxAgentIdFrom(agentId)) : undefined;
+  const sandboxAgent = newThreadDraft && fork === undefined ? sandboxAgents.find((agent) => agent.id === sandboxAgentIdFrom(agentId)) : undefined;
   // An agent runs its own task; plan mode doesn't apply to it.
-  const planMode = planModeSetting && sandboxAgent === undefined;
+  const planMode = planModeSetting && sandboxAgent === undefined && fork === undefined;
   // In plan mode the picker chooses the planner, so it always names an agent.
   // Without an explicit pick, use the shared preference order (OpenCode first),
   // never the first entry in whatever order the agent list happened to arrive.
@@ -83,6 +104,18 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
     ...(effectiveAgent !== undefined && Object.keys(mainChoice).length > 0 ? { main: mainChoice } : {}),
     ...(planMode && customSubAgents > 0 ? { agents: Object.fromEntries(Object.entries(agentChoices).filter(([, c]) => Object.keys(c).length > 0)) } : {}),
   };
+
+  const mentionCommands = useMemo((): MentionCommand[] => [
+    ...(newThreadDraft && sandboxAgent === undefined && fork === undefined
+      ? [{ name: 'plan', description: planModeSetting ? 'Turn plan mode off' : 'Plan mode: split the work across agents', run: () => { setPlanMode(!planModeSetting); } }]
+      : []),
+    { name: 'new', description: 'Start a new thread', run: () => { useTaskStore.getState().focus(null); useUiStore.getState().setDraft(true); } },
+  ], [newThreadDraft, sandboxAgent, fork, planModeSetting, setPlanMode]);
+  const mentions = useMentions({
+    text: objective, setText: setObjective, textarea, anchor: box, attachments: attachmentDraft,
+    workspaceId: fork?.workspaceId ?? activeWorkspaceId, commands: mentionCommands,
+    currentThreadKey: task !== null && variant === 'docked' ? (task.threadId ?? task.id) : null,
+  });
 
   const trimmed = objective.trim();
   const busy = task !== null && (isWorkingState(task.state) || task.state === 'WAITING_FOR_APPROVAL');
@@ -128,6 +161,9 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
     if (!canSubmit || activeWorkspaceId === null) return;
     setSubmitting(true);
     setError(null);
+    // Clear the box at once, like a chat app; put the text back if sending fails.
+    const sentText = objective;
+    setObjective('');
     try {
       if (busy && task !== null) {
         const entry = await window.conductor.task.enqueue({
@@ -144,7 +180,8 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
         return;
       }
       const created = await window.conductor.task.create({
-        workspaceId: activeWorkspaceId,
+        workspaceId: fork?.workspaceId ?? activeWorkspaceId,
+        ...(fork !== undefined ? { forkFromTaskId: fork.id } : {}),
         objective: trimmed,
         ...(task !== null && variant === 'docked' ? { parentTaskId: task.id } : {}),
         ...(sandboxAgent !== undefined ? { sandboxAgentId: sandboxAgent.id } : chosenAgent !== undefined ? { agentId: chosenAgent.id } : {}),
@@ -154,6 +191,11 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
       });
       useTaskStore.getState().upsert(created);
       useTaskStore.getState().focus(created.id);
+      const issue = seededIssue.current;
+      seededIssue.current = null;
+      if (issue !== null && issue.workspaceId === created.workspaceId) {
+        void window.conductor.github.linkIssue({ workspaceId: issue.workspaceId, number: issue.number, threadKey: created.threadId ?? created.id }).catch(() => undefined);
+      }
       if (sandboxAgent !== undefined) {
         void useSandboxAgentStore.getState().refresh();
         // Back to normal routing for the next new thread.
@@ -163,6 +205,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
       setObjective('');
       attachmentDraft.reset();
     } catch (err) {
+      setObjective((current) => (current === '' ? sentText : current));
       setError(err instanceof Error ? err.message : 'Could not start the task');
     } finally {
       setSubmitting(false);
@@ -187,6 +230,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
 
   const placeholder = activeWorkspaceId === null
     ? 'Add a project to start a task'
+    : fork !== undefined ? 'Continue in a new thread…'
     : task !== null && variant === 'docked'
       ? busy ? 'Steer the agent, or queue a follow-up…' : 'Reply…'
       : planMode ? 'Describe what to build…' : 'Ask anything. @ files, / commands';
@@ -218,7 +262,8 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           ))}
         </ul>
       ) : null}
-      <div className="relative rounded-2xl border border-input bg-popover shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60 dark:bg-card">
+      {mentions.menu}
+      <div ref={box} className="composer-glass relative rounded-2xl border border-input shadow-composer transition-[border-color,box-shadow] focus-within:border-ring/60">
         {planMode && subAgentsOpen ? (
           <div className="border-b border-border px-4 pt-3 pb-2.5">
             <p className="flex items-center gap-1.5 text-2xs font-medium text-muted-foreground"><LayersIcon size={12} /> Sub-agents</p>
@@ -234,30 +279,8 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             </ul>
           </div>
         ) : null}
-        <label htmlFor="task-objective" className="sr-only">What would you like Conductor to do?</label>
-        <textarea
-          id="task-objective"
-          ref={textarea}
-          rows={1}
-          value={objective}
-          maxLength={MAX_OBJECTIVE}
-          placeholder={placeholder}
-          disabled={submitting || activeWorkspaceId === null}
-          onChange={(event) => { setObjective(event.target.value); }}
-          onPaste={attachmentDraft.onPaste}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void submit();
-            }
-          }}
-          className={cn(
-            'block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed',
-            variant === 'hero' ? 'min-h-16' : 'min-h-10',
-          )}
-        />
-
-        <div className="px-3 pt-1">
+        {attachmentDraft.attachments.length > 0 || attachmentDraft.busy || attachmentDraft.errors.length > 0 ? (
+          <div className="px-3 pt-3">
           <AttachmentTray
             attachments={attachmentDraft.attachments}
             onRemove={(id) => { void attachmentDraft.remove(id); }}
@@ -270,6 +293,32 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             onClearErrors={attachmentDraft.clearErrors}
           />
         </div>
+        ) : null}
+        <label htmlFor="task-objective" className="sr-only">What would you like Conductor to do?</label>
+        <textarea
+          id="task-objective"
+          ref={textarea}
+          rows={1}
+          value={objective}
+          maxLength={MAX_OBJECTIVE}
+          placeholder={placeholder}
+          disabled={activeWorkspaceId === null}
+          onChange={(event) => { setObjective(event.target.value); }}
+          onPaste={attachmentDraft.onPaste}
+          {...mentions.textareaProps}
+          onKeyDown={(event) => {
+            if (mentions.onKeyDown(event)) return;
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void submit();
+            }
+          }}
+          className={cn(
+            'block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed',
+            variant === 'hero' ? 'min-h-16' : 'min-h-10',
+          )}
+        />
+
 
         <div className="flex items-end gap-2 px-2.5 pt-1 pb-2.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" aria-label="Task options">
@@ -278,7 +327,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             <MenuSelect
               label="Project"
               value={activeWorkspaceId ?? ''}
-              disabled={task !== null && variant === 'docked'}
+              disabled={(task !== null && variant === 'docked') || fork !== undefined}
               onChange={(next) => { if (next) void selectProject(next).catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not switch project'); }); }}
               title={project?.rootPath}
               className="max-w-full sm:max-w-48"
@@ -372,13 +421,13 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             </button>
           ) : (
             <button type="submit" disabled={!canSubmit} aria-label={submitting ? 'Sending…' : busy ? (deliveryMode === 'steer' ? 'Steer agent' : 'Queue message') : 'Start task'} title={busy ? (deliveryMode === 'steer' ? 'Steer (Enter): stop current work and run this next' : 'Queue (Enter): run this after current work') : 'Send (Enter)'} className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground transition-[filter,transform,background-color] duration-150 hover:brightness-110 active:scale-90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-              {submitting ? <Spinner size={14} /> : <ArrowUpIcon size={16} />}
+              <ArrowUpIcon size={16} />
             </button>
           )}
           </div>
         </div>
       </div>
-      {error !== null ? <p role="alert" className="mt-2 px-3 text-xs text-destructive-foreground">{error}</p> : null}
+      {error !== null ? <p role="alert" className="composer-glass mt-2 w-fit rounded-lg px-2.5 py-1 text-xs text-destructive-foreground">{error}</p> : null}
     </form>
   );
 }

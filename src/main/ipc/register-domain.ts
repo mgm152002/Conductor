@@ -63,6 +63,8 @@ import { parseRunOptions } from '../agents/run-resolver';
 import type { UsageRange, UsageSummary } from '@shared/usage';
 import { UsageSummaryRequest, WorkspaceDeleteRequest } from '@shared/ipc-contract';
 import { listWorkspaceChanges, readWorkspaceFileDiff } from '../domain/workspace-changes';
+import { listWorkspaceFiles } from '../domain/workspace-files';
+import { replyFor } from '../orchestrator/thread-context';
 import { worktreeBranch, worktreePathFor } from '../domain/worktree';
 import { existsSync } from 'node:fs';
 import type { AgentQuestionBroker } from '../orchestrator/agent-questions';
@@ -155,6 +157,19 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     return deps.renderVisual(i.html);
   });
   router.handle('task.thread', A['task.thread'], (_e, i) => deps.taskQueries.thread(i.threadId));
+  // A thread as Markdown (each message and the agent's reply), for referencing
+  // it from another conversation with @.
+  router.handle('task.transcript', A['task.transcript'], (_e, i) => {
+    const turns = deps.taskQueries.thread(i.threadId);
+    const root = turns.find((task) => task.id === i.threadId) ?? turns[0];
+    if (root === undefined) throw new Error('That thread was not found');
+    const title = root.title?.trim() || root.objective.replace(/\s+/g, ' ').slice(0, 80);
+    const body = turns.map((task) => {
+      const reply = replyFor(deps.store, task.id).trim();
+      return `## User\n\n${task.objective}\n\n## Assistant\n\n${reply === '' ? '(no reply)' : reply.length > 12_000 ? `${reply.slice(0, 12_000)}… (truncated)` : reply}`;
+    }).join('\n\n');
+    return { title, markdown: `# Thread: ${title}\n\n${body}\n` };
+  });
   router.handle('task.retry', A['task.retry'], (_e, i) => {
     const task = orchestrator.getTask(i.id);
     if (!task || task.state !== 'BLOCKED') throw new Error('Only blocked tasks can be retried. Use Resume for interrupted work.');
@@ -218,6 +233,12 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
     const { root, branch } = changesRoot(input.workspaceId, input.taskId);
     const changes = await listWorkspaceChanges(root);
     return { ...changes, ...(branch !== undefined ? { worktree: true, branch } : {}) };
+  });
+
+  router.handle('workspace.files', A['workspace.files'], async (_event, input) => {
+    const workspace = workspaces.get(input.workspaceId);
+    if (workspace === undefined) throw new Error(`Workspace ${input.workspaceId} not found`);
+    return listWorkspaceFiles(workspace.rootPath);
   });
 
   router.handle('workspace.fileDiff', A['workspace.fileDiff'], async (_event, input) => {
@@ -297,10 +318,17 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
       // A sandbox agent starts a new thread on its first available CLI; its
       // thread is bound to it before the run starts, so the first step already
       // gets the agent's sandbox, instructions and fallback order.
-      const sandboxAgentId = input.parentTaskId === undefined ? input.sandboxAgentId : undefined;
+      // A fork is a new thread that follows on from a message in another one;
+      // a fork of an agent chat stays that agent's chat.
+      const fork = input.parentTaskId === undefined ? input.forkFromTaskId : undefined;
+      const forkSource = fork !== undefined ? deps.orchestrator.getTask(fork) : undefined;
+      const forkAgentId = forkSource !== undefined ? deps.sandboxAgents?.agentForTask(forkSource)?.id : undefined;
+      const sandboxAgentId = input.parentTaskId === undefined && fork === undefined ? input.sandboxAgentId : undefined;
+      const bindTo = sandboxAgentId ?? forkAgentId;
       const agentId = sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? deps.sandboxAgents.startingCli(sandboxAgentId, input.agentId) : input.agentId;
-      return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(input.parentTaskId ? {parentTaskId:input.parentTaskId}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && sandboxAgentId === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
-        ...(sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? { onCreated: (task: Task) => { deps.sandboxAgents!.bindThread(task.threadId ?? task.id, sandboxAgentId); } } : {})});
+      const parentTaskId = input.parentTaskId ?? fork;
+      return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(parentTaskId ? {parentTaskId}:{}),...(fork !== undefined ? {fork:true}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && bindTo === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
+        ...(bindTo !== undefined && deps.sandboxAgents !== undefined ? { onCreated: (task: Task) => { deps.sandboxAgents!.bindThread(task.threadId ?? task.id, bindTo); } } : {})});
     },
   );
 

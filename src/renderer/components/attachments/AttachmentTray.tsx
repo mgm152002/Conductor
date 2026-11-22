@@ -32,7 +32,7 @@ export function AttachmentTray({ attachments, onRemove, onPick, picker = true, b
       <Button variant="ghost" disabled={busy || disabled || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE} onClick={onPick}><PaperclipIcon />Attach files</Button>
       <span className="text-2xs text-muted-foreground">Up to {MAX_ATTACHMENTS_PER_MESSAGE} files, {formatAttachmentSize(MAX_ATTACHMENT_BYTES)} each</span>
     </div>}
-    {!!attachments.length && <ul className={history ? 'flex max-w-full flex-wrap items-start gap-3' : 'flex flex-wrap gap-2'} aria-label="Attached files">
+    {!!attachments.length && <ul className={history ? 'flex max-w-full flex-wrap items-start justify-end gap-2' : 'flex flex-wrap gap-2'} aria-label="Attached files">
       {attachments.map(attachment => <li key={attachment.id} className="min-w-0 max-w-full"><AttachmentCard attachment={attachment} display={history ? 'history' : 'compact'} onPreview={setSelected} onRemove={onRemove} disabled={busy || disabled} /></li>)}
     </ul>}
     {busy && <div role="status" className="space-y-1 text-xs text-muted-foreground">

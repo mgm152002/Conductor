@@ -99,7 +99,8 @@ export class TaskRunner {
     // execution never wait on the title call. Scheduled only after the run
     // options above are saved, so title generation can pin itself to the
     // model this thread will actually run on.
-    if (task.parentTaskId === undefined) {
+    // A thread's first message, including the first message of a fork.
+    if (task.parentTaskId === undefined || task.threadId === task.id) {
       try { this.deps.onThreadCreated?.(task); } catch { /* titles never block work */ }
     }
     // Auto routing needs the agent's model list; usually cached already.

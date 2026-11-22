@@ -76,6 +76,7 @@ async function seed() {
   const opened: string[] = [];
   const apiPrs: unknown[] = [];
   const mergeCalls: { method?: string; body?: string }[] = [];
+  const fetchAuth: (string | undefined)[] = [];
   let prMerged = false;
   const service = new GitHubService({
     store: s,
@@ -128,10 +129,23 @@ async function seed() {
       if (url.includes('/commits/abc123/check-runs')) return new Response(JSON.stringify({
         check_runs: [{ name: 'test', status: 'completed', conclusion: 'success', html_url: 'https://github.com/x/checks' }],
       }), { status: 200 });
+      if (url.includes('/issues?state=')) {
+        fetchAuth.push((init as { headers?: Record<string, string> } | undefined)?.headers?.['authorization']);
+        return new Response(JSON.stringify([
+          { number: 5, title: 'Login loops', state: 'open', html_url: 'https://github.com/acme/widgets/issues/5', comments: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', user: { login: 'reporter' }, labels: [{ name: 'bug', color: 'd73a4a' }] },
+          { number: 6, title: 'A pull request', state: 'open', html_url: 'https://github.com/acme/widgets/pull/6', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', pull_request: {} },
+        ]), { status: 200 });
+      }
+      if (url.endsWith('/issues/5')) return new Response(JSON.stringify({
+        number: 5, title: 'Login loops', body: 'Steps: sign in, get redirected forever.', html_url: 'https://github.com/acme/widgets/issues/5', state: 'open', user: { login: 'reporter' }, labels: ['bug'],
+      }), { status: 200 });
+      if (url.includes('/issues/5/comments')) return new Response(JSON.stringify([
+        { body: 'Happens on Safari only', created_at: '2026-01-02T00:00:00Z', user: { login: 'helper' } },
+      ]), { status: 200 });
       throw new Error(`unexpected fetch ${url}`);
     }) as typeof fetch,
   });
-  return { s, project, taskId, service, opened, secrets, apiPrs, mergeCalls };
+  return { s, project, taskId, service, opened, secrets, apiPrs, mergeCalls, fetchAuth };
 }
 
 describe('GitHubService connection', () => {
@@ -265,5 +279,40 @@ describe('GitHubService.openPr', () => {
     const prs = service.listPrs(project.id);
     expect(prs).toHaveLength(1);
     expect(prs[0]).toMatchObject({ number: 9, state: 'merged', threadTitle: 'Fix the thing', threadKey: taskId });
+  });
+});
+
+describe('GitHubService issues', () => {
+  it('lists issues without pull requests, reads public repos anonymously, and links threads', async () => {
+    const { s, project, taskId, service, fetchAuth, opened } = await seed();
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init', '-q', root!]);
+    execFileSync('git', ['-C', root!, 'remote', 'add', 'origin', 'git@github.com:acme/widgets.git']);
+
+    const anonymous = await service.listIssues(project.id, 'open');
+    expect(anonymous.connected).toBe(false);
+    expect(fetchAuth[0]).toBeUndefined();
+    expect(anonymous.issues.map((issue) => issue.number)).toEqual([5]);
+    expect(anonymous.issues[0]).toMatchObject({ title: 'Login loops', author: 'reporter', labels: [{ name: 'bug', color: 'd73a4a' }], threadKeys: [] });
+
+    const context = await service.issueContext(project.id, 5);
+    expect(context.markdown).toContain('# Issue #5: Login loops');
+    expect(context.markdown).toContain('sign in, get redirected forever');
+    expect(context.markdown).toContain('@helper');
+
+    service.linkIssue(project.id, 5, taskId);
+    service.linkIssue(project.id, 5, taskId);
+    await service.connect(project.id, 'ghp_test_token');
+    const linked = await service.listIssues(project.id, 'open');
+    expect(fetchAuth.at(-1)).toBe('Bearer ghp_test_token');
+    expect(linked.issues[0]!.threadKeys).toEqual([taskId]);
+    expect(() => { service.linkIssue(project.id, 5, randomUUID()); }).toThrow(/not in this project/);
+
+    // A deleted thread drops out of the issue's links.
+    s.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
+    expect((await service.listIssues(project.id, 'open')).issues[0]!.threadKeys).toEqual([]);
+
+    await service.openIssue(project.id, 5);
+    expect(opened.at(-1)).toBe('https://github.com/acme/widgets/issues/5');
   });
 });
