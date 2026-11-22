@@ -108,8 +108,20 @@ export function parseMemUsage(text: string): number {
 /** Runs a docker command; injectable for tests. */
 export type DockerRunner = (args: string[], options?: { timeoutMs?: number }) => Promise<string>;
 
+/**
+ * Where a docker CLI lives when the app is launched from Finder (which has a
+ * minimal PATH): Docker Desktop, Homebrew, OrbStack, Rancher Desktop, Colima.
+ */
+export function dockerSearchDirs(home: string = homedir()): string[] {
+  return [
+    '/usr/local/bin', '/opt/homebrew/bin', '/Applications/Docker.app/Contents/Resources/bin', join(home, '.docker/bin'),
+    join(home, '.orbstack/bin'), '/Applications/OrbStack.app/Contents/MacOS/xbin',
+    join(home, '.rd/bin'), join(home, '.colima/bin'), '/usr/bin', '/bin',
+  ];
+}
+
 function searchPath(): string {
-  const extra = ['/usr/local/bin', '/opt/homebrew/bin', '/Applications/Docker.app/Contents/Resources/bin', join(homedir(), '.docker/bin'), '/usr/bin', '/bin'];
+  const extra = dockerSearchDirs();
   return [...new Set([...(process.env['PATH'] ?? '').split(delimiter), ...extra])].filter(Boolean).join(delimiter);
 }
 
