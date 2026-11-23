@@ -9,7 +9,7 @@ import { betweenTurnHandoff, buildTimeline, turnRun, type TimelineItem, type Tur
 import { isWorkingState } from '../../lib/thread-status';
 import { formatDuration } from '../../lib/time';
 import { Alert, Button } from '../ui/primitives';
-import { FolderIcon, ForkIcon, PlusIcon } from '../ui/icons';
+import { ForkIcon } from '../ui/icons';
 import { useThreadNavigation } from '../../hooks/useThreadNavigation';
 import { threadTitle } from '../../lib/thread-status';
 import { ArtifactRow, DeliveredFiles } from '../workspace/ArtifactsRegion';
@@ -31,6 +31,7 @@ import { MessageActions } from './MessageActions';
 import { useElementHeight } from '../../hooks/useElementHeight';
 import { WorkBoard } from './WorkBoard';
 import { agentLabel, formatCost, outputRate, usageBreakdown } from '../../lib/usage-format';
+import { WorkingIndicator } from './WorkingIndicator';
 
 // The main surface: a thread header, a centred message
 // timeline, and the composer docked at the bottom, with an optional details
@@ -58,12 +59,7 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
     const source = runningSteps.length > 1 ? `${runningSteps.length} agents` : undefined;
     const elapsed = Math.max(0, now - Date.parse(task.createdAt));
     return (
-      <div className="flex min-w-0 items-center gap-2 px-1 text-[13px] text-muted-foreground" role="status">
-        <span className="sr-only">{label}</span>
-        <span aria-hidden="true" className="working-dots"><span /><span /><span /></span>
-        <span aria-hidden="true" className="tabular-nums">{label} for {formatDuration(elapsed)}</span>
-        {source !== undefined ? <span className="text-muted-foreground/70">· {source}</span> : null}
-      </div>
+      <WorkingIndicator label={label} elapsed={formatDuration(elapsed)} detail={source} />
     );
   }
   if (task.state === 'BLOCKED' || task.state === 'RECOVERABLE_INTERRUPTION') {
@@ -360,19 +356,6 @@ function ForkDraft({ sourceId, project }: { sourceId: string; project: Workspace
   );
 }
 
-function NoProjects(): React.JSX.Element {
-  const setAddProjectOpen = useUiStore((s) => s.setAddProjectOpen);
-  const loading = useWorkspaceStore((s) => s.loading);
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 pb-[10vh] text-center">
-      <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary/12 text-primary"><FolderIcon size={22} /></div>
-      <h2 className="font-display text-lg font-semibold text-foreground">{loading ? 'Loading projects…' : 'Add a project to get started'}</h2>
-      <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">A project is a folder your agents work in. Threads, memory and indexed files are kept per project.</p>
-      <Button className="mt-5" size="md" variant="primary" onClick={() => { setAddProjectOpen(true); }}><PlusIcon size={14} />Add project</Button>
-    </div>
-  );
-}
-
 export function ChatView(): React.JSX.Element {
   const task = useFocusedTask();
   const draft = useUiStore((s) => s.draft);
@@ -384,9 +367,7 @@ export function ChatView(): React.JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {workspaces.length === 0 ? (
-        <NoProjects />
-      ) : forkFrom !== null ? (
+      {forkFrom !== null ? (
         <ForkDraft key={forkFrom} sourceId={forkFrom} project={workspaces.find((w) => w.id === useTaskStore.getState().tasks[forkFrom]?.workspaceId) ?? project} />
       ) : showThread ? (
         <Thread key={threadKey(task)} focused={task} project={project} />

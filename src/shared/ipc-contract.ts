@@ -73,7 +73,8 @@ const RunChoiceSchema = z.object({
 });
 
 export const TaskCreateRequest = z.object({
-  workspaceId: z.string().uuid(),
+  /** Omitted = no project: the thread runs in the app's hidden General workspace. */
+  workspaceId: z.string().uuid().optional(),
   objective: z.string().trim().min(1).max(10_000),
   acceptanceCriteria: z.array(z.string().trim().min(1).max(1000)).max(50).optional(),
   /** Continue an existing conversation thread from this task. */

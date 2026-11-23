@@ -26,6 +26,7 @@ import { GeneratedArtifact } from './GeneratedArtifact';
 import { MessageActions } from './MessageActions';
 import { useElementHeight } from '../../hooks/useElementHeight';
 import { useMentions, type MentionCommand } from '../mentions/useMentions';
+import { WorkingIndicator } from './WorkingIndicator';
 
 /** Project-free conversation: no plans, project context or task workflow. */
 export function CasualChat(): React.JSX.Element {
@@ -250,8 +251,8 @@ export function CasualChat(): React.JSX.Element {
                 ) : null}
               <article aria-label={message.role === 'user' ? 'You' : 'Assistant'} className={cn('min-w-0 [overflow-wrap:anywhere]', message.role === 'user' && 'ml-auto max-w-[80%] rounded-2xl bg-message px-4 py-2.5 text-message-foreground')}>
                 {message.role === 'user' && message.attachments.length > 0 ? <div className="mb-2"><AttachmentTray attachments={message.attachments} /></div> : null}
-                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <p role="status" className="flex items-center gap-2 px-1 text-[13px] text-muted-foreground"><span aria-hidden="true" className="working-dots"><span /><span /><span /></span>Thinking</p> : null}
-                {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <p role="status" className="mt-1.5 flex items-center gap-2 px-1 text-[13px] text-muted-foreground"><span aria-hidden="true" className="working-dots"><span /><span /><span /></span>Working</p> : null}
+                {message.role === 'user' ? <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p> : (message.content || (message.activity?.length ?? 0) > 0 || message.error) ? <MessagesTimeline items={buildChatMessageTimeline(message)} live={message.status === 'streaming'} /> : message.status === 'streaming' ? <WorkingIndicator label="Thinking" /> : null}
+                {message.role === 'assistant' && message.status === 'streaming' && message.content ? null : message.role === 'assistant' && message.status === 'streaming' && (message.activity?.length ?? 0) > 0 && !message.content ? <WorkingIndicator className="mt-1.5" label="Working" /> : null}
                 {message.status === 'cancelled' ? <p className="mt-2 text-xs text-muted-foreground">Stopped.</p> : null}
               </article>
               {message.status !== 'streaming' ? (

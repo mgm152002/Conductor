@@ -25,7 +25,7 @@ import { CliRegistrar } from './catalog/registrar';
 import { ConnectorService } from './connectors/connector-service';
 import { IngestionWorker } from './connectors/ingestion-worker';
 import { resumeTargetFor, threadHistory } from './orchestrator/thread-context';
-import type { Task } from '@shared/domain';
+import { GENERAL_WORKSPACE_ID, type Task } from '@shared/domain';
 import { FilesConnectorLifecycle } from './connectors/files-connector';
 import { createMemoryIngestionSink } from './connectors/memory-ingestion-sink';
 import { ConnectorRuntime } from './connectors/connector-runtime';
@@ -284,6 +284,10 @@ export async function bootstrap(): Promise<AppServices> {
   const storage = new DiskManagedStorage(join(app.getPath('userData'), 'blobs'));
   // Agent chats without a project run in this hidden, non-git workspace.
   const AGENT_WORKSPACE_ID = '00000000-0000-4000-8000-0000a6e17000';
+  // Work threads started without a project run in this hidden workspace. It
+  // exists from startup so "No project" can be selected like any workspace.
+  const ensureGeneralWorkspace = (): string => workspaces.ensureHidden(GENERAL_WORKSPACE_ID, 'General', join(app.getPath('userData'), 'general-space')).id;
+  ensureGeneralWorkspace();
   // Late-bound: the approval broker is created after the orchestrator.
   // eslint-disable-next-line prefer-const
   let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
@@ -751,6 +755,7 @@ export async function bootstrap(): Promise<AppServices> {
 
   registerDomainHandlers({
     sandboxAgents,
+    generalWorkspace: ensureGeneralWorkspace,
     router, runner, taskQueries, permissions, registry, audit, store,
     workspaces,
     settings,

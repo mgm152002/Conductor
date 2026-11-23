@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ChatSpace, ChatThread } from '@shared/chat-contract';
-import type { Task, Workspace } from '@shared/domain';
+import { GENERAL_WORKSPACE_ID, type Task, type Workspace } from '@shared/domain';
 import { useApprovalStore, useQuestionStore, useTaskStore, useThreadTierStore, useUiStore, useWorkspaceStore } from '../stores';
 import { useThreadNavigation } from '../hooks/useThreadNavigation';
 import { pickFocusedTask } from './workspace/useFocusedTask';
@@ -716,7 +716,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
   const workProject = workProjectId !== null ? projectsById.get(workProjectId) ?? null : null;
   // Every project's threads in one list, newest first; a project filter narrows it.
   const workTasks = useMemo(() => Object.values(tasks)
-    .filter((task) => projectsById.has(task.workspaceId) && (workProject === null || task.workspaceId === workProject.id))
+    .filter((task) => (projectsById.has(task.workspaceId) || task.workspaceId === GENERAL_WORKSPACE_ID) && (workProject === null || task.workspaceId === workProject.id))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id)), [tasks, projectsById, workProject]);
   const running = useMemo(() => Object.values(tasks).filter((task) => !isTerminalTask(task)).length, [tasks]);
 
@@ -775,11 +775,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}): React
             <button type="button" onClick={onHome ? openChat : openWork} aria-label={onHome ? 'New chat' : 'New thread'} title={`${onHome ? 'New chat' : 'New thread'} (⌘N)`} className="side-icon mr-1"><SquarePenIcon size={14} /></button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {onHome ? <ChatHistory onNavigate={onNavigate} /> : workspaces.length === 0 ? (
-              <button type="button" onClick={() => { setAddProjectOpen(true); }} className="nav-row">
-                <FolderPlusIcon size={14} /><span>Add your first project</span>
-              </button>
-            ) : (
+            {onHome ? <ChatHistory onNavigate={onNavigate} /> : (
               <WorkThreads
                 key={workProject?.id ?? 'all'}
                 project={workProject}

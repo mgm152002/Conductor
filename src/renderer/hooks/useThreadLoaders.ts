@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { GENERAL_WORKSPACE_ID } from '@shared/domain';
 import { useTaskStore, useWorkspaceStore } from '../stores';
 import { useChatStore } from '../stores/chat-store';
 import { useSandboxAgentStore } from '../stores/sandbox-agent-store';
@@ -15,7 +16,7 @@ export function useThreadLoaders(): void {
   const workspaceKey = workspaces.map((w) => w.id).join(',');
   useEffect(() => {
     let cancelled = false;
-    for (const id of workspaceKey === '' ? [] : workspaceKey.split(',')) {
+    for (const id of [GENERAL_WORKSPACE_ID, ...(workspaceKey === '' ? [] : workspaceKey.split(','))]) {
       void window.conductor.task.list({ workspaceId: id, limit: 50 }).then((list) => {
         if (!cancelled) useTaskStore.getState().setTasks(list);
       }).catch(() => { /* surfaced by the main data pump */ });

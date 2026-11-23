@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ApprovalRequest, Task } from '@shared/domain';
+import { GENERAL_WORKSPACE_ID, type ApprovalRequest, type Task } from '@shared/domain';
 import { useApprovalStore, useQuestionStore, useTaskStore, useWorkspaceStore } from '../stores';
 import { isTerminalTask } from '../stores/task-store';
 import { pickFocusedTask } from '../components/workspace/useFocusedTask';
@@ -96,7 +96,7 @@ export function useTaskEvents(): { errors: string[]; retry: () => void } {
       if (!active) return;
       const store = useWorkspaceStore.getState();
       store.setWorkspaces(workspaces);
-      if (store.activeWorkspaceId === initialSelection) store.setActive(workspaces.some((item) => item.id === selected) ? selected : null);
+      if (store.activeWorkspaceId === initialSelection) store.setActive(selected === GENERAL_WORKSPACE_ID || workspaces.some((item) => item.id === selected) ? selected : workspaces.length === 0 ? GENERAL_WORKSPACE_ID : null);
       report('Workspaces');
     }).catch((error: unknown) => { if (active) report('Workspaces', error); }).finally(() => { if (active) useWorkspaceStore.getState().setLoading(false); });
     void refreshTasks();

@@ -17,6 +17,7 @@ export function useThreadNavigation(): {
 
   const selectProject = useCallback(async (workspaceId: string): Promise<void> => {
     if (useWorkspaceStore.getState().activeWorkspaceId === workspaceId) return;
+    // GENERAL_WORKSPACE_ID is "No project"; it is selected like any workspace.
     await window.conductor.workspace.select(workspaceId);
     useWorkspaceStore.getState().setActive(workspaceId);
   }, []);

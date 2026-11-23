@@ -21,6 +21,12 @@ export type UntrustedSource =
   | 'tool_output'
   | 'agent_instruction';
 
+/**
+ * Hidden workspace that Work threads started without a project run in. It is
+ * never listed as a project; the renderer selects it as "No project".
+ */
+export const GENERAL_WORKSPACE_ID = '00000000-0000-4000-8000-0000a6e17001';
+
 export interface Workspace {
   id: string; // uuid v4
   name: string;

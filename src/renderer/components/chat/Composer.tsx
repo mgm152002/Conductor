@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Task } from '@shared/domain';
+import { GENERAL_WORKSPACE_ID, type Task } from '@shared/domain';
 import { useComposerStore, useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
 import { isWorkingState } from '../../lib/thread-status';
 import { useThreadNavigation } from '../../hooks/useThreadNavigation';
@@ -38,6 +38,11 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
 }): React.JSX.Element {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const project = workspaces.find((w) => w.id === activeWorkspaceId);
+  // No project: Work runs in the hidden General workspace (the main process
+  // supplies it when no workspace id is sent).
+  const noProject = project === undefined;
+  const projectId = fork?.workspaceId ?? project?.id ?? null;
   const { selectProject } = useThreadNavigation();
   const [objective, setObjective] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -113,7 +118,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   ], [newThreadDraft, sandboxAgent, fork, planModeSetting, setPlanMode]);
   const mentions = useMentions({
     text: objective, setText: setObjective, textarea, anchor: box, attachments: attachmentDraft,
-    workspaceId: fork?.workspaceId ?? activeWorkspaceId, commands: mentionCommands,
+    workspaceId: fork?.workspaceId ?? project?.id ?? null, commands: mentionCommands,
     currentThreadKey: task !== null && variant === 'docked' ? (task.threadId ?? task.id) : null,
   });
 
@@ -122,7 +127,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   const threadId = task !== null && variant === 'docked' ? (task.threadId ?? task.id) : null;
   // While the agent works, a message can still be sent: steered (interrupt
   // and run next) or queued (run after the current task finishes).
-  const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_OBJECTIVE && activeWorkspaceId !== null && !submitting
+  const canSubmit = trimmed.length > 0 && trimmed.length <= MAX_OBJECTIVE && !submitting
     && !attachmentDraft.busy && attachmentDraft.errors.length === 0
     && (busy || !planMode || chosenAgent !== undefined);
 
@@ -144,7 +149,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   // are handled with Retry / Resume in the header.
   const running = task !== null && (isWorkingState(task.state) || task.state === 'WAITING_FOR_APPROVAL');
   const showStop = running && trimmed.length === 0;
-  const project = workspaces.find((w) => w.id === activeWorkspaceId);
+
 
   useLayoutEffect(() => {
     const element = textarea.current;
@@ -158,7 +163,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
   }, [autoFocus, task?.id]);
 
   async function submit(): Promise<void> {
-    if (!canSubmit || activeWorkspaceId === null) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     // Clear the box at once, like a chat app; put the text back if sending fails.
@@ -180,7 +185,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
         return;
       }
       const created = await window.conductor.task.create({
-        workspaceId: fork?.workspaceId ?? activeWorkspaceId,
+        ...(projectId !== null ? { workspaceId: projectId } : {}),
         ...(fork !== undefined ? { forkFromTaskId: fork.id } : {}),
         objective: trimmed,
         ...(task !== null && variant === 'docked' ? { parentTaskId: task.id } : {}),
@@ -228,9 +233,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
     }
   }
 
-  const placeholder = activeWorkspaceId === null
-    ? 'Add a project to start a task'
-    : fork !== undefined ? 'Continue in a new thread…'
+  const placeholder = fork !== undefined ? 'Continue in a new thread…'
     : task !== null && variant === 'docked'
       ? busy ? 'Steer the agent, or queue a follow-up…' : 'Reply…'
       : planMode ? 'Describe what to build…' : 'Ask anything. @ files, / commands';
@@ -287,7 +290,7 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
             onPick={() => { void attachmentDraft.pick(); }}
             picker={false}
             busy={attachmentDraft.busy}
-            disabled={submitting || activeWorkspaceId === null}
+            disabled={submitting}
             progress={attachmentDraft.progress}
             errors={attachmentDraft.errors}
             onClearErrors={attachmentDraft.clearErrors}
@@ -302,7 +305,6 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
           value={objective}
           maxLength={MAX_OBJECTIVE}
           placeholder={placeholder}
-          disabled={activeWorkspaceId === null}
           onChange={(event) => { setObjective(event.target.value); }}
           onPaste={attachmentDraft.onPaste}
           {...mentions.textareaProps}
@@ -322,18 +324,19 @@ export function Composer({ task, autoFocus = false, variant = 'docked', currentA
 
         <div className="flex items-end gap-2 px-2.5 pt-1 pb-2.5">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" aria-label="Task options">
-          <AttachButton onPick={() => { void attachmentDraft.pick(); }} count={attachmentDraft.attachments.length} disabled={attachmentDraft.busy || submitting || activeWorkspaceId === null} />
+          <AttachButton onPick={() => { void attachmentDraft.pick(); }} count={attachmentDraft.attachments.length} disabled={attachmentDraft.busy || submitting} />
           <div className="min-w-0 max-w-full">
             <MenuSelect
               label="Project"
-              value={activeWorkspaceId ?? ''}
+              value={noProject ? GENERAL_WORKSPACE_ID : project.id}
               disabled={(task !== null && variant === 'docked') || fork !== undefined}
               onChange={(next) => { if (next) void selectProject(next).catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Could not switch project'); }); }}
               title={project?.rootPath}
               className="max-w-full sm:max-w-48"
-              options={workspaces.length === 0
-                ? [{ value: '', label: 'No project', mark: <FolderIcon size={13} /> }]
-                : workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name, mark: <FolderIcon size={13} /> }))}
+              options={[
+                { value: GENERAL_WORKSPACE_ID, label: 'No project', mark: <FolderIcon size={13} /> },
+                ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name, mark: <FolderIcon size={13} /> })),
+              ]}
             />
           </div>
           <div className="min-w-0 max-w-full">

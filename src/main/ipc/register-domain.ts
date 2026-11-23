@@ -99,6 +99,8 @@ export interface DomainHandlerDeps {
   audit: AuditLog;
   store: Store;
   workspaces: WorkspaceService;
+  /** The hidden workspace threads run in when the user has no project. */
+  generalWorkspace?: () => string;
   settings: SettingsService;
   orchestrator: Orchestrator;
   resumeCenter: ResumeCenter;
@@ -311,6 +313,10 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
   // through CONTEXT_LOADING → PLANNING, with progress streamed via events.
   // Validation failures reject before any task is created and surface as a
   // typed handler error to the renderer.
+  const generalWorkspaceId = (): string => {
+    if (deps.generalWorkspace === undefined) throw new Error('No project selected');
+    return deps.generalWorkspace();
+  };
   router.handle(
     'task.create',
     TaskCreateRequest,
@@ -327,7 +333,7 @@ export function registerDomainHandlers(deps: DomainHandlerDeps): void {
       const bindTo = sandboxAgentId ?? forkAgentId;
       const agentId = sandboxAgentId !== undefined && deps.sandboxAgents !== undefined ? deps.sandboxAgents.startingCli(sandboxAgentId, input.agentId) : input.agentId;
       const parentTaskId = input.parentTaskId ?? fork;
-      return deps.runner.create({workspaceId:input.workspaceId,objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(parentTaskId ? {parentTaskId}:{}),...(fork !== undefined ? {fork:true}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && bindTo === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
+      return deps.runner.create({workspaceId:input.workspaceId ?? generalWorkspaceId(),objective:input.objective,...(input.attachmentIds ? {attachmentIds:input.attachmentIds}:{}),...(input.acceptanceCriteria ? {acceptanceCriteria:input.acceptanceCriteria}:{}),...(parentTaskId ? {parentTaskId}:{}),...(fork !== undefined ? {fork:true}:{}),...(agentId ? {agentId}:{}),...(input.plan === true && bindTo === undefined ? {plan:true}:{}),...(input.runOptions ? {runOptions:parseRunOptions(input.runOptions)}:{}),
         ...(bindTo !== undefined && deps.sandboxAgents !== undefined ? { onCreated: (task: Task) => { deps.sandboxAgents!.bindThread(task.threadId ?? task.id, bindTo); } } : {})});
     },
   );

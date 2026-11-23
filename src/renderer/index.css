@@ -492,6 +492,45 @@ body {
   50% { transform: scaleY(1); }
 }
 
+/* Claude Code-style working row: a star glyph that cycles through sizes and
+   a label with a soft highlight sweeping left to right. */
+.cc-working { animation: conductor-fade 160ms ease-out both; }
+.cc-glyph {
+  display: inline-block;
+  width: 1.1em;
+  flex: none;
+  text-align: center;
+  color: var(--primary);
+  font-size: 15px;
+  line-height: 1;
+}
+.cc-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 38%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 62%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: conductor-cc-sweep 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: background-position;
+}
+.cc-meta { color: color-mix(in srgb, var(--muted-foreground) 70%, transparent); font-size: 12px; }
+@keyframes conductor-cc-sweep {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-working { animation: none; }
+  .cc-shimmer { animation: none; background: none; color: var(--muted-foreground); }
+}
+
 .working-dots {
   display: inline-flex;
   align-items: center;

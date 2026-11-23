@@ -512,6 +512,44 @@ export function messageShowsCurrentHandoff(message: ChatMessage): boolean {
   });
 }
 
+/**
+ * Activity offsets are recorded as the reply streams, so they can fall in the
+ * middle of a word, a link or a code fence. Splitting there cuts the markdown
+ * in two ("[docs](https://git" … "hub.com)") and neither half renders. Snap
+ * the split back to the start of the line it falls in (or, within one long
+ * line, the previous whitespace), and out of any open code fence.
+ */
+export function safeSplitOffset(content: string, cursor: number, offset: number): number {
+  if (offset >= content.length || offset <= cursor) return offset;
+  // Between two tokens already (whitespace on either side of the split).
+  const atBoundary = /\s/.test(content[offset - 1] ?? '') || /\s/.test(content[offset] ?? '');
+  let split = offset;
+  if (!atBoundary) {
+    const head = content.slice(cursor, offset);
+    const lineStart = head.lastIndexOf('\n');
+    if (lineStart !== -1) split = cursor + lineStart + 1;
+    else {
+      const space = Math.max(head.lastIndexOf(' '), head.lastIndexOf('\t'));
+      // A single unbroken run of text cannot be split safely; keep it whole.
+      split = space === -1 ? cursor : cursor + space + 1;
+    }
+  }
+  // Do not leave a markdown link or inline code span open at the split.
+  const before = content.slice(cursor, split);
+  const openLink = before.lastIndexOf('[') > before.lastIndexOf(']') || before.lastIndexOf('](') > before.lastIndexOf(')');
+  const ticks = (before.replace(/`{3,}/g, '').match(/`/g) ?? []).length;
+  if (openLink || ticks % 2 === 1) {
+    const paragraph = before.lastIndexOf('\n\n');
+    split = paragraph === -1 ? cursor : cursor + paragraph + 2;
+  }
+  const fences = (content.slice(0, split).match(/^ {0,3}(```|~~~)/gm) ?? []).length;
+  if (fences % 2 === 1) {
+    const open = content.slice(0, split).search(/^ {0,3}(```|~~~)(?![\s\S]*^ {0,3}(```|~~~))/m);
+    split = open === -1 ? cursor : Math.max(cursor, open);
+  }
+  return split;
+}
+
 /** Builds the same work-log presentation for a standalone Chat assistant reply. */
 export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
   const items: TimelineItem[] = [];
@@ -551,7 +589,7 @@ export function buildChatMessageTimeline(message: ChatMessage): TimelineItem[] {
     for (const entry of activity) {
       const handoff = toHandoff(entry);
       if (handoff !== null) { flushWork(); items.push(handoff); continue; }
-      const offset = Math.min(Math.max(entry.contentOffset ?? cursor, cursor), content.length);
+      const offset = safeSplitOffset(content, cursor, Math.min(Math.max(entry.contentOffset ?? cursor, cursor), content.length));
       const prose = content.slice(cursor, offset).trim();
       if (prose !== '') {
         flushWork();

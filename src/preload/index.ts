@@ -344,7 +344,8 @@ const conductor = {
     /** Rename a thread; resolves to its root task carrying the new title. */
     renameThread: (threadId:string,title:string):Promise<Task> => invoke('task.renameThread',{threadId,title}),
     create: (input: {
-      workspaceId: string;
+      /** Omitted = no project (the hidden General workspace). */
+      workspaceId?: string;
       objective: string;
       acceptanceCriteria?: string[];
       parentTaskId?: string;

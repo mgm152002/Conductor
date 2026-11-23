@@ -12,6 +12,7 @@ import { DeliveredFiles } from '../workspace/ArtifactsRegion';
 import { PendingApprovalPanel } from '../chat/PendingApprovalPanel';
 import { AgentAvatar, type AgentMood } from '../ui/AgentAvatar';
 import { Alert } from '../ui/primitives';
+import { WorkingIndicator } from '../chat/WorkingIndicator';
 
 // One agent's answer in a chat: its avatar and name, then what it did and
 // said (the same timeline Work threads use), its approval requests inline,
@@ -79,10 +80,7 @@ export function AgentReply({ agent, task, onText, previousRun, onRun, onFork, na
         {visible.length > 0 ? <MessagesTimeline items={visible} live={live} /> : null}
         {details !== null ? <div className="mt-3 empty:hidden"><DeliveredFiles taskId={task.id} artifacts={details.artifacts} /></div> : null}
         {live ? (
-          <p role="status" className="mt-1 flex items-center gap-2 px-1 text-[13px] text-muted-foreground">
-            <span aria-hidden="true" className="working-dots"><span /><span /><span /></span>
-            <span className="truncate">{current !== undefined ? 'Working' : 'Thinking'}</span>
-          </p>
+          <WorkingIndicator className="mt-1" label={current !== undefined ? 'Working' : 'Thinking'} />
         ) : null}
         {!live && visible.length === 0 && capacity === undefined && details !== null && !details.artifacts.some((artifact) => artifact.delivered === true) ? <p className="text-xs text-muted-foreground">No reply.</p> : null}
         <div className="mt-2 empty:hidden"><PendingApprovalPanel task={task} /></div>
