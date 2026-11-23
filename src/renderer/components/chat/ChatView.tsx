@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Task, Workspace } from '@shared/domain';
 import type { TaskDetails } from '@shared/task-view';
 import { useTaskStore, useUiStore, useWorkspaceStore } from '../../stores';
@@ -80,10 +80,13 @@ function StatusLine({ task, details, items }: { task: Task; details: TaskDetails
 }
 
 /** One message in the thread: the user's request, the agent's work and reply, and its status. */
-function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun, onFork }: {
-  task: Task; isLatest: boolean; onDetails?: (() => void) | undefined; onLoaded: () => void;
+// Memoised: a thread re-renders whenever any task changes, but an earlier
+// message only needs to when its own task or details do. Callbacks take the
+// task id so the parent can pass the same functions to every turn.
+const Turn = memo(function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun, onFork }: {
+  task: Task; isLatest: boolean; onDetails?: ((taskId: string) => void) | undefined; onLoaded: () => void;
   /** Start a new thread from this message; absent for read-only history. */
-  onFork?: (() => void) | undefined;
+  onFork?: ((taskId: string) => void) | undefined;
   /** The previous turn's CLI/model, so a switch between turns shows a handoff divider like chat. */
   previousRun?: TurnRun | undefined;
   onRun?: ((taskId: string, run: TurnRun) => void) | undefined;
@@ -121,7 +124,7 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun, onFork 
   // The backend's stored output copy ("Document") would only duplicate it.
   const generatedInChat = !live && replyText !== '' && (hasArtifactBlock(replyText) || (requestedKind !== null && !hasDeliveredFileLink(replyText)));
   return (
-    <section aria-label={`Message: ${task.objective.slice(0, 60)}`} className="group/turn flex flex-col gap-5">
+    <section aria-label={`Message: ${task.objective.slice(0, 60)}`} className={cn('group/turn flex flex-col gap-5', !isLatest && 'offscreen-skip')}>
       {error !== null ? <Alert action={<Button size="xs" variant="ghost" onClick={refresh}>Retry details</Button>}>{error}</Alert> : null}
       <MessagesTimeline items={items} live={live} />
       {!live && replyText !== '' && requestedKind !== null && !hasArtifactBlock(replyText) && !hasDeliveredFileLink(replyText)
@@ -155,15 +158,15 @@ function Turn({ task, isLatest, onDetails, onLoaded, previousRun, onRun, onFork 
       ) : null}
       {!live ? (
         <div className="-mt-3 flex items-center">
-          <MessageActions text={replyText} at={task.updatedAt} onFork={onFork} className="group-hover/turn:opacity-100" />
+          <MessageActions text={replyText} at={task.updatedAt} onFork={onFork === undefined ? undefined : () => { onFork(task.id); }} className="group-hover/turn:opacity-100" />
           {!isLatest && onDetails !== undefined ? (
-            <button type="button" onClick={onDetails} className="ms-auto cursor-pointer text-3xs text-muted-foreground opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100">Inspect this message</button>
+            <button type="button" onClick={() => { onDetails(task.id); }} className="ms-auto cursor-pointer text-3xs text-muted-foreground opacity-0 transition-opacity group-hover/turn:opacity-100 hover:text-foreground focus-visible:opacity-100">Inspect this message</button>
           ) : null}
         </div>
       ) : null}
     </section>
   );
-}
+});
 
 function InspectedDetailsPanel({ task }: { task: Task }): React.JSX.Element {
   const { details } = useTaskDetails(task);
@@ -201,6 +204,8 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
   }, [key, latest.id]);
   useEffect(() => { stick.current = true; }, [key]);
 
+  const inspectTurn = useCallback((taskId: string) => { useTaskStore.getState().focus(taskId); openDetails('files'); }, [openDetails]);
+  const forkTurn = useCallback((taskId: string) => { useUiStore.getState().setForkFrom(taskId); }, []);
   const follow = useCallback(() => {
     const element = scroller.current;
     if (element !== null && stick.current) element.scrollTop = element.scrollHeight;
@@ -239,8 +244,8 @@ function Thread({ focused, project }: { focused: Task; project: Workspace | unde
                 task={turn}
                 isLatest={index === turns.length - 1}
                 onLoaded={follow}
-                onDetails={() => { useTaskStore.getState().focus(turn.id); openDetails('files'); }}
-                onFork={() => { useUiStore.getState().setForkFrom(turn.id); }}
+                onDetails={inspectTurn}
+                onFork={forkTurn}
                 previousRun={index > 0 ? turnRuns.get(turns[index - 1]!.id) : undefined}
                 onRun={reportRun}
               />

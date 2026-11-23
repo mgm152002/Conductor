@@ -70,5 +70,10 @@ export function useSystemAppearance(): Appearance {
     applyTheme(themeId, appearance);
   }, [themeId, appearance]);
 
+  const reduceEffects = useThemeStore((state) => state.reduceEffects);
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-effects', reduceEffects);
+  }, [reduceEffects]);
+
   return appearance;
 }

@@ -27,6 +27,10 @@ function createMainWindow(): BrowserWindow {
       sandbox: true,
       webSecurity: true,
       nodeIntegration: false,
+      // Cache compiled renderer code from the first launch onwards (instead of
+      // waiting for code to run "hot"), so later launches parse less JS —
+      // noticeable on slower Macs. Performance only; no security effect.
+      v8CacheOptions: 'bypassHeatCheck',
     },
   });
 

@@ -788,3 +788,32 @@ body {
 .dark .composer-glass {
   background: color-mix(in srgb, var(--card) 68%, transparent);
 }
+
+/* Earlier messages in a long thread: the browser skips their layout and paint
+   while they are off screen, and remembers their real height once seen, so
+   long threads scroll and stream as lightly as short ones. */
+.offscreen-skip {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+}
+
+/* Reduced effects (Settings > Appearance > Performance; on by default on
+   low-power Macs). Live blur is re-rendered on every frame the content behind
+   it moves, and looping animations keep the compositor busy; both give way to
+   solid surfaces and still indicators. Unlayered, so it wins over utilities. */
+.reduce-effects .composer-glass,
+.reduce-effects .dropdown-glass,
+.reduce-effects .dialog-backdrop,
+.reduce-effects [class*='backdrop-blur'] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.reduce-effects .composer-glass { background: var(--popover); }
+.dark.reduce-effects .composer-glass { background: var(--card); }
+.reduce-effects .dropdown-glass { background: var(--popover); }
+.reduce-effects .dialog-backdrop { background: color-mix(in srgb, var(--background) 78%, transparent); }
+.reduce-effects :is(.cc-shimmer, .text-shimmer) { animation: none; background: none; color: var(--muted-foreground); }
+.reduce-effects :is(.animate-status-pulse, .eq-bars > span, .working-dots > span, .measures > span[data-state='running']) {
+  animation: none;
+}
+.reduce-effects .working-dots > span { opacity: 0.6; }
