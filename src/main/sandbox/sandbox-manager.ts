@@ -109,14 +109,17 @@ export function parseMemUsage(text: string): number {
 export type DockerRunner = (args: string[], options?: { timeoutMs?: number }) => Promise<string>;
 
 /**
- * Where a docker CLI lives when the app is launched from Finder (which has a
- * minimal PATH): Docker Desktop, Homebrew, OrbStack, Rancher Desktop, Colima.
+ * Where a docker CLI lives when the app is launched from a desktop shell with a
+ * minimal PATH: Docker Desktop, Homebrew, OrbStack, Rancher Desktop, Colima,
+ * plus the usual Linux and Windows install locations. Missing dirs are harmless.
  */
-export function dockerSearchDirs(home: string = homedir()): string[] {
+export function dockerSearchDirs(home: string = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
+  const programFiles = env['ProgramFiles'] ?? 'C:\\Program Files';
   return [
     '/usr/local/bin', '/opt/homebrew/bin', '/Applications/Docker.app/Contents/Resources/bin', join(home, '.docker/bin'),
     join(home, '.orbstack/bin'), '/Applications/OrbStack.app/Contents/MacOS/xbin',
-    join(home, '.rd/bin'), join(home, '.colima/bin'), '/usr/bin', '/bin',
+    join(home, '.rd/bin'), join(home, '.colima/bin'), '/snap/bin', '/usr/bin', '/bin',
+    join(programFiles, 'Docker', 'Docker', 'resources', 'bin'), join(programFiles, 'Rancher Desktop', 'resources', 'resources', 'win32', 'bin'),
   ];
 }
 
@@ -126,25 +129,60 @@ function searchPath(): string {
 }
 
 function dockerBinary(): string | undefined {
+  const names = process.platform === 'win32' ? ['docker.exe', 'docker.cmd', 'docker'] : ['docker'];
   for (const dir of searchPath().split(delimiter)) {
-    const candidate = join(dir, 'docker');
-    if (existsSync(candidate)) return candidate;
+    for (const name of names) {
+      const candidate = join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
   }
   return undefined;
 }
 
-const defaultDocker: DockerRunner = (args, options = {}) => new Promise((resolve, reject) => {
-  const docker = dockerBinary();
-  if (docker === undefined) { reject(new Error('Docker is not installed')); return; }
-  execFile(docker, args, { timeout: options.timeoutMs ?? 60_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PATH: searchPath() } }, (error, stdout, stderr) => {
-    if (error !== null) {
-      const detail = `${stderr}`.split('\n').map((line) => line.trim()).find((line) => line !== '') ?? error.message;
-      reject(new Error(detail.slice(0, 400)));
-      return;
-    }
-    resolve(`${stdout}`);
+function execDocker(docker: string, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(docker, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PATH: searchPath() } }, (error, stdout, stderr) => {
+      if (error !== null) {
+        const detail = `${stderr}`.split('\n').map((line) => line.trim()).find((line) => line !== '') ?? error.message;
+        reject(new Error(detail.slice(0, 400)));
+        return;
+      }
+      resolve(`${stdout}`);
+    });
   });
-});
+}
+
+/** The docker context that answered last; undefined means the CLI's own active one. */
+let workingContext: string | undefined;
+
+/**
+ * The CLI's active context may point at a runtime that is not running (say
+ * Docker Desktop, while OrbStack, Colima or Rancher Desktop is). If it does not
+ * answer, use whichever other context does. DOCKER_HOST / DOCKER_CONTEXT win.
+ */
+async function pickContext(docker: string): Promise<string | undefined> {
+  if (process.env['DOCKER_HOST'] || process.env['DOCKER_CONTEXT']) return undefined;
+  if (workingContext !== undefined) return workingContext;
+  try { await execDocker(docker, ['info', '--format', '{{.ServerVersion}}'], 10_000); return undefined; } catch { /* try the others */ }
+  let names: string[] = [];
+  try { names = (await execDocker(docker, ['context', 'ls', '--format', '{{.Name}}'], 10_000)).split('\n').map((n) => n.trim()).filter(Boolean); } catch { return undefined; }
+  for (const name of names) {
+    try { await execDocker(docker, ['--context', name, 'info', '--format', '{{.ServerVersion}}'], 10_000); workingContext = name; return name; } catch { /* next */ }
+  }
+  return undefined;
+}
+
+const defaultDocker: DockerRunner = async (args, options = {}) => {
+  const docker = dockerBinary();
+  if (docker === undefined) throw new Error('Docker is not installed');
+  const context = await pickContext(docker);
+  try {
+    return await execDocker(docker, context === undefined ? args : ['--context', context, ...args], options.timeoutMs ?? 60_000);
+  } catch (error) {
+    workingContext = undefined; // re-probe next time, in case the runtime changed
+    throw error;
+  }
+};
 
 export interface SandboxManagerOptions {
   docker?: DockerRunner;
