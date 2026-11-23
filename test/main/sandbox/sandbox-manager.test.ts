@@ -612,3 +612,10 @@ describe('dockerSearchDirs', () => {
     ]));
   });
 });
+
+describe('dockerSearchDirs (other platforms)', () => {
+  it('includes Linux and Windows install locations', () => {
+    expect(dockerSearchDirs('/home/me', { ProgramFiles: 'D:\\PF' })).toEqual(expect.arrayContaining(['/snap/bin', '/usr/bin']));
+    expect(dockerSearchDirs('/home/me', { ProgramFiles: 'D:\\PF' }).some((d) => d.includes('D:\\PF'))).toBe(true);
+  });
+});
