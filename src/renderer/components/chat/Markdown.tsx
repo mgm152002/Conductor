@@ -4,6 +4,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../../lib/cn';
 import { splitVideoUrls, splitVisualBlocks } from '../../lib/visuals';
+import { splitMarkdownBlocks } from '../../lib/markdown-blocks';
 import { splitArtifactBlocks } from '@shared/generated-artifacts';
 import { HtmlVisual } from './HtmlVisual';
 import { MermaidDiagram } from './MermaidDiagram';
@@ -279,6 +280,22 @@ export interface MarkdownProps {
   live?: boolean;
 }
 
+const REMARK_PLUGINS = [remarkGfm];
+
+/** One top-level block, parsed only when its own text changes. */
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }): React.JSX.Element {
+  return <ReactMarkdown remarkPlugins={REMARK_PLUGINS} skipHtml={true} components={components}>{text}</ReactMarkdown>;
+});
+
+/**
+ * Markdown rendered block by block. While a reply streams in only its last
+ * block changes, so earlier paragraphs, tables and code are not re-parsed.
+ * Each block renders as fragments, so the DOM matches a single parse.
+ */
+function MarkdownBlocks({ text }: { text: string }): React.JSX.Element {
+  return <>{splitMarkdownBlocks(text).map((block, index) => <MarkdownBlock key={index} text={block} />)}</>;
+}
+
 /**
  * Renders GitHub Flavored Markdown (GFM) using react-markdown and remark-gfm.
  * Raw HTML is disallowed, and links are rendered inert as text spans so that
@@ -337,16 +354,7 @@ function MarkdownView({ text, children, className, live = false }: MarkdownProps
                   <video controls preload="metadata" src={part.url} className="aspect-video w-full rounded-lg border border-border bg-black" />
                 </figure>
               )
-              : (
-                <ReactMarkdown
-                  key={`${index}:${visualIndex}:${partIndex}`}
-                  remarkPlugins={[remarkGfm]}
-                  skipHtml={true}
-                  components={components}
-                >
-                  {part.text}
-                </ReactMarkdown>
-              )));
+              : <MarkdownBlocks key={`${index}:${visualIndex}:${partIndex}`} text={part.text} />));
       })}
     </div>
   );

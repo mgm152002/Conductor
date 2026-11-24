@@ -11,6 +11,8 @@ interface TaskState {
   detailsRevision: Record<string, number>;
   focus: (id: string | null) => void;
   bumpDetails: (id: string) => void;
+  /** Bump several tasks in one store update (one re-render, not one per task). */
+  bumpDetailsMany: (ids: readonly string[]) => void;
   setTasks: (tasks: Task[]) => void;
   upsert: (task: Task) => void;
   remove: (id: string) => void;
@@ -28,6 +30,14 @@ export const useTaskStore = create<TaskState>((set) => ({
   focus: (id): void => { set({ focusedTaskId: id }); },
   bumpDetails: (id): void => {
     set((state) => ({ detailsRevision: { ...state.detailsRevision, [id]: (state.detailsRevision[id] ?? 0) + 1 } }));
+  },
+  bumpDetailsMany: (ids): void => {
+    if (ids.length === 0) return;
+    set((state) => {
+      const detailsRevision = { ...state.detailsRevision };
+      for (const id of ids) detailsRevision[id] = (detailsRevision[id] ?? 0) + 1;
+      return { detailsRevision };
+    });
   },
   setTasks: (tasks): void => {
     // Lists may be workspace-scoped and race live events. Merge snapshots

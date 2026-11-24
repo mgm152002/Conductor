@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import { MoonIcon, SunIcon } from 'lucide-react';
 import { BUILT_IN_THEMES, GRAPHITE_DARK_THEME_COLORS, GRAPHITE_LIGHT_THEME_COLORS, getThemeColorsForAppearance, type ThemeAppearance, type ThemeColors } from '@shared/theme-palettes';
 import { cn } from '../../lib/cn';
-import { THEMES, useThemeStore, type ColorScheme, type ThemeId } from '../../stores/theme-store';
+import { THEMES, useThemeStore, type ColorScheme, type EffectsMode, type ThemeId } from '../../stores/theme-store';
 import { SettingsSection } from './SettingsLayout';
 
 // Settings > Appearance (design adapted under MIT; see third-party-licenses):
@@ -105,6 +105,37 @@ function SchemeCard({ scheme, themeId, active, onPick }: { scheme: ColorScheme; 
   );
 }
 
+const EFFECT_OPTIONS: Array<{ id: EffectsMode; label: string; hint: string }> = [
+  { id: 'auto', label: 'Automatic', hint: 'Reduced on Macs with 4 or fewer cores or little memory' },
+  { id: 'full', label: 'Full', hint: 'Translucent glass and animated indicators' },
+  { id: 'reduced', label: 'Reduced', hint: 'Solid surfaces and still indicators; smoother on older Macs' },
+];
+
+function EffectsSettings(): React.JSX.Element {
+  const effects = useThemeStore((s) => s.effects);
+  const reduced = useThemeStore((s) => s.reduceEffects);
+  const setEffects = useThemeStore((s) => s.setEffects);
+  return (
+    <SettingsSection title="Performance">
+      <div role="radiogroup" aria-label="Visual effects" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {EFFECT_OPTIONS.map((option) => (
+          <button key={option.id} type="button" role="radio" aria-checked={effects === option.id} onClick={() => { setEffects(option.id); }}
+            className={cn('flex cursor-pointer flex-col gap-0.5 rounded-xl border px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              effects === option.id ? 'border-transparent ring-2 ring-ring' : 'border-border/60 hover:bg-accent/50')}>
+            <span className="text-sm font-medium text-foreground">{option.label}</span>
+            <span className="text-xs text-muted-foreground">{option.hint}</span>
+          </button>
+        ))}
+      </div>
+      {effects === 'auto' ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {reduced ? 'This Mac looks low-powered, so effects are reduced.' : 'This Mac can handle full effects.'}
+        </p>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
 export function AppearanceSettings(): React.JSX.Element {
   const scheme = useThemeStore((s) => s.scheme);
   const themeId = useThemeStore((s) => s.themeId);
@@ -142,6 +173,7 @@ export function AppearanceSettings(): React.JSX.Element {
           })}
         </div>
       </SettingsSection>
+      <EffectsSettings />
     </>
   );
 }

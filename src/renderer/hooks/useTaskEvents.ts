@@ -4,6 +4,9 @@ import { useApprovalStore, useQuestionStore, useTaskStore, useWorkspaceStore } f
 import { isTerminalTask } from '../stores/task-store';
 import { pickFocusedTask } from '../components/workspace/useFocusedTask';
 
+/** At most one details refresh per streaming task in this window (~6 a second). */
+export const STREAM_REFRESH_MS = 160;
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'Unexpected error';
 }
@@ -64,10 +67,26 @@ export function useTaskEvents(): { errors: string[]; retry: () => void } {
         void refreshApprovals();
       }
     });
+    // An agent streams many small chunks a second, and each bump reloads the
+    // task's details and re-renders its reply. Coalesce them: the first chunk
+    // after a quiet spell shows at once, then at most one refresh per window.
+    const streamed = new Set<string>();
+    let streamTimer: number | null = null;
+    let lastFlush = 0;
+    const flushStream = (): void => {
+      streamTimer = null;
+      lastFlush = performance.now();
+      const ids = [...streamed];
+      streamed.clear();
+      useTaskStore.getState().bumpDetailsMany(ids);
+    };
     const stopStream = window.conductor.on('task.stream', (payload) => {
       const event = payload as { taskId?: string };
-      if (event && typeof event.taskId === 'string') useTaskStore.getState().bumpDetails(event.taskId);
+      if (!event || typeof event.taskId !== 'string') return;
+      streamed.add(event.taskId);
+      if (streamTimer === null) streamTimer = window.setTimeout(flushStream, Math.max(0, STREAM_REFRESH_MS - (performance.now() - lastFlush)));
     });
+    const stopStreamTimer = (): void => { if (streamTimer !== null) window.clearTimeout(streamTimer); streamTimer = null; };
     const stopQuestions = window.conductor.on('question.requested', (payload) => {
       const request = payload as import('@shared/domain').AgentQuestionRequest;
       if (request && typeof request.id === 'string') {
@@ -85,7 +104,7 @@ export function useTaskEvents(): { errors: string[]; retry: () => void } {
       }
       void refreshApprovals();
     });
-    return () => { mounted.current = false; approvalRequest.current += 1; stopTasks(); stopStream(); stopApprovals(); stopQuestions(); };
+    return () => { mounted.current = false; approvalRequest.current += 1; stopTasks(); stopStream(); stopStreamTimer(); stopApprovals(); stopQuestions(); };
   }, [refreshApprovals]);
 
   useEffect(() => {

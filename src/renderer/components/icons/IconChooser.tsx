@@ -1,5 +1,6 @@
 import { createElement, useMemo, useRef, useState } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { flushSync } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import {
   Anchor, Atom, Book, BookOpen, Bot, Brain, Briefcase, Bug, Calendar, Camera, ChartColumn, Cloud, CloudCog, Code, Coffee,
   Compass, Cpu, Database, Feather, FileText, Flame, FlaskConical, FolderCode, Gamepad2, Gift, GitBranch, Globe, GraduationCap,
@@ -49,6 +50,21 @@ export type IconChoice =
 
 const escapeXml = (text: string): string => text.replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+/**
+ * An icon's SVG markup. Rendered with the client renderer the app already
+ * runs, into a detached element: importing react-dom/server for this alone
+ * put the whole server renderer into the startup bundle. Call from event
+ * handlers (not during render), as the pickers do.
+ */
+function iconMarkup(Icon: LucideIcon): string {
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  flushSync(() => { root.render(createElement(Icon)); });
+  const markup = host.innerHTML;
+  root.unmount();
+  return markup;
+}
+
 /** A picked icon, emoji or monogram as a 40×40 SVG tile: the glyph in its colour over a soft tint of it. */
 export function choiceSvg(choice: Exclude<IconChoice, { kind: 'image' }>): string {
   const tile = (color: string, body: string): string =>
@@ -62,7 +78,7 @@ export function choiceSvg(choice: Exclude<IconChoice, { kind: 'image' }>): strin
   }
   const Icon = ICONS.find(([name]) => name === choice.name)?.[1] ?? FolderCode;
   // The icon's own paths, without its outer <svg>, centred on the tile.
-  const inner = renderToStaticMarkup(createElement(Icon)).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  const inner = iconMarkup(Icon).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
   return tile(choice.color, `<g transform="translate(8 8)" fill="none" stroke="${choice.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`);
 }
 
