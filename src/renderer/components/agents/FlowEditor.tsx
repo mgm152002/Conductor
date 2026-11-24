@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_REPLY_HOURS, flowProblem, FLOW_MAX_NODES, type AgentFlow, type FlowEdge, type FlowNode, type FlowRun, type FlowNodeStatus, type FlowSchedule } from '@shared/agent-flows';
+import { DEFAULT_MAX_ROUNDS, DEFAULT_REPLY_HOURS, flowProblem, FLOW_MAX_NODES, type AgentFlow, type FlowBranch, type FlowEdge, type FlowNode, type FlowRun, type FlowNodeStatus, type FlowSchedule } from '@shared/agent-flows';
 import type { SandboxAgent } from '@shared/sandbox-agents';
 import { buildCron, describeCron, readCron, WEEKDAYS, type ScheduleKind } from '../../lib/flow-schedule';
 import { relativeTime } from '../../lib/time';
 import { cn } from '../../lib/cn';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Alert, Button, Switch, inputClassName, textareaClassName } from '../ui/primitives';
-import { ClockIcon, GlobeIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon } from '../ui/icons';
+import { ClockIcon, GlobeIcon, ListChecksIcon, MailIcon, SparklesIcon, PlayIcon, PlusIcon, Spinner, TrashIcon } from '../ui/icons';
 import { message } from './AgentDialog';
 import { MailPanel } from './MailPanel';
 import { ModelEffortPicker } from '../chat/ModelEffortPicker';
@@ -20,6 +20,7 @@ import { FLOW_TEMPLATES, pickAgent, type FlowTemplate } from '@shared/flow-templ
 // when every step pointing at it has finished. Flows run by hand or on a schedule.
 
 const REPLY = '__reply__';
+const REVIEW = '__review__';
 const NODE_W = 232;
 const NODE_H = 92;
 
@@ -128,8 +129,14 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
   function addStep(agentId: string): void {
     if (draft.nodes.length >= FLOW_MAX_NODES) { setError(`A flow can have up to ${FLOW_MAX_NODES} steps.`); return; }
     const last = draft.nodes[draft.nodes.length - 1];
+    const review = agentId === REVIEW;
     const reply = agentId === REPLY;
-    const node: FlowNode = { id: `step-${Math.random().toString(36).slice(2, 8)}`, kind: reply ? 'reply' : 'agent', agentId: reply ? '' : agentId, ...(reply ? { waitHours: DEFAULT_REPLY_HOURS } : {}), prompt: '', x: last !== undefined ? last.x + NODE_W + 70 : 60, y: last !== undefined ? last.y : 80 };
+    const waits = reply || review;
+    const node: FlowNode = {
+      id: `step-${Math.random().toString(36).slice(2, 8)}`, kind: review ? 'review' : reply ? 'reply' : 'agent', agentId: waits ? '' : agentId,
+      ...(waits ? { waitHours: DEFAULT_REPLY_HOURS } : {}), ...(review ? { maxRounds: DEFAULT_MAX_ROUNDS, ...(clis.find((c) => c.available && !c.remote) !== undefined ? { cli: clis.find((c) => c.available && !c.remote)!.id } : {}) } : {}),
+      prompt: '', x: last !== undefined ? last.x + NODE_W + 70 : 60, y: last !== undefined ? last.y : 80,
+    };
     update({ nodes: [...draft.nodes, node], edges: last !== undefined ? [...draft.edges, { from: last.id, to: node.id }] : draft.edges });
     setSelected({ kind: 'node', id: node.id });
   }
@@ -235,6 +242,24 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
   }), [draft.nodes]);
   const node = selected?.kind === 'node' ? draft.nodes.find((item) => item.id === selected.id) : undefined;
   const nodePos = (id: string): FlowNode | undefined => draft.nodes.find((item) => item.id === id);
+  const selectedEdge = selected?.kind === 'edge' ? draft.edges[selected.index] : undefined;
+  const edgeSource = selectedEdge === undefined ? undefined : draft.nodes.find((item) => item.id === selectedEdge.from);
+  const branchable = edgeSource?.kind === 'reply' || edgeSource?.kind === 'review';
+  /** Set (or clear) the branch condition on the selected arrow. */
+  const setWhen = (when: FlowBranch | undefined): void => {
+    if (selected?.kind !== 'edge') return;
+    update({
+      edges: draft.edges.map((edge, index) => {
+        if (index !== selected.index) return edge;
+        const next: FlowEdge = { from: edge.from, to: edge.to };
+        if (when !== undefined) next.when = when;
+        return next;
+      }),
+    });
+  };
+  const predecessors = node === undefined ? [] : draft.edges.filter((edge) => edge.to === node.id)
+    .map((edge) => draft.nodes.find((item) => item.id === edge.from)).filter((item): item is FlowNode => item !== undefined);
+  const stepLabel = (item: FlowNode): string => item.kind === 'review' ? 'Review my reply' : item.kind === 'reply' ? 'Wait for your reply' : agentById.get(item.agentId)?.name ?? 'Missing agent';
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -283,7 +308,9 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
             </svg>
             {draft.nodes.map((item) => {
               const isReply = item.kind === 'reply';
-              const agent = isReply ? undefined : agentById.get(item.agentId);
+              const isReview = item.kind === 'review';
+              const waits = isReply || isReview;
+              const agent = waits ? undefined : agentById.get(item.agentId);
               const status = statusOf(item.id);
               const on = selected?.kind === 'node' && selected.id === item.id;
               return (
@@ -296,11 +323,17 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
                     onPointerDown={(e) => { startConnect(e, item); }}
                     className="absolute top-1/2 -right-[5px] size-2.5 -translate-y-1/2 cursor-crosshair rounded-full border border-input bg-background transition-transform hover:scale-150 hover:border-foreground" />
                   <span className="flex items-center gap-2">
-                    {isReply ? <span className="grid size-5 place-items-center rounded-md bg-accent text-muted-foreground"><MailIcon size={12} /></span> : agent !== undefined ? <AgentAvatar agent={agent} size={20} /> : <span className="size-5 rounded-md bg-muted" />}
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{isReply ? 'Wait for your reply' : agent?.name ?? 'Missing agent'}</span>
+                    {isReview ? <span className="grid size-5 place-items-center rounded-md bg-accent text-muted-foreground"><ListChecksIcon size={12} /></span>
+                      : isReply ? <span className="grid size-5 place-items-center rounded-md bg-accent text-muted-foreground"><MailIcon size={12} /></span>
+                        : agent !== undefined ? <AgentAvatar agent={agent} size={20} /> : <span className="size-5 rounded-md bg-muted" />}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{isReview ? 'Review my reply' : isReply ? 'Wait for your reply' : agent?.name ?? 'Missing agent'}</span>
                     {status !== undefined ? <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">{status === 'running' ? <Spinner size={11} /> : <span aria-hidden="true" className={cn('size-1.5 rounded-full', STATUS_DOT[status])} />}{STATUS_TEXT[status]}</span> : null}
                   </span>
-                  <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{isReply ? `Pauses until you answer the email (up to ${item.waitHours ?? DEFAULT_REPLY_HOURS} h)` : item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}</span>
+                  <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                    {isReview ? `Approve continues; send-back re-runs the step before it (up to ${item.maxRounds ?? DEFAULT_MAX_ROUNDS} rounds)`
+                      : isReply ? `Pauses until you answer the email (up to ${item.waitHours ?? DEFAULT_REPLY_HOURS} h)`
+                        : item.prompt.trim() === '' ? 'Add what this step should do' : item.prompt}
+                  </span>
                 </div>
               );
             })}
@@ -322,6 +355,7 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
                 { value: '', label: agents.length === 0 ? 'Create an agent first' : 'Add a step…', mark: <PlusIcon size={13} /> },
                 ...agents.map((agent) => ({ value: agent.id, label: agent.name, mark: <AgentAvatar agent={agent} size={16} /> })),
                 { value: REPLY, label: 'Wait for my email reply', mark: <MailIcon size={13} /> },
+                { value: REVIEW, label: 'Review my email reply', mark: <ListChecksIcon size={13} /> },
               ]} />
           </div>
         </div>
@@ -330,10 +364,41 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
           {node !== undefined ? (
             <section className="flex flex-col gap-2.5" aria-label="Step">
               <h3 className="text-sm font-medium text-foreground">Step</h3>
-              {node.kind === 'reply' ? (
+              {node.kind === 'reply' || node.kind === 'review' ? (
                 <>
-                  <p className="text-xs text-muted-foreground">Waits for your email reply, then passes it on.</p>
+                  <p className="text-xs text-muted-foreground">{node.kind === 'review'
+                    ? 'Waits for your email feedback, then routes the workflow to the next step or a revision.'
+                    : 'Waits for your email reply, then passes it on.'}</p>
                   <label className="flex items-center gap-2 text-xs text-muted-foreground">Give up after<input type="number" min={1} max={336} aria-label="Hours to wait" className={cn(inputClassName, 'w-20')} value={node.waitHours ?? DEFAULT_REPLY_HOURS} onChange={(e) => { patchNode(node.id, { waitHours: Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_REPLY_HOURS) }); }} />hours</label>
+                  {node.kind === 'review' ? (
+                    <>
+                      <MenuSelect variant="box" label="Feedback routing CLI" value={node.cli ?? ''}
+                        onChange={(value) => { patchNode(node.id, { cli: value || undefined, model: undefined, effort: undefined, loopTo: undefined }); }}
+                        options={[
+                          { value: '', label: 'Fixed target and keyword matching' },
+                          ...clis.filter((c) => !c.remote).map((c) => ({ value: c.id, label: c.name, disabled: !c.available })),
+                        ]} />
+                      {node.cli !== undefined ? (
+                        <>
+                          <ModelEffortPicker variant="box" agentId={node.cli} label="Feedback routing"
+                            value={{ ...(node.model !== undefined ? { model: node.model } : {}), ...(node.effort !== undefined ? { effort: node.effort } : {}) }}
+                            onChange={(choice) => { patchNode(node.id, { model: choice.model, effort: choice.effort }); }} />
+                          <p className="text-xs text-muted-foreground">This agent reads the workflow and your email feedback, chooses the next step or an earlier step to revise, and passes structured instructions to the workflow. Revision limits stop the flow for review.</p>
+                        </>
+                      ) : null}
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">Send back for at most<input type="number" min={1} max={10} aria-label="Revision rounds" className={cn(inputClassName, 'w-20')} value={node.maxRounds ?? DEFAULT_MAX_ROUNDS} onChange={(e) => { patchNode(node.id, { maxRounds: Math.min(10, Math.max(1, Math.round(Number(e.target.value)) || DEFAULT_MAX_ROUNDS)) }); }} />rounds</label>
+                      <MenuSelect variant="box" label="If no review comes" value={node.onTimeout ?? 'fail'}
+                        onChange={(value) => { patchNode(node.id, { onTimeout: value as 'fail' | 'approve' }); }}
+                        options={[{ value: 'fail', label: 'Fail the flow' }, { value: 'approve', label: 'Proceed as approved' }]} />
+                      {node.cli !== undefined ? null : predecessors.length > 0 ? (
+                        <MenuSelect variant="box" label="Send work back to" value={node.loopTo ?? ''}
+                          onChange={(value) => { patchNode(node.id, { loopTo: value === '' ? undefined : value }); }}
+                          options={[{ value: '', label: 'Nowhere — just decide' }, ...predecessors.map((item) => ({ value: item.id, label: stepLabel(item) }))]} />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Draw an arrow from the step you want reviewed into this one to send work back.</p>
+                      )}
+                    </>
+                  ) : null}
                   {!mailReady ? (
                     <>
                       <Alert tone="warning">Email isn’t connected yet, so this step can’t be answered. Connect AgentMail here.</Alert>
@@ -368,6 +433,30 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
           ) : selected?.kind === 'edge' ? (
             <section className="flex flex-col gap-2.5" aria-label="Arrow">
               <h3 className="text-sm font-medium text-foreground">Arrow</h3>
+              {branchable && selectedEdge !== undefined && edgeSource !== undefined ? (
+                selectedEdge.when === undefined ? (
+                  <Button size="sm" variant="outline" className="self-start" onClick={() => { setWhen({ label: edgeSource.kind === 'review' ? 'approve' : 'approved' }); }}>Branch on the reply</Button>
+                ) : (
+                  <>
+                    <p className="text-xs text-muted-foreground">Only continues when the reply matches this condition.</p>
+                    {edgeSource.kind === 'review' ? (
+                      <MenuSelect variant="box" label="Continues on" value={selectedEdge.when.label}
+                        onChange={(value) => { setWhen({ ...selectedEdge.when, label: value }); }}
+                        options={[{ value: 'approve', label: 'approve — keep going' }, { value: 'revise', label: 'revise — send back' }]} />
+                    ) : (
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">Branch name
+                        <input className={inputClassName} value={selectedEdge.when.label} placeholder="e.g. approved" onChange={(e) => { setWhen({ ...selectedEdge.when, label: e.target.value }); }} />
+                      </label>
+                    )}
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">When the reply matches (a pattern)
+                      <input className={cn(inputClassName, 'font-mono')} value={selectedEdge.when.match ?? ''}
+                        placeholder={edgeSource.kind === 'review' ? 'optional — the built-in verdicts decide' : 'e.g. approve|ship it'}
+                        onChange={(e) => { const match = e.target.value; setWhen(match.trim() === '' ? { label: selectedEdge.when!.label } : { label: selectedEdge.when!.label, match }); }} />
+                    </label>
+                    <Button size="sm" variant="ghost" className="self-start" onClick={() => { setWhen(undefined); }}>Remove condition</Button>
+                  </>
+                )
+              ) : null}
               <Button size="sm" variant="outline" className="self-start" onClick={() => { update({ edges: draft.edges.filter((_, i) => i !== selected.index) }); setSelected(null); }}><TrashIcon size={13} />Remove arrow</Button>
             </section>
           ) : (

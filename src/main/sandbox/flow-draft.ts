@@ -70,7 +70,7 @@ export function parseDraft(reply: string, agents: readonly DraftAgent[], mail: b
     return agents.find((agent) => agent.name.toLowerCase() === wanted || agent.id === label.trim());
   };
   const keys = new Map<string, string>();
-  const nodes: FlowNode[] = [];
+  const nodes: FlowInput['nodes'] = [];
   const links: Array<{ id: string; after: unknown }> = [];
   for (const [index, item] of (raw.steps as unknown[]).slice(0, FLOW_MAX_NODES).entries()) {
     const step = item as { key?: unknown; kind?: unknown; agent?: unknown; prompt?: unknown; after?: unknown; waitHours?: unknown } | null;
