@@ -1687,6 +1687,25 @@ const migration045: Migration = {
   },
 };
 
+// Migration 46 — feedback loops in flows. A reply or review step records the
+// `branch` it settled on (the label of the arrow whose condition the reply
+// text matched, or the review verdict), which decides which outgoing arrows
+// continue. A review step counts its `rounds`; when a verdict is "revise" it
+// resets the reviewed step with `pending_input` holding the feedback text to
+// inject into that step's next objective. All three live on the run-node row
+// so the verdict survives restarts and never has to be re-parsed from email.
+const migration046: Migration = {
+  version: 46,
+  name: 'agent_flow_review_loop',
+  up({ db }: Tx): void {
+    db.exec(`
+      ALTER TABLE agent_flow_run_nodes ADD COLUMN rounds INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE agent_flow_run_nodes ADD COLUMN branch TEXT;
+      ALTER TABLE agent_flow_run_nodes ADD COLUMN pending_input TEXT;
+    `);
+  },
+};
+
 /** All migrations in version order. Must be a gapless 1..N sequence. */
 export const MIGRATIONS: readonly Migration[] = [
   migration001,
@@ -1734,4 +1753,5 @@ export const MIGRATIONS: readonly Migration[] = [
   migration043,
   migration044,
   migration045,
+  migration046,
 ];

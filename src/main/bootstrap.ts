@@ -678,6 +678,7 @@ export async function bootstrap(): Promise<AppServices> {
     const task = payload as Task | undefined;
     if (task !== undefined && typeof task.id === 'string') { void sandboxAgents.taskSettled(task).catch(() => undefined); void flows.taskSettled(task).catch(() => undefined); }
   });
+  flows.setFeedbackRouter(({ prompt, cli, model, effort }) => groupPlanner.generateText(prompt, 'Route workflow feedback', { agentId: cli, ...(model !== undefined ? { model } : {}), ...(effort !== undefined ? { effort } : {}) }));
   flows.setPlanner((prompt) => groupPlanner.ask('Drafting a flow', prompt, 'Read-only. Do not use tools, run commands, or edit files. Reply with the JSON object only.'));
   flows.setReplyReader((taskId) => {
     const task = stateMachine.getTask(taskId);
