@@ -4,6 +4,7 @@ import { cp } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { BrowserDriver } from './browser-tools';
+import { readCookies } from './chrome-cookies';
 
 // Chrome on the user's own Mac, driven over the DevTools protocol. It runs in
 // its own profile (Chrome refuses remote control of the everyday profile), so
@@ -127,6 +128,14 @@ export interface DeviceChromeOptions {
   sourceProfile?: () => string | undefined;
   /** The user's Chrome data folder (tests). */
   chromeDataDir?: string;
+  /**
+   * Drive the Chrome the user already has open (its everyday profile) instead of a private
+   * copy. It must allow remote debugging (chrome://inspect/#remote-debugging); nothing is
+   * launched or closed, and agents only work in tabs of their own.
+   */
+  attach?: boolean;
+  /** Reads the Keychain password that decrypts copied cookies (tests). */
+  cookiePassword?: () => Promise<string>;
 }
 
 export interface DeviceChromeStatus { available: boolean; browser?: string; running: boolean; visible?: boolean; profile?: { name: string; email?: string; copiedAt: string }; profileError?: string }
@@ -139,6 +148,8 @@ export class DeviceChrome {
   private users = 0;
   private idle: NodeJS.Timeout | undefined;
   private profileError: string | undefined;
+  /** Cookies of a fresh copy still to be handed to the Chrome that starts on it. */
+  private cookiesPending = false;
 
   constructor(private readonly opts: DeviceChromeOptions) {}
 
@@ -174,7 +185,7 @@ export class DeviceChrome {
    */
   private async syncProfile(force = false): Promise<void> {
     const wanted = this.opts.sourceProfile?.();
-    if (wanted === undefined) return;
+    if (wanted === undefined || this.opts.attach === true) return;
     const dataDir = this.opts.chromeDataDir ?? CHROME_DATA_DIR;
     try {
       const source = pickProfile(chromeProfiles(dataDir), wanted);
@@ -186,6 +197,7 @@ export class DeviceChrome {
       await cp(join(dataDir, source.dir), target, { recursive: true, filter: (path) => !SKIP.has(basename(path)) && !/^Singleton/.test(basename(path)) });
       writeFileSync(this.markerFile(), JSON.stringify({ dir: source.dir, name: source.name, ...(source.email !== undefined ? { email: source.email } : {}), copiedAt: new Date().toISOString() }));
       this.profileError = undefined;
+      this.cookiesPending = true;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       this.profileError = code === 'EPERM' || code === 'EACCES'
@@ -208,7 +220,7 @@ export class DeviceChrome {
 
   /** The DevTools address of a Chrome already running on the profile, if it answers. */
   private async running(): Promise<string | undefined> {
-    const file = join(this.opts.profileDir, 'DevToolsActivePort');
+    const file = join(this.opts.attach === true ? (this.opts.chromeDataDir ?? CHROME_DATA_DIR) : this.opts.profileDir, 'DevToolsActivePort');
     if (!existsSync(file)) return undefined;
     const [port, path] = readFileSync(file, 'utf8').split('\n');
     if (port === undefined || path === undefined || !/^\d+$/.test(port.trim())) return undefined;
@@ -222,6 +234,7 @@ export class DeviceChrome {
   private async launch(headless: boolean): Promise<string> {
     const found = this.chrome();
     if (found === undefined) throw new Error('Google Chrome is not installed on this Mac.');
+    if (this.opts.attach === true) throw new Error('Your current Chrome is not open for agents. Open it, go to chrome://inspect/#remote-debugging and turn on “Allow remote debugging for this browser instance”.');
     mkdirSync(this.opts.profileDir, { recursive: true });
     await this.syncProfile();
     rmSync(join(this.opts.profileDir, 'DevToolsActivePort'), { force: true });
@@ -264,6 +277,7 @@ export class DeviceChrome {
       let url = await this.running();
       if (url !== undefined) {
         const cdp = await Cdp.connect(url);
+        if (this.opts.attach === true) { this.headless = false; return cdp; }
         const version = await cdp.send('Browser.getVersion');
         const headless = /Headless/i.test(String(version['userAgent'] ?? ''));
         // A hidden Chrome left from before, but the user now wants to see it: restart it shown.
@@ -274,11 +288,28 @@ export class DeviceChrome {
       }
       url = await this.launch(wanted);
       this.headless = wanted;
-      return Cdp.connect(url);
+      return this.restoreCookies(await Cdp.connect(url));
     })();
     this.conn = next;
     next.catch(() => { if (this.conn === next) this.conn = undefined; });
     return next;
+  }
+
+  /**
+   * A fresh copy of the profile has cookies the new Chrome cannot read, so it drops them. Decrypt
+   * them with the Keychain key and set them over DevTools. Best effort: if the Keychain is
+   * refused the agents' Chrome simply starts signed out.
+   */
+  private async restoreCookies(cdp: Cdp): Promise<Cdp> {
+    if (!this.cookiesPending) return cdp;
+    this.cookiesPending = false;
+    try {
+      const cookies = await readCookies(join(this.opts.profileDir, 'Default'), this.opts.cookiePassword);
+      for (let at = 0; at < cookies.length; at += 200) await cdp.send('Storage.setCookies', { cookies: cookies.slice(at, at + 200) }).catch(() => undefined);
+    } catch (error) {
+      this.profileError = `Your logins could not be carried over: ${error instanceof Error ? error.message : 'unknown error'}. Allow Conductor to use “Chrome Safe Storage” in the Keychain, then press Refresh logins.`;
+    }
+    return cdp;
   }
 
   /** Used by a tab: the browser connection, counted so an idle hidden Chrome can be closed. */
@@ -317,7 +348,7 @@ export class DeviceChrome {
     }
     const launched = await this.launch(false);
     this.headless = false;
-    const cdp = Cdp.connect(launched);
+    const cdp = Cdp.connect(launched).then((connected) => this.restoreCookies(connected));
     this.conn = cdp;
     await (await cdp).send('Target.createTarget', { url });
     execFile('open', ['-a', found.app]);
@@ -329,7 +360,8 @@ export class DeviceChrome {
     const pending = this.conn;
     this.conn = undefined;
     const cdp = await pending?.catch(() => undefined);
-    if (cdp !== undefined && !cdp.closed) { await cdp.send('Browser.close').catch(() => undefined); cdp.close(); }
+    // The user's own Chrome is only disconnected from, never closed.
+    if (cdp !== undefined && !cdp.closed) { if (this.opts.attach !== true) await cdp.send('Browser.close').catch(() => undefined); cdp.close(); }
     this.child?.kill();
     this.child = undefined;
   }

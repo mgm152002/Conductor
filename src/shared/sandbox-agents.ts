@@ -152,12 +152,13 @@ export const SANDBOX_AGENT_COLORS = ['#c9379a', '#4a6fe8', '#2a9763', '#c58c1c',
 /**
  * Which browser agents and flows browse the web with:
  *  - device: Conductor's own Chrome on this Mac (separate profile, hidden or in the background).
+ *  - current: the Chrome the user already has open, in tabs of its own (needs remote debugging allowed).
  *  - sandbox: the sandbox's own browser.
  * With device, the sandbox starts only when the agent needs its terminal or files.
  */
-export type BrowserPreference = 'device' | 'sandbox';
+export type BrowserPreference = 'device' | 'current' | 'sandbox';
 export const BROWSER_PREFERENCE_KEY = 'sandbox.browserPreference';
-export const isBrowserPreference = (value: unknown): value is BrowserPreference => value === 'device' || value === 'sandbox';
+export const isBrowserPreference = (value: unknown): value is BrowserPreference => value === 'device' || value === 'current' || value === 'sandbox';
 /** The saved preference. Older values ('cloud', 'both') came from the removed cloud browser and read as the sandbox. */
 export const browserPreferenceOf = (value: unknown, fallback: BrowserPreference = 'sandbox'): BrowserPreference => (isBrowserPreference(value) ? value : fallback);
 /** Whether Conductor's Chrome shows its window (in the background) instead of running headless. */

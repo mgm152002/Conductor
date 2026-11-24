@@ -293,11 +293,13 @@ export async function bootstrap(): Promise<AppServices> {
   let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
   const deviceChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => settings.resolve(DEVICE_CHROME_VISIBLE_KEY) === true,
     sourceProfile: () => { const value = settings.resolve(DEVICE_CHROME_PROFILE_KEY); return typeof value === 'string' && value !== '' ? value : 'auto'; } });
-  app.once('before-quit', () => { void deviceChrome.shutdown(); });
+  const currentChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => true, attach: true });
+  app.once('before-quit', () => { void deviceChrome.shutdown(); void currentChrome.shutdown(); });
   const sandboxAgents = new SandboxAgentService({
     store, manager: sandboxes, gateway: sandboxGateway,
     browserPreference: () => browserPreferenceOf(settings.resolve(BROWSER_PREFERENCE_KEY)),
     deviceBrowser: () => (deviceChrome.available() ? deviceChrome.session() : undefined),
+    currentBrowser: () => (currentChrome.available() ? currentChrome.session() : undefined),
     agentSecrets: (agentId) => {
       const mine = () => secretStore.list().filter((secret) => secret.owner === AGENT_SECRET_ALL || secret.owner === agentSecretOwner(agentId));
       return {

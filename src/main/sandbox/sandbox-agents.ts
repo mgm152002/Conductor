@@ -97,6 +97,8 @@ export interface SandboxAgentServiceDeps {
   agentSecrets?: (agentId: string) => import('./browser-tools').BrowserSecrets;
   /** A new tab in Conductor's Chrome on this Mac, when Chrome is installed. */
   deviceBrowser?: () => BrowserDriver | undefined;
+  /** A tab in the Chrome the user already has open. */
+  currentBrowser?: () => BrowserDriver | undefined;
 }
 
 interface ActiveRun { agentId: string; session: GatewaySession }
@@ -697,8 +699,8 @@ export class SandboxAgentService {
     const preference = this.deps.browserPreference?.() ?? 'sandbox';
     // The browser this run uses outside the sandbox, if any (Settings → Browser).
     let browser: { kind: BrowserKind; driver: BrowserDriver } | undefined;
-    if (preference === 'device' && agent.tools.includes('browser')) {
-      const driver = this.deps.deviceBrowser?.();
+    if ((preference === 'device' || preference === 'current') && agent.tools.includes('browser')) {
+      const driver = preference === 'current' ? this.deps.currentBrowser?.() : this.deps.deviceBrowser?.();
       if (driver !== undefined) browser = { kind: 'device', driver };
     }
     // With an outside browser the sandbox's own browser is hidden and the sandbox starts only when
