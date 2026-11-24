@@ -38,7 +38,8 @@ export interface FlowNode {
 }
 
 /** A run may contain generated bookkeeping nodes that are never editable or saved. */
-export type FlowExecutionNode = Omit<FlowNode, 'kind'> & { kind?: FlowNodeKind | 'rewind' };
+/** A step as a run executes it. `attemptOf`: the saved step a rewind's fresh copy re-runs. */
+export type FlowExecutionNode = Omit<FlowNode, 'kind'> & { kind?: FlowNodeKind | 'rewind'; attemptOf?: string };
 /**
  * A branch condition on an arrow leaving a reply or review step: the reply
  * text is matched against `match` (case-insensitively) and the first arrow
@@ -69,6 +70,10 @@ export interface AgentFlow {
 export type FlowNodeStatus = 'waiting' | 'running' | 'done' | 'failed' | 'skipped';
 export interface FlowRunNode {
   nodeId: string; status: FlowNodeStatus; taskId: string | null; output: string; note: string;
+  /** The saved step this is (a rewind re-runs steps as fresh copies with new ids). */
+  stepId: string;
+  /** Which run of that step this is: 1, then 2, 3… after each rewind. */
+  attempt: number;
   /** Review steps: how many feedback rounds have come back so far. */
   rounds?: number;
   /** The branch a reply or review step settled on; which arrows continue. */

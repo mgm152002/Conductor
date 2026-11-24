@@ -93,7 +93,7 @@ export function FlowHistory({ onOpenFlow, onBack }: { onOpenFlow: (flowId: strin
                               <li key={node.nodeId} className="flex flex-col gap-2">
                                 <span className="flex items-center gap-2 text-sm">
                                   <span className={cn('size-1.5 rounded-full', dot(node.status))} />
-                                  <span className="font-medium text-foreground">{run.labels[node.nodeId] ?? 'Step'}</span>
+                                  <span className="font-medium text-foreground">{run.labels[node.nodeId] ?? 'Step'}{node.attempt > 1 ? ` · revision ${node.attempt - 1}` : ''}</span>
                                   <span className="text-muted-foreground">{STATUS_TEXT[node.status]}</span>
                                 </span>
                                 {node.note !== '' ? <span className="ps-3.5 text-xs text-muted-foreground">{node.note}</span> : null}

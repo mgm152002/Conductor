@@ -25,6 +25,29 @@ interface Definition { name: string; nodes: FlowExecutionNode[]; edges: FlowEdge
 /** Reply and review steps both pause the flow on an email from the user. */
 const isWaitKind = (kind: FlowExecutionNode['kind']): kind is 'reply' | 'review' => kind === 'reply' || kind === 'review';
 
+/**
+ * Which saved step each node of a run belongs to, and which attempt of it it is. A rewind adds
+ * fresh copies with new ids and marks them `attemptOf`; copies made before that mark existed
+ * are matched to the earlier node doing the same work (same kind, agent, CLI and prompt).
+ */
+export function stepsOf(nodes: readonly FlowExecutionNode[]): Map<string, { stepId: string; attempt: number; order: number }> {
+  const out = new Map<string, { stepId: string; attempt: number; order: number }>();
+  const count = new Map<string, number>();
+  const work = (node: FlowExecutionNode): string => JSON.stringify([node.kind ?? 'agent', node.agentId, node.cli ?? '', node.prompt]);
+  const firstWith = new Map<string, string>();
+  // Copies are appended after the rewind that made them; saved steps all come before any rewind.
+  let rewound = false;
+  nodes.forEach((node, order) => {
+    if (node.kind === 'rewind') rewound = true;
+    const stepId = node.attemptOf ?? (node.kind === 'rewind' || !rewound ? node.id : firstWith.get(work(node)) ?? node.id);
+    if (node.kind !== 'rewind' && !firstWith.has(work(node))) firstWith.set(work(node), stepId);
+    const attempt = (count.get(stepId) ?? 0) + 1;
+    count.set(stepId, attempt);
+    out.set(node.id, { stepId, attempt, order });
+  });
+  return out;
+}
+
 export interface FlowServiceDeps {
   store: Store;
   /** The sandbox agents a flow's steps run as. */
@@ -251,11 +274,15 @@ export class AgentFlowService {
   private runById(runId: string): FlowRun | undefined {
     const row = this.db.prepare('SELECT * FROM agent_flow_runs WHERE id = ?').get(runId) as RunRow | undefined;
     if (row === undefined) return undefined;
+    const steps = stepsOf(parse<Definition>(row.definition, { name: '', nodes: [], edges: [] }).nodes);
     const nodes = (this.db.prepare('SELECT * FROM agent_flow_run_nodes WHERE run_id = ?').all(runId) as NodeRow[])
       .map((node) => ({
         nodeId: node.node_id, status: node.status, taskId: node.task_id, output: node.output, note: node.note,
+        stepId: steps.get(node.node_id)?.stepId ?? node.node_id, attempt: steps.get(node.node_id)?.attempt ?? 1,
         ...(node.rounds > 0 ? { rounds: node.rounds } : {}), ...(node.branch !== null ? { branch: node.branch } : {}),
-      }));
+      }))
+      // In the order the run added them, so a step's latest attempt comes last.
+      .sort((a, b) => (steps.get(a.nodeId)?.order ?? 0) - (steps.get(b.nodeId)?.order ?? 0));
     return { id: row.id, flowId: row.flow_id, trigger: row.trigger, status: row.status, input: row.input, startedAt: row.started_at, finishedAt: row.finished_at, nodes };
   }
 
@@ -321,6 +348,18 @@ export class AgentFlowService {
             continue;
           }
           if (isWaitKind(node.kind)) {
+            // Right behind a reply or review step that already got the user's answer: act on
+            // that answer instead of waiting for a second email that will never come.
+            const answered = incoming.map((edge) => ({ source: definition.nodes.find((item) => item.id === edge.from), state: states.get(edge.from) }))
+              .find(({ source, state }) => source !== undefined && isWaitKind(source.kind) && state?.status === 'done' && state.output.trim() !== '');
+            if (answered?.state !== undefined) {
+              const reply = answered.state.output;
+              this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'running', started_at = ?, note = 'Waiting for your reply by email.' WHERE run_id = ? AND node_id = ?").run(this.now().toISOString(), runId, node.id);
+              // Handled once this pass releases the run lock (handling it advances the run again).
+              const target = { runId, nodeId: node.id };
+              void Promise.resolve().then(() => this.replyReceived(target, reply.replace(/^Subject:[^\n]*\n/, ''), reply)).catch(() => undefined);
+              continue;
+            }
             // Waiting only makes sense if the step before really emailed the user.
             const sources = incoming.map((edge) => states.get(edge.from)?.task_id).filter((id): id is string => typeof id === 'string');
             const mail = this.deps.mail;
@@ -430,10 +469,17 @@ export class AgentFlowService {
     const target = byThread ?? sorted.find((item) => mail.threadsFor(item.upstreamTasks).length === 0);
     if (target === undefined) return;
     const reply = `Subject: ${message.subject}\n${message.text}`.slice(0, MAX_OUTPUT);
+    await this.replyReceived(target, message.text, reply, `${message.threadId}:${message.id}`);
+  }
+
+  /**
+   * The user's answer reached a waiting reply or review step: from an email, or handed on by
+   * the reply step just before it. `messageKey` marks an email so it is never routed twice.
+   */
+  private async replyReceived(target: { runId: string; nodeId: string }, text: string, reply: string, messageKey?: string): Promise<void> {
     const run = this.db.prepare('SELECT definition FROM agent_flow_runs WHERE id = ?').get(target.runId) as { definition: string } | undefined;
     const definition = parse<Definition>(run?.definition ?? '', { name: '', nodes: [], edges: [] });
-    const messageKey = `${message.threadId}:${message.id}`;
-    if (definition.feedbackMessages?.includes(messageKey)) return;
+    if (messageKey !== undefined && definition.feedbackMessages?.includes(messageKey)) return;
     const node = definition.nodes.find((item) => item.id === target.nodeId);
     if (node?.kind === 'review' && node.cli !== undefined) {
       let claimed = false;
@@ -441,6 +487,7 @@ export class AgentFlowService {
         const result = db.prepare("UPDATE agent_flow_run_nodes SET pending_input = ?, output = ?, note = 'Analyzing reviewer feedback.' WHERE run_id = ? AND node_id = ? AND status = 'running' AND note LIKE 'Waiting for your reply%'").run(reply, reply, target.runId, target.nodeId);
         if (result.changes === 0) return;
         claimed = true;
+        if (messageKey === undefined) return;
         definition.feedbackMessages = [...(definition.feedbackMessages ?? []), messageKey];
         db.prepare('UPDATE agent_flow_runs SET definition = ? WHERE id = ?').run(JSON.stringify(definition), target.runId);
       });
@@ -448,10 +495,10 @@ export class AgentFlowService {
       await this.routeFeedback(target.runId, target.nodeId);
       return;
     }
-    if (node?.kind === 'review') { await this.reviewReplied(target.runId, target.nodeId, node, definition, message.text, reply); return; }
+    if (node?.kind === 'review') { await this.reviewReplied(target.runId, target.nodeId, node, definition, text, reply); return; }
     // A plain reply step records which branch its text matched, so the arrows
     // out of it decide what continues without re-reading the email.
-    const branch = matchBranch(definition, target.nodeId, message.text);
+    const branch = matchBranch(definition, target.nodeId, text);
     this.db.prepare("UPDATE agent_flow_run_nodes SET status = 'done', output = ?, note = '', branch = ? WHERE run_id = ? AND node_id = ? AND status = 'running'")
       .run(reply, branch, target.runId, target.nodeId);
     await this.advance(target.runId);

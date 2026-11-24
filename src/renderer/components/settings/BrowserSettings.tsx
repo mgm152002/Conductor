@@ -7,7 +7,7 @@ import { MenuSelect } from '../ui/MenuSelect';
 
 const OPTIONS: Array<{ id: BrowserPreference; label: string; hint: string }> = [
   { id: 'device', label: 'This Mac', hint: 'Agents browse in Conductor’s own Chrome on this Mac: a separate profile that runs hidden (or in the background), so your own windows are never touched. The sandbox starts only when an agent needs its terminal or files.' },
-  { id: 'current', label: 'Current browser', hint: 'Agents work in tabs of the Chrome you already have open, with your own logins and no copying. In Chrome, open chrome://inspect/#remote-debugging and turn on “Allow remote debugging for this browser instance”. Agents open their own windows; close them any time.' },
+  { id: 'current', label: 'Current browser', hint: 'Agents work in tabs of the Chrome you already have open, with your own logins and no copying. In Chrome, open chrome://inspect/#remote-debugging and turn on “Allow remote debugging for this browser instance”. Agents open their own windows; close them any time. Until that is on, agents use Conductor’s own Chrome instead.' },
   { id: 'sandbox', label: 'Sandbox', hint: 'Agents browse inside their sandbox, which starts with every run. Chrome on this Mac is not used.' },
 ];
 

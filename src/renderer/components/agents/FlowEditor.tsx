@@ -101,7 +101,7 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
   const problem = flowProblem(draft.nodes, draft.edges);
   const latest = runs[0];
   const live = latest?.status === 'running';
-  const statusOf = (nodeId: string): FlowNodeStatus | undefined => latest?.nodes.find((node) => node.nodeId === nodeId)?.status;
+  const statusOf = (nodeId: string): FlowNodeStatus | undefined => latestAttempt(latest, nodeId)?.status;
 
   const loadRuns = useCallback(async () => {
     if (flow === null) return;
@@ -491,12 +491,17 @@ export function FlowEditor({ flow, agents, sandboxRunning = false, onSaved, onDe
   );
 }
 
+/** A saved step's most recent attempt in a run (a rewind re-runs steps as fresh copies). */
+function latestAttempt(run: FlowRun | undefined, stepId: string): FlowRun['nodes'][number] | undefined {
+  return run?.nodes.filter((item) => item.stepId === stepId).at(-1);
+}
+
 function StepOutput({ run, nodeId }: { run: FlowRun | undefined; nodeId: string }): React.JSX.Element | null {
-  const state = run?.nodes.find((item) => item.nodeId === nodeId);
+  const state = latestAttempt(run, nodeId);
   if (state === undefined) return null;
   return (
     <div className="rounded-xl border border-border bg-card p-3">
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" className={cn('size-1.5 rounded-full', STATUS_DOT[state.status])} />Last run · {STATUS_TEXT[state.status]}</p>
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" className={cn('size-1.5 rounded-full', STATUS_DOT[state.status])} />Last run · {STATUS_TEXT[state.status]}{state.attempt > 1 ? ` · revision ${state.attempt - 1}` : ''}</p>
       {state.note !== '' ? <p className="mt-1.5 text-xs text-destructive-foreground">{state.note}</p> : null}
       {state.output !== '' ? <div className="mt-2 max-h-60 overflow-y-auto text-sm"><RunMarkdown text={state.output} /></div> : null}
     </div>

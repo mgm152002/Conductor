@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { SqliteStore } from '@main/db/store';
 import { AgentMail } from '@main/sandbox/agentmail';
-import { AgentFlowService } from '@main/sandbox/flow-service';
+import { AgentFlowService, stepsOf } from '@main/sandbox/flow-service';
 import { FlowInputSchema, flowProblem } from '@shared/agent-flows';
 
 // Review steps and branch conditions: a review waits for the user's verdict
@@ -163,6 +163,26 @@ describe('review steps and branch conditions', () => {
       expect(service.runs(flow.id)[0]!.status).toBe('done');
     });
 
+    it('reports a rewound step\'s new attempt under the step it re-runs, so the editor can show it', async () => {
+      const { service, flow } = await agentReview();
+      service.setFeedbackRouter(async () => JSON.stringify({ route: { type: 'decision', next: ['d'] }, feedback: { summary: 'Redo', instructions: ['Shorter'] } }));
+      await service.mailArrived(reply('shorten the intro'));
+      const nodes = service.runs(flow.id)[0]!.nodes;
+      const attempts = (step: string) => nodes.filter((n) => n.stepId === step);
+      // Every node in the run says which saved step it belongs to; the copies made by the rewind count as attempt 2.
+      expect(nodes.every((n) => ['d', 'c', 'r', 'p'].includes(n.stepId) || n.stepId === n.nodeId)).toBe(true);
+      expect(attempts('d').map((n) => [n.attempt, n.status])).toEqual([[1, 'done'], [2, 'running']]);
+      expect(attempts('c').map((n) => [n.attempt, n.status])).toEqual([[1, 'done'], [2, 'waiting']]);
+      expect(attempts('r').at(-1)).toMatchObject({ attempt: 2, status: 'waiting' });
+    });
+
+    it('matches copies from runs made before attempts were marked, without merging two real steps', () => {
+      const step = (id: string, prompt: string, kind?: 'rewind') => ({ id, agentId: 'a', prompt, x: 0, y: 0, ...(kind !== undefined ? { kind } : {}) });
+      const steps = stepsOf([step('find', 'same'), step('again', 'same'), step('rw', '{}', 'rewind'), step('uuid-1', 'same')]);
+      expect(steps.get('again')).toMatchObject({ stepId: 'again', attempt: 1 }); // a real second step, not a retry
+      expect(steps.get('uuid-1')).toMatchObject({ stepId: 'find', attempt: 2 });
+    });
+
     it('recovers persisted feedback analysis in a fresh service after restart', async () => {
       const { store, flow, makeService, service } = await agentReview();
       const runId = service.runs(flow.id)[0]!.id;
@@ -186,6 +206,39 @@ describe('review steps and branch conditions', () => {
       expect(service.runs(flow.id)[0]!.status).toBe('failed');
       expect(started).toHaveLength(2);
       expect(service.runs(flow.id)[0]!.nodes.find((n) => n.nodeId === 'r')!.note).toContain('maximum number');
+    });
+
+    it('a review placed right after a reply step acts on that reply instead of failing', async () => {
+      // email → reply → review → apply: the reply step already collected the answer.
+      const h = await setup();
+      const flow = h.service.save({ name: 'Reply then review', input: '', schedule: null,
+        nodes: [
+          { id: 'find', agentId: h.A, prompt: 'find jobs', x: 0, y: 0 },
+          { id: 'email', agentId: h.A, prompt: 'email the list', x: 100, y: 0 },
+          { id: 'w', kind: 'reply', agentId: '', prompt: '', x: 200, y: 0 },
+          { id: 'r', kind: 'review', agentId: '', cli: 'codex', maxRounds: 3, prompt: '', x: 300, y: 0 },
+          { id: 'apply', agentId: h.B, prompt: 'apply', x: 400, y: 0 },
+        ], edges: [{ from: 'find', to: 'email' }, { from: 'email', to: 'w' }, { from: 'w', to: 'r' }, { from: 'r', to: 'apply' }],
+      });
+      const routed: string[] = [];
+      h.service.setFeedbackRouter(async (input) => {
+        routed.push(input.prompt);
+        return JSON.stringify({ route: { type: 'decision', next: ['find'] }, feedback: { summary: 'Add Marvell', instructions: ['Include the Marvell posting'] } });
+      });
+      await h.service.run(flow.id, 'manual');
+      await h.service.taskSettled({ id: h.started[0]!.id, state: 'COMPLETED' });
+      await h.mail.send('Internships found: 3 to review', 'the list', h.started[1]!.id);
+      await h.service.taskSettled({ id: h.started[1]!.id, state: 'COMPLETED' });
+      await h.service.mailArrived(reply('can you include marvell job as well'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const nodes = h.service.runs(flow.id)[0]!.nodes;
+      expect(nodes.find((n) => n.nodeId === 'r')!.note).not.toMatch(/never sent you an email/);
+      expect(routed).toHaveLength(1);
+      expect(routed[0]).toContain('can you include marvell job as well');
+      // The run goes back to find with the feedback.
+      expect(h.started).toHaveLength(3);
+      expect(h.started[2]!.objective).toContain('Include the Marvell posting');
+      expect(h.service.runs(flow.id)[0]!.status).toBe('running');
     });
 
     it('passes structured instructions to the selected forward step', async () => {

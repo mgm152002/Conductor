@@ -293,7 +293,8 @@ export async function bootstrap(): Promise<AppServices> {
   let sandboxApprover: import('./adapters/tool-gate').ToolApprover | undefined;
   const deviceChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => settings.resolve(DEVICE_CHROME_VISIBLE_KEY) === true,
     sourceProfile: () => { const value = settings.resolve(DEVICE_CHROME_PROFILE_KEY); return typeof value === 'string' && value !== '' ? value : 'auto'; } });
-  const currentChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => true, attach: true });
+  // The user's own Chrome; when it is not open for agents they get Conductor's Chrome instead.
+  const currentChrome = new DeviceChrome({ profileDir: join(app.getPath('userData'), 'agent-chrome'), visible: () => true, attach: true, fallback: deviceChrome });
   app.once('before-quit', () => { void deviceChrome.shutdown(); void currentChrome.shutdown(); });
   const sandboxAgents = new SandboxAgentService({
     store, manager: sandboxes, gateway: sandboxGateway,

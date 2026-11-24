@@ -52,7 +52,7 @@ export function applyFeedbackDecision(definition: FeedbackDefinition, reviewId: 
   const ids = new Map(affected.map((n) => [n.id, freshId(n.id)]));
   const review = definition.nodes.find((n) => n.id === reviewId)!;
   const rewind: FlowExecutionNode = { id: freshId('rewind'), kind: 'rewind', agentId: '', prompt: JSON.stringify(decision.feedback), x: review.x, y: review.y + 140 };
-  const added = [rewind, ...affected.map((n) => ({ ...n, id: ids.get(n.id)!, ...(n.loopTo !== undefined ? { loopTo: ids.get(n.loopTo) ?? n.loopTo } : {}), y: n.y + 140 }))];
+  const added = [rewind, ...affected.map((n) => ({ ...n, id: ids.get(n.id)!, attemptOf: n.attemptOf ?? n.id, ...(n.loopTo !== undefined ? { loopTo: ids.get(n.loopTo) ?? n.loopTo } : {}), y: n.y + 140 }))];
   // Historical incoming/internal edges remain. External consumers now depend
   // on the fresh attempts; external prerequisites are reused by those attempts.
   const edges = definition.edges.filter((e) => !(ids.has(e.from) && !ids.has(e.to)));

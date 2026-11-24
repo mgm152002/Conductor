@@ -23,8 +23,19 @@ const CANDIDATES = [
 ];
 const COMMAND_MS = 60_000;
 const LAUNCH_MS = 20_000;
+const CONNECT_MS = 10_000;
+// The user's own Chrome asks them to allow the connection the first time, so give them time to click.
+const ATTACH_CONNECT_MS = 60_000;
+const ATTACH_HELP = 'Your current Chrome is not open for agents. Open it, go to chrome://inspect/#remote-debugging and turn on “Allow remote debugging for this browser instance”.';
 const IDLE_CLOSE_MS = 120_000;
 const MAX_TEXT = 60_000;
+/** The longest a loaded page is given to draw its content with scripts. */
+const CONTENT_MS = 8_000;
+const CONTENT_LENGTH = '(document.body ? document.body.innerText : "").trim().length';
+/** How long a click is given to change the page (single-page apps update after the click returns). */
+const CLICK_CHANGE_MS = 3_000;
+/** A short fingerprint of what the page shows: its address and a hash of its text. */
+const PAGE_SIGNATURE = '/*page*/ (() => { const t = document.body ? document.body.innerText : ""; let h = 0; for (let i = 0; i < t.length; i += 1) h = (h * 31 + t.charCodeAt(i)) | 0; return location.href + "#" + t.length + ":" + h; })()';
 
 /** The browser app found on this Mac, if any. */
 export function findChrome(candidates: readonly string[] = CANDIDATES): { app: string; binary: string; name: string } | undefined {
@@ -90,11 +101,12 @@ class Cdp {
     });
   }
 
-  static connect(url: string): Promise<Cdp> {
+  static connect(url: string, timeout = CONNECT_MS): Promise<Cdp> {
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
-      ws.addEventListener('open', () => { resolve(new Cdp(ws)); }, { once: true });
-      ws.addEventListener('error', () => { reject(new Error('Could not connect to Chrome.')); }, { once: true });
+      const timer = setTimeout(() => { reject(new Error('Chrome did not accept the connection in time.')); try { ws.close(); } catch { /* not open */ } }, timeout);
+      ws.addEventListener('open', () => { clearTimeout(timer); resolve(new Cdp(ws)); }, { once: true });
+      ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Could not connect to Chrome.')); }, { once: true });
     });
   }
 
@@ -136,6 +148,8 @@ export interface DeviceChromeOptions {
   attach?: boolean;
   /** Reads the Keychain password that decrypts copied cookies (tests). */
   cookiePassword?: () => Promise<string>;
+  /** With attach: the Chrome to use instead when the user's own cannot be reached. */
+  fallback?: DeviceChrome;
 }
 
 export interface DeviceChromeStatus { available: boolean; browser?: string; running: boolean; visible?: boolean; profile?: { name: string; email?: string; copiedAt: string }; profileError?: string }
@@ -224,6 +238,9 @@ export class DeviceChrome {
     if (!existsSync(file)) return undefined;
     const [port, path] = readFileSync(file, 'utf8').split('\n');
     if (port === undefined || path === undefined || !/^\d+$/.test(port.trim())) return undefined;
+    // Remote debugging turned on at chrome://inspect serves only the WebSocket, not /json/version,
+    // so the user's own Chrome is checked by connecting to it.
+    if (this.opts.attach === true) return `ws://127.0.0.1:${port.trim()}${path.trim()}`;
     try {
       const response = await fetch(`http://127.0.0.1:${port.trim()}/json/version`, { signal: AbortSignal.timeout(1500) });
       if (!response.ok) return undefined;
@@ -232,9 +249,9 @@ export class DeviceChrome {
   }
 
   private async launch(headless: boolean): Promise<string> {
+    if (this.opts.attach === true) throw new Error(ATTACH_HELP);
     const found = this.chrome();
     if (found === undefined) throw new Error('Google Chrome is not installed on this Mac.');
-    if (this.opts.attach === true) throw new Error('Your current Chrome is not open for agents. Open it, go to chrome://inspect/#remote-debugging and turn on “Allow remote debugging for this browser instance”.');
     mkdirSync(this.opts.profileDir, { recursive: true });
     await this.syncProfile();
     rmSync(join(this.opts.profileDir, 'DevToolsActivePort'), { force: true });
@@ -275,9 +292,15 @@ export class DeviceChrome {
     const wanted = !this.opts.visible();
     const next = (async () => {
       let url = await this.running();
+      if (this.opts.attach === true) {
+        // The user's own Chrome is never launched: connect to it or say how to open it for agents.
+        if (url === undefined) throw new Error(ATTACH_HELP);
+        const cdp = await Cdp.connect(url, ATTACH_CONNECT_MS).catch(() => { throw new Error(ATTACH_HELP); });
+        this.headless = false;
+        return cdp;
+      }
       if (url !== undefined) {
         const cdp = await Cdp.connect(url);
-        if (this.opts.attach === true) { this.headless = false; return cdp; }
         const version = await cdp.send('Browser.getVersion');
         const headless = /Headless/i.test(String(version['userAgent'] ?? ''));
         // A hidden Chrome left from before, but the user now wants to see it: restart it shown.
@@ -310,6 +333,21 @@ export class DeviceChrome {
       this.profileError = `Your logins could not be carried over: ${error instanceof Error ? error.message : 'unknown error'}. Allow Conductor to use “Chrome Safe Storage” in the Keychain, then press Refresh logins.`;
     }
     return cdp;
+  }
+
+  /**
+   * The Chrome a new tab opens in, and its connection (counted). The user's own Chrome when it
+   * can be reached, else the fallback, so agents still get a browser.
+   */
+  async acquireTab(): Promise<{ owner: DeviceChrome; cdp: Cdp }> {
+    try {
+      return { owner: this, cdp: await this.acquire() };
+    } catch (error) {
+      const fallback = this.opts.fallback;
+      if (this.opts.attach !== true || fallback === undefined) throw error;
+      console.warn(`[device-chrome] current Chrome unreachable, using Conductor's Chrome: ${error instanceof Error ? error.message : String(error)}`);
+      return { owner: fallback, cdp: await fallback.acquire() };
+    }
   }
 
   /** Used by a tab: the browser connection, counted so an idle hidden Chrome can be closed. */
@@ -373,28 +411,28 @@ const find = (selector: string): string => `(${FIND})(${JSON.stringify(selector)
 
 /** One run's tab (in a window of its own, opened in the background). */
 class ChromeTab implements BrowserDriver {
-  private tab: Promise<{ cdp: Cdp; sessionId: string; targetId: string }> | undefined;
+  private tab: Promise<{ cdp: Cdp; sessionId: string; targetId: string; owner: DeviceChrome }> | undefined;
 
   constructor(private readonly chrome: DeviceChrome) {}
 
-  private async page(signal?: AbortSignal): Promise<{ cdp: Cdp; sessionId: string; targetId: string }> {
+  private async page(signal?: AbortSignal): Promise<{ cdp: Cdp; sessionId: string; targetId: string; owner: DeviceChrome }> {
     const current = this.tab;
     if (current !== undefined) {
       const open = await current.catch(() => undefined);
       if (open !== undefined && !open.cdp.closed) return open;
-      if (open !== undefined && this.tab === current) { this.tab = undefined; this.chrome.release(); }
+      if (open !== undefined && this.tab === current) { this.tab = undefined; open.owner.release(); }
     }
     this.tab ??= (async () => {
-      const cdp = await this.chrome.acquire();
+      const { owner, cdp } = await this.chrome.acquireTab();
       try {
         const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true, background: true }, undefined, signal) as { targetId: string };
         const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true }, undefined, signal) as { sessionId: string };
         await cdp.send('Page.enable', {}, sessionId);
         // Pages behave as if focused even though the window stays behind the user's.
         await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }, sessionId).catch(() => undefined);
-        return { cdp, sessionId, targetId };
+        return { cdp, sessionId, targetId, owner };
       } catch (error) {
-        this.chrome.release();
+        owner.release();
         throw error;
       }
     })();
@@ -419,8 +457,25 @@ class ChromeTab implements BrowserDriver {
     const until = Date.now() + ms;
     while (Date.now() < until && signal?.aborted !== true) {
       const state = await this.eval('document.readyState', signal).catch(() => 'loading');
-      if (state === 'complete') return;
+      if (state === 'complete') break;
       await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    await this.rendered(signal, Math.min(CONTENT_MS, Math.max(0, until - Date.now())));
+  }
+
+  /**
+   * Many sites (Workday, for one) build the page with scripts after the document is
+   * "complete", so it is empty at first. Wait until the page shows text and that text
+   * has stopped changing, for at most `ms`.
+   */
+  private async rendered(signal: AbortSignal | undefined, ms: number): Promise<void> {
+    const until = Date.now() + ms;
+    let last = -1;
+    while (Date.now() < until && signal?.aborted !== true) {
+      const length = Number(await this.eval(CONTENT_LENGTH, signal).catch(() => 0)) || 0;
+      if (length > 0 && length === last) return;
+      last = length;
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }
 
@@ -442,15 +497,25 @@ class ChromeTab implements BrowserDriver {
     return out.data;
   }
 
+  /** The whole page's text, waiting a little if it has not been drawn yet. */
+  private async readPage(signal?: AbortSignal): Promise<string> {
+    const read = async (): Promise<string> => String(await this.eval('document.body ? document.body.innerText : document.documentElement.innerText', signal) ?? '');
+    const text = await read();
+    if (text.trim() !== '') return text;
+    await this.rendered(signal, CONTENT_MS);
+    return read();
+  }
+
   async text(selector: string | undefined, signal?: AbortSignal): Promise<string> {
     const value = selector !== undefined && selector !== ''
       ? await this.eval(`(() => { const el = ${find(selector)}; if (!el) throw new Error(${JSON.stringify(`No element matches ${selector}.`)}); return el.innerText ?? el.textContent; })()`, signal)
-      : await this.eval('document.body ? document.body.innerText : document.documentElement.innerText', signal);
+      : await this.readPage(signal);
     const text = String(value ?? '');
     return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}\n… (cut at ${MAX_TEXT} characters)` : text;
   }
 
   async click(selector: string, signal?: AbortSignal): Promise<string> {
+    const before = await this.eval(PAGE_SIGNATURE, signal).catch(() => undefined);
     const box = await this.eval(`(() => { const el = ${find(selector)}; if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'center' }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`, signal) as { x: number; y: number; w: number; h: number } | null;
     if (box === null) throw new Error(`No element matches ${selector}.`);
     if (box.w === 0 && box.h === 0) {
@@ -462,7 +527,20 @@ class ChromeTab implements BrowserDriver {
       await this.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 }, signal);
     }
     await this.settle(signal, 10_000, 400);
-    return `Clicked ${selector}. ${await this.where(signal)}`;
+    const changed = before === undefined || await this.changedFrom(before, signal);
+    return `Clicked ${selector}. ${await this.where(signal)}${changed ? '' : ' The page did not change after the click: the element may not be clickable, or the page may need longer. Check before relying on what it shows.'}`;
+  }
+
+  /** Whether the page moves away from `before` within a few seconds; once it does, wait for it to settle. */
+  private async changedFrom(before: unknown, signal?: AbortSignal): Promise<boolean> {
+    const until = Date.now() + CLICK_CHANGE_MS;
+    while (signal?.aborted !== true) {
+      const now = await this.eval(PAGE_SIGNATURE, signal).catch(() => before);
+      if (now !== before) { await this.rendered(signal, CONTENT_MS); return true; }
+      if (Date.now() >= until) return false;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
   }
 
   async type(selector: string, text: string, opts: { clear?: boolean; submit?: boolean }, signal?: AbortSignal): Promise<string> {
@@ -510,6 +588,6 @@ class ChromeTab implements BrowserDriver {
     const open = await pending.catch(() => undefined);
     if (open === undefined) return;
     if (!open.cdp.closed) await open.cdp.send('Target.closeTarget', { targetId: open.targetId }).catch(() => undefined);
-    this.chrome.release();
+    open.owner.release();
   }
 }
