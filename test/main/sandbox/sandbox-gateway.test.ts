@@ -329,6 +329,19 @@ describe('locking the folder agents share', () => {
     expect(gateway.locks.list()).toEqual([]);
     expect((await b.callTool({ name: 'file_write', arguments: { path: `${S}/notes.md` } })).isError).not.toBe(true);
   });
+
+  it('preserves spaces in shared file paths instead of truncating locks to a prefix', async () => {
+    const a = await connect((await openAs('task-a', 'Resume Tailor')).url);
+    const b = await connect((await openAs('task-b', 'Web Researcher')).url);
+    const sop = `${S}/Job Application Fill SOP Guidelines.md`;
+    const other = `${S}/Job Description.md`;
+
+    expect((await a.callTool({ name: 'file_write', arguments: { path: sop } })).isError).not.toBe(true);
+    expect(gateway.locks.list().map((lock) => lock.path)).toEqual([sop]);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: other } })).isError).not.toBe(true);
+    expect((await b.callTool({ name: 'file_write', arguments: { path: sop } })).isError).toBe(true);
+    expect((await b.callTool({ name: 'shell_exec', arguments: { command: `cat "${sop}" > "${S}/out.txt"` } })).isError).toBe(true);
+  });
 });
 
 describe('SandboxGateway tools/list while the sandbox starts', () => {
