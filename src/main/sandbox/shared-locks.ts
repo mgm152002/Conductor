@@ -27,13 +27,16 @@ const PATH_END = String.raw`\s'"\`;|&<>()$*?\\,\[\]{}=`;
 export class SharedLocks {
   private readonly locks = new Map<string, SharedLock>();
   private readonly mention: RegExp;
+  private readonly quotedMention: RegExp;
 
   constructor(private readonly root: string) {
     const escaped = root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const home = root.slice(0, root.lastIndexOf('/')).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const leaf = root.slice(root.lastIndexOf('/') + 1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const prefix = `(?:${escaped}|(?:~|\\$HOME|\\$\\{HOME\\}|${home})/${leaf})`;
     // The folder by its full path, or as ~/shared and $HOME/shared.
-    this.mention = new RegExp(`(?:${escaped}|(?:~|\\$HOME|\\$\\{HOME\\}|${home})/${leaf})(?![^/${PATH_END}])(?:/[^${PATH_END}]*)?`, 'g');
+    this.mention = new RegExp(`${prefix}(?![^/${PATH_END}])(?:/[^${PATH_END}]*)?`, 'g');
+    this.quotedMention = new RegExp(`(['"])(${prefix}(?:/[^'"\\n\\r]*)?)\\1`, 'g');
   }
 
   /** The path inside the shared folder, normalised; undefined when it is elsewhere. */
@@ -50,7 +53,20 @@ export class SharedLocks {
     const found = new Set<string>();
     const walk = (item: unknown): void => {
       if (typeof item === 'string') {
-        for (const match of item.matchAll(this.mention)) {
+        // A standalone path argument (e.g. file_write / str_replace_editor) may contain spaces or parentheses.
+        const trimmed = item.trim();
+        const whole = !/[\n\r;|&<>`'"$]/.test(trimmed.replace(/^(?:\$HOME|\$\{HOME\})/, '')) ? this.resolve(trimmed) : undefined;
+        if (whole !== undefined) {
+          found.add(whole);
+          return;
+        }
+        // Extract quoted paths in shell commands first so spaces inside quotes are preserved and not re-matched truncated.
+        const remainder = item.replace(this.quotedMention, (_full, _q, inner: string) => {
+          const path = this.resolve(inner);
+          if (path !== undefined) found.add(path);
+          return ' ';
+        });
+        for (const match of remainder.matchAll(this.mention)) {
           const path = this.resolve(match[0]);
           if (path !== undefined) found.add(path);
         }
