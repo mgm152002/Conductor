@@ -39,6 +39,8 @@ export const AGY_READ_TOOLS: ReadonlySet<string> = new Set([
 // write_file and edit_file are the names agy 1.4.7 reports at run time.
 const FILE_TOOLS = new Set(['write_to_file', 'write_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const COMMAND_TOOLS = new Set(['run_command', 'send_command_input', 'notebook_execution', 'execute_browser_javascript']);
+/** Antigravity's own web search and page reading: allowed when the run has web access (casual chat). */
+const WEB_TOOLS = new Set(['search_web', 'read_url_content']);
 const PATH_KEY = /path|file|dir|uri/i;
 const HOOK_TIMEOUT_S = 3600;
 
@@ -176,6 +178,12 @@ export function classifyAgyTool(name: string, args: Json, rootPath: string, read
     return { allow: false, request: { kind: 'permissions', summary: 'Antigravity wants to read outside the workspace', detail: outside.join('\n'), rememberKey: `read:${outside.join('|')}` } };
   }
   if (name === 'run_command' && str(args['CommandLine']) !== undefined && isSafeReadCommand(str(args['CommandLine'])!, rootPath)) return { allow: true };
+  // A web lookup goes to the gate even in a read-only run: it accepts it when
+  // the run has web access and declines it otherwise.
+  if (WEB_TOOLS.has(name)) {
+    const detail = str(args['query']) ?? str(args['Query']) ?? str(args['Url']) ?? str(args['url']);
+    return { allow: false, request: { kind: 'permissions', web: true, summary: `Antigravity wants to ${name === 'search_web' ? 'search the web' : 'read a web page'}${purpose ? ` (${purpose})` : ''}`, ...(detail !== undefined ? { detail } : {}), rememberKey: `tool:${name}` } };
+  }
   if (readOnly) return { allow: 'never' };
   if (COMMAND_TOOLS.has(name)) {
     const command = str(args['CommandLine']) ?? str(args['Input']) ?? JSON.stringify(args).slice(0, 2000);

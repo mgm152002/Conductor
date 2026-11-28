@@ -154,9 +154,15 @@ export function acpGateRequest(agentName: string, toolCall: Json): GateRequest {
       const files = paths;
       return { kind: 'file_change', summary: `${agentName} wants to change files (${title})`, ...(files.length > 0 ? { detail: files.join('\n') } : {}) };
     }
+    case 'fetch': {
+      const url = str(input?.['url']) ?? title;
+      return { kind: 'permissions', web: true, summary: `${agentName} wants to fetch a web page`, detail: url, rememberKey: 'tool:fetch' };
+    }
     default: {
       const detail = raw !== undefined && raw !== null ? JSON.stringify(raw).slice(0, 2000) : locations.join('\n');
-      return { kind: 'permissions', summary: `${agentName} asks to ${title}`, ...(detail ? { detail } : {}), rememberKey: `tool:${title}` };
+      // OpenCode's websearch/webfetch and Kiro's web_search/web_fetch may arrive without a kind.
+      const web = /^web[_ ]?(search|fetch)\b/i.test(title);
+      return { kind: 'permissions', ...(web ? { web: true } : {}), summary: `${agentName} asks to ${title}`, ...(detail ? { detail } : {}), rememberKey: `tool:${title}` };
     }
   }
 }

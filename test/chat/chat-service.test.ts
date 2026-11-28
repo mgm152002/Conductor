@@ -399,7 +399,7 @@ describe('standalone casual chat', () => {
     expect(done.messages.at(-1)?.content).toBe('Hello\nthere');
     expect(updates.some((s) => s.messages.at(-1)?.content === 'Hello' && s.messages.at(-1)?.status === 'streaming')).toBe(true);
     expect(service.list()).toEqual([done.thread]);
-    expect(adapter.calls.started[0]).toMatchObject({ objective: 'Hello world', rootPath: join(root, 'chat-sandbox'), mode: 'read_only', conversationOnly: true });
+    expect(adapter.calls.started[0]).toMatchObject({ objective: 'Hello world', rootPath: join(root, 'chat-sandbox'), mode: 'read_only', conversationOnly: true, webAccess: true });
     expect(adapter.calls.started[0]).not.toHaveProperty('mcpServers');
     expect(adapter.calls.started[0]).not.toHaveProperty('workspaceId');
     expect(statSync(join(root, 'chat-sandbox')).mode & 0o777).toBe(0o700);

@@ -16,7 +16,8 @@ import { SANDBOX_MCP_KEY, SANDBOX_ONLY_NOTICE } from '@shared/sandbox-agents';
 // about (Bash commands outside its read-only set, file edits, web fetches,
 // MCP tools); reads inside the project run without a prompt.
 //
-//   read_only          → Read, Glob and Grep only; anything else is refused
+//   read_only          → Read, Glob and Grep only (plus WebSearch/WebFetch
+//                         with web access, i.e. casual chat); anything else is refused
 //   assisted_execution → default permission mode, each prompt goes to the user
 //   trusted_automation → default permission mode, prompts accepted by Conductor
 
@@ -65,8 +66,8 @@ export function claudeGateRequest(toolName: string, input: Json): GateRequest {
     const path = str(input['file_path']) ?? str(input['notebook_path']);
     return { kind: 'file_change', summary: 'Claude Code wants to change files', ...(path ? { detail: path } : {}) };
   }
-  if (toolName === 'WebFetch') return { kind: 'permissions', summary: 'Claude Code wants to fetch a web page', ...(str(input['url']) ? { detail: str(input['url'])! } : {}), rememberKey: 'tool:WebFetch' };
-  if (toolName === 'WebSearch') return { kind: 'permissions', summary: 'Claude Code wants to search the web', ...(str(input['query']) ? { detail: str(input['query'])! } : {}), rememberKey: 'tool:WebSearch' };
+  if (toolName === 'WebFetch') return { kind: 'permissions', web: true, summary: 'Claude Code wants to fetch a web page', ...(str(input['url']) ? { detail: str(input['url'])! } : {}), rememberKey: 'tool:WebFetch' };
+  if (toolName === 'WebSearch') return { kind: 'permissions', web: true, summary: 'Claude Code wants to search the web', ...(str(input['query']) ? { detail: str(input['query'])! } : {}), rememberKey: 'tool:WebSearch' };
   return { kind: 'permissions', summary: `Claude Code wants to use ${toolName}`, detail: JSON.stringify(input).slice(0, 2000), rememberKey: `tool:${toolName}` };
 }
 
@@ -90,9 +91,14 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
       // pre-allowed by name pattern (they act inside the user's approved
       // server, not on local files), while built-in write tools stay off.
       // This is what lets a casual chat use e.g. a video-generation server.
+      // A run with web access (casual chat) also gets Claude's own web search
+      // and fetch, pre-allowed: they read the web, never this Mac.
+      const web = data.webAccess === true && data.sandboxOnly !== true;
+      const tools = web ? 'Read,Glob,Grep,WebSearch,WebFetch' : 'Read,Glob,Grep';
+      const webAllowed = web ? ['WebSearch', 'WebFetch'] : [];
       const mcpServers = data.mcpServers ?? [];
       if (mcpServers.length === 0) {
-        return { args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', ...modelArgs], cwd: data.rootPath, stdin };
+        return { args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', tools, ...(web ? ['--allowedTools', ...webAllowed] : []), ...modelArgs], cwd: data.rootPath, stdin };
       }
       const config: Record<string, unknown> = {};
       const mcpEnv: Record<string, string> = {};
@@ -103,9 +109,9 @@ export class ClaudeCodeAdapter extends GatedAgentAdapter {
           ? { type: 'http', url: server.url, timeout: APPROVAL_TIMEOUT_MS, ...(auth.headers !== undefined ? { headers: auth.headers } : {}) }
           : { command: server.command ?? '', args: server.args ?? [], ...(server.env !== undefined ? { env: server.env } : {}) };
       }
-      const allowed = mcpServers.flatMap((server) => [`mcp__${server.key}__*`, `mcp__${server.key}`]);
+      const allowed = [...mcpServers.flatMap((server) => [`mcp__${server.key}__*`, `mcp__${server.key}`]), ...webAllowed];
       return {
-        args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep',
+        args: ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', '--tools', tools,
           '--mcp-config', JSON.stringify({ mcpServers: config }), '--allowedTools', ...allowed, ...modelArgs],
         cwd: data.rootPath, stdin, env: mcpEnv,
       };

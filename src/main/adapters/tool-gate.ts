@@ -41,6 +41,11 @@ export interface ToolGateOptions {
    * declined, even with auto-approve, so work happens in the sandbox.
    */
   sandboxOnly?: boolean;
+  /**
+   * The run may use its CLI's own web search and fetch tools without asking,
+   * even when read-only (casual chat). Only requests marked `web` qualify.
+   */
+  allowWeb?: boolean;
 }
 
 /** Asks the user (through Conductor's approval UI) and resolves with their decision. */
@@ -66,6 +71,8 @@ export interface GateRequest {
   cwd?: string;
   /** A read or search inside the workspace: no approval is ever needed. */
   readOnly?: boolean;
+  /** A web search or page fetch by the CLI's own web tools (accepted when the run allows web access). */
+  web?: boolean;
   /**
    * What "Allow for this task" covers. Defaults to the exact command for
    * commands, every file change for file changes, and the summary otherwise.
@@ -100,6 +107,7 @@ export class ToolGate {
     // Reads and searches never ask, and the auto-approve toggle covers every
     // tool, including ones a read-only profile would otherwise decline.
     if (request.readOnly === true) return 'accept';
+    if (request.web === true && this.options.allowWeb === true) return 'accept';
     if (this.options.sandboxOnly === true && (request.kind === 'command' || request.kind === 'file_change')) return 'decline';
     if (this.options.autoApprove?.() === true) return 'accept';
     if (this.mode === 'trusted_automation') return 'accept';

@@ -31,6 +31,11 @@ export interface ObjectiveInput {
   stepId?: string;
   /** Casual chat invocation: no project context, tools, or inherited MCP. */
   conversationOnly?: boolean;
+  /**
+   * The run may look things up on the web with its CLI's own web tools
+   * (search and fetch), even when it is read-only. Casual chat sets it.
+   */
+  webAccess?: boolean;
   objective: string;
   description?: string;
   rootPath: string;
