@@ -28,7 +28,9 @@ const sandboxAgentInput = z.object({
   tools: z.array(z.enum(['browser', 'shell', 'files', 'code', 'documents'])).min(1).max(5),
   approval: z.enum(['risky', 'all', 'none']),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  icon: z.string().max(MAX_AGENT_ICON_CHARS).regex(AGENT_ICON_PATTERN).optional(),
+  // '' means "no custom icon": agents without one (every default agent on a
+  // fresh install) are stored with '' and the editor sends it back on save.
+  icon: z.union([z.literal(''), z.string().max(MAX_AGENT_ICON_CHARS).regex(AGENT_ICON_PATTERN)]).optional(),
 });
 const mcpCli = z.enum(['claude-code', 'codex', 'opencode', 'antigravity', 'kiro']);
 const mcpKey = z.string().trim().regex(/^[a-z0-9][a-z0-9_.-]{0,63}$/);
